@@ -27,7 +27,7 @@ data class TrainingWithExercises(
         parentColumn = "id",
         entityColumn = "trainingSessionId"
     )
-    val exerciseResults: List<ExerciseResultWithExercise>
+    val exerciseResults: List<ExerciseResult>
 )
 
 data class AnalyticsWithDetails(
@@ -46,7 +46,7 @@ data class AnalyticsWithDetails(
         parentColumn = "id",
         entityColumn = "analyticsId"
     )
-    val hints: List<CorrectionHintWithControls>
+    val hints: List<CorrectionHint>
 )
 
 data class CorrectionHintWithControls(

@@ -1,6 +1,7 @@
 package com.example.diarytripeljump
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -9,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,12 +24,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.diarytripeljump.ui.theme.DiaryTripelJumpTheme
 import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
-fun DiaryScreen(modifier: Modifier = Modifier) {
+fun DiaryScreen(
+    modifier: Modifier = Modifier,
+    viewModel: DiaryViewModel,
+    onNavigateToTab: (Int) -> Unit = {}
+) {
+    val uiState by viewModel.uiState.collectAsState()
     val currentDate = SimpleDateFormat("EEEE, MMMM d", Locale("ru")).format(Date())
     val currentTime = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
     val greeting = when (SimpleDateFormat("HH", Locale.getDefault()).format(Date()).toInt()) {
@@ -65,60 +73,63 @@ fun DiaryScreen(modifier: Modifier = Modifier) {
         }
 
         // Next Competition Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+        if (uiState.upcomingCompetitions.isNotEmpty()) {
+            val nextCompetition = uiState.upcomingCompetitions.first()
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        text = "Следующие соревнования",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primary
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "3",
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                            style = MaterialTheme.typography.labelSmall,
+                            text = "Следующие соревнования",
+                            style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimary
+                            color = MaterialTheme.colorScheme.primary
                         )
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary
+                        ) {
+                            Text(
+                                text = uiState.upcomingCompetitions.size.toString(),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
                     }
+                    Text(
+                        text = nextCompetition.name,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        InfoChip(icon = "📅", text = formatDate(nextCompetition.date))
+                        InfoChip(icon = "📍", text = nextCompetition.location ?: "Место TBD")
+                    }
+                    Text(
+                        text = nextCompetition.eventType,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    )
                 }
-                Text(
-                    text = "Чемпионат города",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    InfoChip(icon = "📅", text = "15 Окт")
-                    InfoChip(icon = "📍", text = "Стадион")
-                }
-                Text(
-                    text = "Тройной прыжок",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                )
             }
         }
 
@@ -130,64 +141,71 @@ fun DiaryScreen(modifier: Modifier = Modifier) {
             QuickActionButton(
                 icon = "🏆",
                 label = "Результаты",
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                onClick = { onNavigateToTab(1) }
             )
             QuickActionButton(
                 icon = "💪",
                 label = "Тренировки",
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                onClick = { onNavigateToTab(2) }
             )
             QuickActionButton(
                 icon = "🗓️",
                 label = "Соревнования",
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                onClick = { onNavigateToTab(3) }
             )
             QuickActionButton(
                 icon = "📊",
                 label = "Аналитика",
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                onClick = { onNavigateToTab(1) } // Временно на результаты
             )
             QuickActionButton(
                 icon = "👤",
                 label = "Профиль",
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                onClick = { onNavigateToTab(4) }
             )
         }
 
         // Season Stats
-        Column(
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                text = "2026 СЕЗОН",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+        uiState.seasonStats?.let { stats ->
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                StatCard(
-                    value = "5",
-                    label = "ЛР",
-                    modifier = Modifier.weight(1f)
+                Text(
+                    text = "${stats.year} СЕЗОН",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
                 )
-                StatCard(
-                    value = "8",
-                    label = "СР",
-                    modifier = Modifier.weight(1f)
-                )
-                StatCard(
-                    value = "24",
-                    label = "ТРЕН",
-                    modifier = Modifier.weight(1f)
-                )
-                StatCard(
-                    value = "3",
-                    label = "СОРЕВ",
-                    modifier = Modifier.weight(1f)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    StatCard(
+                        value = stats.personalRecords.toString(),
+                        label = "ЛР",
+                        modifier = Modifier.weight(1f)
+                    )
+                    StatCard(
+                        value = stats.seasonalRecords.toString(),
+                        label = "СР",
+                        modifier = Modifier.weight(1f)
+                    )
+                    StatCard(
+                        value = stats.totalTrainings.toString(),
+                        label = "ТРЕН",
+                        modifier = Modifier.weight(1f)
+                    )
+                    StatCard(
+                        value = stats.totalCompetitions.toString(),
+                        label = "СОРЕВ",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
 
@@ -224,57 +242,19 @@ fun DiaryScreen(modifier: Modifier = Modifier) {
                 }
             }
 
-            // Always show first 3 results
-            ResultItem(
-                event = "Тройной прыжок",
-                result = "14.5 м",
-                date = "10 Окт",
-                isPB = true
-            )
-            ResultItem(
-                event = "Тройной прыжок",
-                result = "14.2 м",
-                date = "3 Окт",
-                isPB = false
-            )
-            ResultItem(
-                event = "Тройной прыжок",
-                result = "13.8 м",
-                date = "26 Сен",
-                isPB = false
-            )
+            // Show results from database
+            val resultsToShow = if (isResultsExpanded) {
+                uiState.tripleJumpResults
+            } else {
+                uiState.tripleJumpResults.take(3)
+            }
 
-            // Show additional results when expanded
-            if (isResultsExpanded) {
+            resultsToShow.forEach { result ->
                 ResultItem(
-                    event = "Тройной прыжок",
-                    result = "13.5 м",
-                    date = "19 Сен",
-                    isPB = false
-                )
-                ResultItem(
-                    event = "Тройной прыжок",
-                    result = "13.2 м",
-                    date = "12 Сен",
-                    isPB = false
-                )
-                ResultItem(
-                    event = "Тройной прыжок",
-                    result = "12.9 м",
-                    date = "5 Сен",
-                    isPB = false
-                )
-                ResultItem(
-                    event = "Тройной прыжок",
-                    result = "12.5 м",
-                    date = "29 Авг",
-                    isPB = false
-                )
-                ResultItem(
-                    event = "Тройной прыжок",
-                    result = "12.1 м",
-                    date = "22 Авг",
-                    isPB = false
+                    event = result.event,
+                    result = result.result,
+                    date = result.date,
+                    isPB = result.isPB
                 )
             }
         }
@@ -298,24 +278,15 @@ fun DiaryScreen(modifier: Modifier = Modifier) {
                     Text("Все")
                 }
             }
-            ExerciseResultItem(
-                exercise = "Приседания",
-                result = "120 кг",
-                date = "12 Окт",
-                isPB = true
-            )
-            ExerciseResultItem(
-                exercise = "Выпады",
-                result = "80 кг",
-                date = "12 Окт",
-                isPB = false
-            )
-            ExerciseResultItem(
-                exercise = "Прыжки на тумбу",
-                result = "45 см",
-                date = "10 Окт",
-                isPB = true
-            )
+
+            uiState.favoriteExerciseResults.take(3).forEach { result ->
+                ExerciseResultCard(
+                    exercise = result.exercise,
+                    result = result.result,
+                    date = result.date,
+                    isPB = result.isPB
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(80.dp)) // Space for bottom nav
@@ -341,11 +312,34 @@ fun InfoChip(icon: String, text: String) {
     }
 }
 
+private fun formatDate(timestamp: Long): String {
+    val calendar = Calendar.getInstance()
+    calendar.timeInMillis = timestamp
+    val day = calendar.get(Calendar.DAY_OF_MONTH)
+    val month = when (calendar.get(Calendar.MONTH)) {
+        Calendar.JANUARY -> "Янв"
+        Calendar.FEBRUARY -> "Фев"
+        Calendar.MARCH -> "Мар"
+        Calendar.APRIL -> "Апр"
+        Calendar.MAY -> "Май"
+        Calendar.JUNE -> "Июн"
+        Calendar.JULY -> "Июл"
+        Calendar.AUGUST -> "Авг"
+        Calendar.SEPTEMBER -> "Сен"
+        Calendar.OCTOBER -> "Окт"
+        Calendar.NOVEMBER -> "Ноя"
+        Calendar.DECEMBER -> "Дек"
+        else -> ""
+    }
+    return "$day $month"
+}
+
 @Composable
 fun QuickActionButton(
     icon: String,
     label: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit = {}
 ) {
     Column(
         modifier = modifier,
@@ -354,7 +348,9 @@ fun QuickActionButton(
     ) {
         Surface(
             shape = CircleShape,
-            modifier = Modifier.size(56.dp),
+            modifier = Modifier
+                .size(56.dp)
+                .clickable { onClick() },
             color = MaterialTheme.colorScheme.surfaceVariant
         ) {
             Box(
@@ -466,7 +462,7 @@ fun ResultItem(event: String, result: String, date: String, isPB: Boolean) {
 }
 
 @Composable
-fun ExerciseResultItem(exercise: String, result: String, date: String, isPB: Boolean) {
+fun ExerciseResultCard(exercise: String, result: String, date: String, isPB: Boolean) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),

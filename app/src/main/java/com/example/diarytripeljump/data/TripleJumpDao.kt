@@ -237,6 +237,25 @@ interface AnalyticsDao {
 }
 
 @Dao
+interface CorrectionHintDao {
+    @Query("SELECT * FROM correction_hints WHERE analyticsId = :analyticsId ORDER BY priority DESC")
+    fun getHintsForAnalytics(analyticsId: Long): Flow<List<CorrectionHint>>
+
+    @Transaction
+    @Query("SELECT * FROM correction_hints WHERE id = :hintId")
+    fun getHintWithControls(hintId: Long): Flow<CorrectionHintWithControls?>
+
+    @Insert
+    suspend fun insert(hint: CorrectionHint): Long
+
+    @Update
+    suspend fun update(hint: CorrectionHint)
+
+    @Delete
+    suspend fun delete(hint: CorrectionHint)
+}
+
+@Dao
 interface AnalyticsIndicatorDao {
     @Query("SELECT * FROM analytics_indicators WHERE analyticsId = :analyticsId")
     fun getIndicatorsForAnalytics(analyticsId: Long): Flow<List<AnalyticsIndicator>>
@@ -264,25 +283,6 @@ interface AnalyticsResultDao {
 
     @Delete
     suspend fun delete(result: AnalyticsResult)
-}
-
-@Dao
-interface CorrectionHintDao {
-    @Query("SELECT * FROM correction_hints WHERE analyticsId = :analyticsId ORDER BY priority DESC")
-    fun getHintsForAnalytics(analyticsId: Long): Flow<List<CorrectionHint>>
-
-    @Transaction
-    @Query("SELECT * FROM correction_hints WHERE id = :hintId")
-    fun getHintWithControls(hintId: Long): Flow<CorrectionHintWithControls?>
-
-    @Insert
-    suspend fun insert(hint: CorrectionHint): Long
-
-    @Update
-    suspend fun update(hint: CorrectionHint)
-
-    @Delete
-    suspend fun delete(hint: CorrectionHint)
 }
 
 @Dao

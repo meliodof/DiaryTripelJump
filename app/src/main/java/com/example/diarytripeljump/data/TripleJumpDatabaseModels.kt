@@ -41,7 +41,7 @@ enum class CompetitionStatus { UPCOMING, COMPLETED, CANCELLED }
 )
 data class TripleJumpResult(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val competitionId: Long,
+    val competitionId: Long?,
     val date: Long,
     val result: Double,
     val weatherConditions: String? = null,
