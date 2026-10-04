@@ -23,7 +23,7 @@ import androidx.room.TypeConverters
         CorrectionHint::class,
         ControlIndicator::class
     ],
-    version = 1,
+    version = 3,
     exportSchema = true
 )
 @TypeConverters(Converters::class)

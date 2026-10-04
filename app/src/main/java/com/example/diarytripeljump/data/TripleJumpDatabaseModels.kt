@@ -77,10 +77,24 @@ data class TrainingSession(
     val trainingType: TrainingType,
     val intensity: Int? = null,
     val durationMinutes: Int? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    val isSkipped: Boolean = false,
+    val skipReason: String? = null
 )
 
-enum class TrainingType { STRENGTH, TECHNICAL, CONDITIONING, RECOVERY }
+enum class TrainingType {
+    STRENGTH,
+    TECHNICAL,
+    JUMP,
+    CONDITIONING,
+    RECOVERY,
+    TECHNICAL_STRENGTH,
+    TECHNICAL_RECOVERY,
+    STRENGTH_CONDITIONING,
+    HYBRID
+}
+
+enum class ExerciseStage { WARMUP, MAIN, COOLDOWN }
 
 @Entity(tableName = "exercises")
 data class Exercise(
@@ -93,10 +107,11 @@ data class Exercise(
 
 enum class ExerciseCategory {
     SQUAT, LUNGE, DEADLIFT,
-    JUMP_BOX, BROAD_JUMP, VERTICAL_JUMP, DEPTH_JUMP,
+    JUMP, JUMP_BOX, BROAD_JUMP, VERTICAL_JUMP, DEPTH_JUMP,
     CORE, PLANK,
     POWER_CLEAN, POWER_SNATCH,
     MOBILITY, STRETCHING,
+    HURDLES,
     OTHER
 }
 
@@ -127,10 +142,12 @@ data class ExerciseResult(
     val resultUnit: ResultUnit,
     val sets: Int? = null,
     val reps: Int? = null,
+    val stage: ExerciseStage = ExerciseStage.MAIN,
+    val hurdleHeightCm: Double? = null,
     val notes: String? = null
 )
 
-enum class ResultUnit { KG, CM, REPS, SECONDS }
+enum class ResultUnit { KG, CM, M, REPS, SECONDS }
 
 @Entity(
     tableName = "training_jump_results",

@@ -34,6 +34,16 @@ class Converters {
     }
 
     @TypeConverter
+    fun fromExerciseStage(stage: ExerciseStage): String {
+        return stage.name
+    }
+
+    @TypeConverter
+    fun toExerciseStage(stage: String): ExerciseStage {
+        return ExerciseStage.valueOf(stage)
+    }
+
+    @TypeConverter
     fun fromExerciseCategory(category: ExerciseCategory): String {
         return category.name
     }
