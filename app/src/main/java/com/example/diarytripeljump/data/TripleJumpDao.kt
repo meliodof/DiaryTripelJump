@@ -109,17 +109,23 @@ interface TrainingSessionDao {
 }
 
 @Dao
+interface CustomExerciseCategoryDao {
+    @Query("SELECT * FROM exercise_categories ORDER BY name")
+    fun getAllCategories(): Flow<List<CustomExerciseCategory>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(category: CustomExerciseCategory): Long
+
+    @Delete
+    suspend fun delete(category: CustomExerciseCategory)
+}
+
+@Dao
 interface ExerciseDao {
     @Query("SELECT * FROM exercises ORDER BY name")
     fun getAllExercises(): Flow<List<Exercise>>
 
-    @Query("SELECT * FROM exercises WHERE isFavorite = 1 ORDER BY name")
-    fun getFavoriteExercises(): Flow<List<Exercise>>
-
-    @Query("SELECT * FROM exercises WHERE category = :category ORDER BY name")
-    fun getExercisesByCategory(category: ExerciseCategory): Flow<List<Exercise>>
-
-    @Insert
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(exercise: Exercise): Long
 
     @Update
@@ -132,10 +138,9 @@ interface ExerciseDao {
 @Dao
 interface ExerciseResultDao {
     @Query("""
-        SELECT exercise_results.*, exercises.name, exercises.category 
+        SELECT exercise_results.*, exercises.name, exercises.categoryName 
         FROM exercise_results 
         INNER JOIN exercises ON exercise_results.exerciseId = exercises.id
-        WHERE exercises.isFavorite = 1
         ORDER BY date DESC
     """)
     fun getFavoriteExerciseResults(): Flow<List<ExerciseResultWithExercise>>
@@ -152,30 +157,6 @@ interface ExerciseResultDao {
         AND result = (SELECT MAX(result) FROM exercise_results WHERE exerciseId = :exerciseId)
     """)
     fun getPersonalBestForExercise(exerciseId: Long): Flow<ExerciseResult?>
-
-    @Query("""
-        SELECT MAX(result) FROM exercise_results 
-        WHERE exerciseId = :exerciseId 
-        AND date >= :seasonStart 
-        AND date <= :seasonEnd
-    """)
-    suspend fun getSeasonalBestForExercise(
-        exerciseId: Long,
-        seasonStart: Long,
-        seasonEnd: Long
-    ): Double?
-
-    @Query("""
-        SELECT AVG(result) FROM exercise_results 
-        WHERE exerciseId = :exerciseId 
-        AND date >= :seasonStart 
-        AND date <= :seasonEnd
-    """)
-    suspend fun getSeasonalAverageForExercise(
-        exerciseId: Long,
-        seasonStart: Long,
-        seasonEnd: Long
-    ): Double?
 
     @Insert
     suspend fun insert(result: ExerciseResult): Long

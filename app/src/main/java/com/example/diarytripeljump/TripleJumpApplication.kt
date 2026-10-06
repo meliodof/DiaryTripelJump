@@ -1,6 +1,7 @@
 package com.example.diarytripeljump
 
 import android.app.Application
+import com.example.diarytripeljump.data.SeedDatabase
 import com.example.diarytripeljump.data.TripleJumpDatabase
 import com.example.diarytripeljump.data.TripleJumpRepository
 import kotlinx.coroutines.CoroutineScope
@@ -25,6 +26,7 @@ class TripleJumpApplication : Application() {
             tripleJumpResultDao = database.tripleJumpResultDao(),
             jumpAttemptDao = database.jumpAttemptDao(),
             trainingSessionDao = database.trainingSessionDao(),
+            customExerciseCategoryDao = database.customExerciseCategoryDao(),
             exerciseDao = database.exerciseDao(),
             exerciseResultDao = database.exerciseResultDao(),
             trainingJumpResultDao = database.trainingJumpResultDao(),
@@ -36,9 +38,8 @@ class TripleJumpApplication : Application() {
             controlIndicatorDao = database.controlIndicatorDao()
         )
 
-        // Заполняем базу данных начальными данными
         applicationScope.launch {
-            val seedDatabase = com.example.diarytripeljump.data.SeedDatabase(repository)
+            val seedDatabase = SeedDatabase(repository)
             seedDatabase.seedInitialData()
         }
     }

@@ -44,16 +44,6 @@ class Converters {
     }
 
     @TypeConverter
-    fun fromExerciseCategory(category: ExerciseCategory): String {
-        return category.name
-    }
-
-    @TypeConverter
-    fun toExerciseCategory(category: String): ExerciseCategory {
-        return ExerciseCategory.valueOf(category)
-    }
-
-    @TypeConverter
     fun fromResultUnit(unit: ResultUnit): String {
         return unit.name
     }

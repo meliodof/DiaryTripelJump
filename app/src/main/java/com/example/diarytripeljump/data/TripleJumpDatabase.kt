@@ -13,6 +13,7 @@ import androidx.room.TypeConverters
         TripleJumpResult::class,
         JumpAttempt::class,
         TrainingSession::class,
+        CustomExerciseCategory::class,
         Exercise::class,
         ExerciseResult::class,
         TrainingJumpResult::class,
@@ -23,7 +24,7 @@ import androidx.room.TypeConverters
         CorrectionHint::class,
         ControlIndicator::class
     ],
-    version = 3,
+    version = 5,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -33,6 +34,7 @@ abstract class TripleJumpDatabase : RoomDatabase() {
     abstract fun tripleJumpResultDao(): TripleJumpResultDao
     abstract fun jumpAttemptDao(): JumpAttemptDao
     abstract fun trainingSessionDao(): TrainingSessionDao
+    abstract fun customExerciseCategoryDao(): CustomExerciseCategoryDao
     abstract fun exerciseDao(): ExerciseDao
     abstract fun exerciseResultDao(): ExerciseResultDao
     abstract fun trainingJumpResultDao(): TrainingJumpResultDao

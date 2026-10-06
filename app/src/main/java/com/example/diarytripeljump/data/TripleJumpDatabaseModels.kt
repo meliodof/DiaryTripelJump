@@ -74,7 +74,7 @@ enum class AttemptType { QUALIFICATION, FINAL, TRAINING }
 data class TrainingSession(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val date: Long,
-    val trainingType: TrainingType,
+    val trainingType: TrainingType = TrainingType.HYBRID,
     val intensity: Int? = null,
     val durationMinutes: Int? = null,
     val notes: String? = null,
@@ -96,24 +96,21 @@ enum class TrainingType {
 
 enum class ExerciseStage { WARMUP, MAIN, COOLDOWN }
 
+@Entity(tableName = "exercise_categories")
+data class CustomExerciseCategory(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val colorHex: String = "#1E4D3B"
+)
+
 @Entity(tableName = "exercises")
 data class Exercise(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
-    val category: ExerciseCategory,
-    val isFavorite: Boolean = false,
-    val defaultUnit: ResultUnit
+    val categoryName: String? = null,
+    val categoryColorHex: String = "#1E4D3B",
+    val defaultUnit: ResultUnit = ResultUnit.KG
 )
-
-enum class ExerciseCategory {
-    SQUAT, LUNGE, DEADLIFT,
-    JUMP, JUMP_BOX, BROAD_JUMP, VERTICAL_JUMP, DEPTH_JUMP,
-    CORE, PLANK,
-    POWER_CLEAN, POWER_SNATCH,
-    MOBILITY, STRETCHING,
-    HURDLES,
-    OTHER
-}
 
 @Entity(
     tableName = "exercise_results",

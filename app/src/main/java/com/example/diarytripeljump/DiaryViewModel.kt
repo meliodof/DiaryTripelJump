@@ -110,6 +110,27 @@ class DiaryViewModel(
         }
     }
 
+    fun saveExerciseToDatabase(
+        name: String,
+        categoryName: String?,
+        categoryColorHex: String = "#1E4D3B",
+        defaultUnit: ResultUnit = ResultUnit.KG
+    ) {
+        viewModelScope.launch {
+            val existing = repository.getAllExercises().first().find { it.name.equals(name, ignoreCase = true) }
+            if (existing == null) {
+                repository.insertExercise(
+                    Exercise(
+                        name = name,
+                        categoryName = categoryName,
+                        categoryColorHex = categoryColorHex,
+                        defaultUnit = defaultUnit
+                    )
+                )
+            }
+        }
+    }
+
     // --- CRUD: Competitions ---
     fun addCompetition(name: String, location: String, date: Long, eventType: String) {
         viewModelScope.launch {
@@ -163,9 +184,19 @@ class DiaryViewModel(
             )
 
             exerciseInputs.forEach { input ->
+                // Ensure exercise is saved in DB for future autocomplete
+                val existing = repository.getAllExercises().first().find { it.name.equals(input.exerciseName, ignoreCase = true) }
+                val exId = existing?.id ?: repository.insertExercise(
+                    Exercise(
+                        name = input.exerciseName,
+                        categoryName = "Пользовательские",
+                        defaultUnit = input.unit
+                    )
+                )
+
                 repository.insertExerciseResult(
                     ExerciseResult(
-                        exerciseId = input.exerciseId,
+                        exerciseId = exId,
                         trainingSessionId = sessionId,
                         date = date,
                         result = input.result,

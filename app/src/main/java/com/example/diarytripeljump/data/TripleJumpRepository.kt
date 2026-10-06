@@ -8,6 +8,7 @@ class TripleJumpRepository(
     private val tripleJumpResultDao: TripleJumpResultDao,
     private val jumpAttemptDao: JumpAttemptDao,
     private val trainingSessionDao: TrainingSessionDao,
+    private val customExerciseCategoryDao: CustomExerciseCategoryDao,
     private val exerciseDao: ExerciseDao,
     private val exerciseResultDao: ExerciseResultDao,
     private val trainingJumpResultDao: TrainingJumpResultDao,
@@ -54,10 +55,13 @@ class TripleJumpRepository(
     suspend fun updateTrainingSession(session: TrainingSession) = trainingSessionDao.update(session)
     suspend fun deleteTrainingSession(session: TrainingSession) = trainingSessionDao.delete(session)
 
+    // Custom Exercise Categories
+    fun getAllCustomCategories(): Flow<List<CustomExerciseCategory>> = customExerciseCategoryDao.getAllCategories()
+    suspend fun insertCustomCategory(category: CustomExerciseCategory): Long = customExerciseCategoryDao.insert(category)
+    suspend fun deleteCustomCategory(category: CustomExerciseCategory) = customExerciseCategoryDao.delete(category)
+
     // Exercises
     fun getAllExercises(): Flow<List<Exercise>> = exerciseDao.getAllExercises()
-    fun getFavoriteExercises(): Flow<List<Exercise>> = exerciseDao.getFavoriteExercises()
-    fun getExercisesByCategory(category: ExerciseCategory): Flow<List<Exercise>> = exerciseDao.getExercisesByCategory(category)
     suspend fun insertExercise(exercise: Exercise): Long = exerciseDao.insert(exercise)
     suspend fun updateExercise(exercise: Exercise) = exerciseDao.update(exercise)
     suspend fun deleteExercise(exercise: Exercise) = exerciseDao.delete(exercise)
@@ -67,8 +71,6 @@ class TripleJumpRepository(
     fun getResultsForExercise(exerciseId: Long): Flow<List<ExerciseResult>> = exerciseResultDao.getResultsForExercise(exerciseId)
     fun getResultsForTraining(sessionId: Long): Flow<List<ExerciseResult>> = exerciseResultDao.getResultsForTraining(sessionId)
     fun getPersonalBestForExercise(exerciseId: Long): Flow<ExerciseResult?> = exerciseResultDao.getPersonalBestForExercise(exerciseId)
-    suspend fun getSeasonalBestForExercise(exerciseId: Long, seasonStart: Long, seasonEnd: Long): Double? = exerciseResultDao.getSeasonalBestForExercise(exerciseId, seasonStart, seasonEnd)
-    suspend fun getSeasonalAverageForExercise(exerciseId: Long, seasonStart: Long, seasonEnd: Long): Double? = exerciseResultDao.getSeasonalAverageForExercise(exerciseId, seasonStart, seasonEnd)
     suspend fun insertExerciseResult(result: ExerciseResult): Long = exerciseResultDao.insert(result)
     suspend fun updateExerciseResult(result: ExerciseResult) = exerciseResultDao.update(result)
     suspend fun deleteExerciseResult(result: ExerciseResult) = exerciseResultDao.delete(result)
