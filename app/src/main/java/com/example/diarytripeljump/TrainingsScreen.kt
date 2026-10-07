@@ -25,11 +25,19 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.diarytripeljump.data.Exercise
+import com.example.diarytripeljump.data.ExerciseResult
 import com.example.diarytripeljump.data.ResultUnit
 import com.example.diarytripeljump.data.TrainingType
 import com.example.diarytripeljump.data.TrainingWithExercises
 import java.text.SimpleDateFormat
 import java.util.*
+
+enum class PairedUnitType {
+    SECONDS_MS, // Сек / Мс
+    KG_G,       // Кг / Г
+    M_CM,       // М / См
+    REPS_ONLY   // Раз
+}
 
 @Composable
 fun TrainingsScreen(
@@ -48,6 +56,7 @@ fun TrainingsScreen(
     var selectedDateMillis by remember { mutableStateOf<Long?>(System.currentTimeMillis()) }
 
     var showAddTrainingDialog by remember { mutableStateOf(false) }
+    var editingTrainingItem by remember { mutableStateOf<TrainingWithExercises?>(null) }
     var showMarkSkippedDialog by remember { mutableStateOf(false) }
     var warningMessage by remember { mutableStateOf<String?>(null) }
 
@@ -84,7 +93,7 @@ fun TrainingsScreen(
             trainingsList = trainingsList
         )
 
-        // 3. Action Buttons Row Directly Under Calendar (No Fixed Legend)
+        // 3. Action Buttons Row Directly Under Calendar
         val activeTrainingsOnSelectedDay = remember(trainingsList, selectedDateMillis) {
             if (selectedDateMillis == null) false
             else {
@@ -103,7 +112,6 @@ fun TrainingsScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Button 1: Add Training
             Button(
                 onClick = { showAddTrainingDialog = true },
                 shape = RoundedCornerShape(12.dp),
@@ -115,7 +123,6 @@ fun TrainingsScreen(
                 Text(text = "Добавить тренировку", fontWeight = FontWeight.Bold, fontSize = 12.sp)
             }
 
-            // Button 2: Mark Skipped Day
             OutlinedButton(
                 onClick = {
                     if (activeTrainingsOnSelectedDay) {
@@ -181,6 +188,8 @@ fun TrainingsScreen(
                 items(filteredTrainings) { trainingItem ->
                     TrainingSessionCard(
                         trainingItem = trainingItem,
+                        exercisesList = exercisesList,
+                        onEditClick = { editingTrainingItem = trainingItem },
                         onDeleteClick = { viewModel.deleteTrainingSession(trainingItem.training) }
                     )
                 }
@@ -233,25 +242,67 @@ fun TrainingsScreen(
         )
     }
 
+    // New Training Dialog
     if (showAddTrainingDialog) {
         AddTrainingDialog(
             exercisesList = exercisesList,
             initialDate = selectedDateMillis ?: System.currentTimeMillis(),
+            existingInputs = emptyList(),
+            dialogTitle = "Новая Тренировка",
             onDismiss = { showAddTrainingDialog = false },
-            onConfirm = { date, type, intensity, duration, notes, exerciseInputs, hop, step, jump, speed ->
+            onConfirm = { date, exerciseInputs ->
                 viewModel.addTrainingSession(
                     date = date,
-                    trainingType = type,
-                    intensity = intensity,
-                    durationMinutes = duration,
-                    notes = notes,
-                    exerciseInputs = exerciseInputs,
-                    hopPhase = hop,
-                    stepPhase = step,
-                    jumpPhase = jump,
-                    runUpSpeed = speed
+                    trainingType = TrainingType.STRENGTH,
+                    intensity = 8,
+                    durationMinutes = 60,
+                    notes = "",
+                    exerciseInputs = exerciseInputs
                 )
                 showAddTrainingDialog = false
+            },
+            onSaveNewExerciseToDb = { name, category ->
+                viewModel.saveExerciseToDatabase(name = name, categoryName = category)
+            }
+        )
+    }
+
+    // Edit Existing Training Dialog
+    if (editingTrainingItem != null) {
+        val session = editingTrainingItem!!.training
+        val existingInputs = remember(editingTrainingItem) {
+            editingTrainingItem!!.exerciseResults.map { exRes ->
+                val exName = exercisesList.find { it.id == exRes.exerciseId }?.name ?: "Упражнение"
+                val (pVal, sVal) = extractPrimarySecondaryValues(exRes)
+                ExerciseResultInput(
+                    exerciseId = exRes.exerciseId,
+                    exerciseName = exName,
+                    result = exRes.result,
+                    unit = exRes.resultUnit,
+                    primaryValue = pVal,
+                    secondaryValue = sVal,
+                    sets = exRes.sets,
+                    reps = exRes.reps
+                )
+            }
+        }
+
+        AddTrainingDialog(
+            exercisesList = exercisesList,
+            initialDate = session.date,
+            existingInputs = existingInputs,
+            dialogTitle = "Редактировать Тренировку",
+            onDismiss = { editingTrainingItem = null },
+            onConfirm = { date, exerciseInputs ->
+                viewModel.updateTrainingSessionWithExercises(
+                    sessionId = session.id,
+                    date = date,
+                    exerciseInputs = exerciseInputs
+                )
+                editingTrainingItem = null
+            },
+            onSaveNewExerciseToDb = { name, category ->
+                viewModel.saveExerciseToDatabase(name = name, categoryName = category)
             }
         )
     }
@@ -443,6 +494,8 @@ fun CompactTrainingCalendarWidget(
 @Composable
 fun TrainingSessionCard(
     trainingItem: TrainingWithExercises,
+    exercisesList: List<Exercise>,
+    onEditClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
     val session = trainingItem.training
@@ -485,38 +538,43 @@ fun TrainingSessionCard(
 
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            text = if (isSkipped) "ПРОПУСК ТРЕНИРОВКИ" else getTrainingTypeTitle(session.trainingType),
+                            text = if (isSkipped) "ПРОПУСК ТРЕНИРОВКИ" else "ТРЕНИРОВКА",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        Text(
-                            text = if (isSkipped) "Причина: ${session.skipReason ?: "Не указана"}"
-                            else "${session.durationMinutes ?: 60} мин · Оценка тяжести ${session.intensity ?: 5}/10",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 11.sp
-                        )
+                        if (isSkipped) {
+                            Text(
+                                text = "Причина: ${session.skipReason ?: "Не указана"}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.sp
+                            )
+                        }
                     }
                 }
 
-                IconButton(onClick = onDeleteClick, modifier = Modifier.size(24.dp)) {
-                    Icon(
-                        imageVector = Icons.Default.DeleteOutline,
-                        contentDescription = "Удалить",
-                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (!isSkipped) {
+                        IconButton(onClick = onEditClick, modifier = Modifier.size(24.dp)) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Редактировать",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
 
-            if (!session.notes.isNullOrEmpty()) {
-                Text(
-                    text = "Заметка: ${session.notes}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp
-                )
+                    IconButton(onClick = onDeleteClick, modifier = Modifier.size(24.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "Удалить",
+                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
             }
 
             if (!isSkipped) {
@@ -525,20 +583,28 @@ fun TrainingSessionCard(
                 if (trainingItem.exerciseResults.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         trainingItem.exerciseResults.forEach { exRes ->
-                            val resultText = if (exRes.result > 0) "${exRes.result} ${getUnitTitle(exRes.resultUnit)}" else ""
-                            val setsText = if (exRes.sets != null && exRes.sets > 0) " (${exRes.sets} подходов × ${exRes.reps ?: 1} раз)" else ""
+                            val exName = exercisesList.find { it.id == exRes.exerciseId }?.name ?: "Упражнение"
+                            val resultFormatted = formatPairedResult(exRes)
+                            val setsInfo = when {
+                                exRes.sets != null && exRes.sets > 0 && exRes.reps != null && exRes.reps > 0 -> "${exRes.sets} подходов × ${exRes.reps} раз"
+                                exRes.reps != null && exRes.reps > 0 -> "${exRes.reps} раз"
+                                exRes.sets != null && exRes.sets > 0 -> "${exRes.sets} подходов"
+                                else -> ""
+                            }
+                            val detailsText = listOf(resultFormatted, setsInfo).filter { it.isNotBlank() }.joinToString(" • ")
+
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = "• Упражнение #${exRes.exerciseId}",
+                                    text = "• $exName",
                                     style = MaterialTheme.typography.bodySmall,
                                     fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "$resultText$setsText",
+                                    text = detailsText,
                                     style = MaterialTheme.typography.bodySmall,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary
@@ -552,108 +618,61 @@ fun TrainingSessionCard(
     }
 }
 
-// Dialog: Add Training with Multi-Exercise Addition, Category Filtering & Expandable List
+// Dialog: Add/Edit Training with Paired Result Units & Individual Sets/Reps
 @Composable
 fun AddTrainingDialog(
     exercisesList: List<Exercise>,
     initialDate: Long,
+    existingInputs: List<ExerciseResultInput> = emptyList(),
+    dialogTitle: String = "Новая Тренировка",
     onDismiss: () -> Unit,
     onConfirm: (
         date: Long,
-        type: TrainingType,
-        intensity: Int,
-        duration: Int,
-        notes: String,
-        exerciseInputs: List<ExerciseResultInput>,
-        hop: Double?,
-        step: Double?,
-        jump: Double?,
-        speed: Double?
-    ) -> Unit
+        exerciseInputs: List<ExerciseResultInput>
+    ) -> Unit,
+    onSaveNewExerciseToDb: (name: String, category: String) -> Unit
 ) {
-    var intensity by remember { mutableFloatStateOf(8f) }
-    var durationText by remember { mutableStateOf("90") }
-    var notesText by remember { mutableStateOf("") }
-
-    // Exercise Name Input with Validation
-    var exerciseNameInput by remember { mutableStateOf("") }
-    var exerciseCategoryName by remember { mutableStateOf("") }
-
-    // Result Toggle & Input
-    var hasResult by remember { mutableStateOf(true) }
-    var resultValueText by remember { mutableStateOf("") }
-    var selectedUnit by remember { mutableStateOf(ResultUnit.KG) }
-
-    // Sets & Reps Toggle & Inputs
-    var hasSeries by remember { mutableStateOf(true) }
-    var setsText by remember { mutableStateOf("5") }
-    var repsText by remember { mutableStateOf("8") }
-
-    // Category Filter (0: Все, 1: Силовые, 2: Прыжковые, 3: Барьеры, 4: Беговые, 5: Восстановление)
+    // 1. Categories Filter: Силовые, Прыжковые, Беговые, ОФП, Восстановление, Другой
     var selectedCategoryFilter by remember { mutableIntStateOf(0) }
     var showAllExercisesInList by remember { mutableStateOf(false) }
 
-    var addedExerciseInputs by remember { mutableStateOf(listOf<ExerciseResultInput>()) }
+    var showCreateExerciseModal by remember { mutableStateOf(false) }
 
-    var hopText by remember { mutableStateOf("") }
-    var stepText by remember { mutableStateOf("") }
-    var jumpText by remember { mutableStateOf("") }
-    var speedText by remember { mutableStateOf("") }
+    var addedExerciseInputs by remember { mutableStateOf(existingInputs) }
 
-    // Dynamic Filtered Exercises from DB based on Category Chip
     val filteredExercises = remember(exercisesList, selectedCategoryFilter) {
         val list = exercisesList.distinctBy { it.name.trim().lowercase() }
         when (selectedCategoryFilter) {
             1 -> list.filter { it.categoryName?.contains("силов", ignoreCase = true) == true || it.categoryName == null }
             2 -> list.filter { it.categoryName?.contains("прыжк", ignoreCase = true) == true }
-            3 -> list.filter { it.categoryName?.contains("барьер", ignoreCase = true) == true }
-            4 -> list.filter { it.categoryName?.contains("бег", ignoreCase = true) == true || it.categoryName?.contains("офп", ignoreCase = true) == true }
+            3 -> list.filter { it.categoryName?.contains("бег", ignoreCase = true) == true }
+            4 -> list.filter { it.categoryName?.contains("офп", ignoreCase = true) == true }
             5 -> list.filter { it.categoryName?.contains("восстан", ignoreCase = true) == true }
+            6 -> list.filter { it.categoryName?.contains("друг", ignoreCase = true) == true }
             else -> list
         }
     }
 
-    val exercisesToShow = if (showAllExercisesInList) filteredExercises else filteredExercises.take(3)
+    val exercisesToShow = if (showAllExercisesInList) filteredExercises else filteredExercises.take(4)
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(text = "Новая Тренировка", fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+            Text(text = dialogTitle, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
         },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // RPE / Heavy Rating Slider
-                Text(text = "Оценка тяжести тренировки: ${intensity.toInt()}/10", style = MaterialTheme.typography.labelMedium)
-                Slider(
-                    value = intensity,
-                    onValueChange = { intensity = it },
-                    valueRange = 1f..10f,
-                    steps = 8,
-                    colors = SliderDefaults.colors(activeTrackColor = MaterialTheme.colorScheme.primary, thumbColor = MaterialTheme.colorScheme.primary)
+                // 1. Category Chips
+                Text(
+                    text = "Вид упражнения:",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
                 )
 
-                OutlinedTextField(
-                    value = durationText,
-                    onValueChange = { input -> durationText = input.filter { it.isDigit() } },
-                    label = { Text("Длительность (мин)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = notesText,
-                    onValueChange = { notesText = it },
-                    label = { Text("Заметки к тренировке") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                HorizontalDivider()
-
-                Text(text = "Выбор вида и упражнений:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-
-                // Category Filter Chips
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -678,55 +697,78 @@ fun AddTrainingDialog(
                     FilterChip(
                         selected = selectedCategoryFilter == 3,
                         onClick = { selectedCategoryFilter = 3 },
-                        label = { Text("📐 Барьеры", fontSize = 10.sp) }
+                        label = { Text("🏃 Беговые", fontSize = 10.sp) }
                     )
                     FilterChip(
                         selected = selectedCategoryFilter == 4,
                         onClick = { selectedCategoryFilter = 4 },
-                        label = { Text("🏃 Беговые", fontSize = 10.sp) }
+                        label = { Text("🏋️ ОФП", fontSize = 10.sp) }
                     )
                     FilterChip(
                         selected = selectedCategoryFilter == 5,
                         onClick = { selectedCategoryFilter = 5 },
                         label = { Text("🧘 Восстановление", fontSize = 10.sp) }
                     )
+                    FilterChip(
+                        selected = selectedCategoryFilter == 6,
+                        onClick = { selectedCategoryFilter = 6 },
+                        label = { Text("🌀 Другой", fontSize = 10.sp) }
+                    )
                 }
 
-                // Exercises Preview Cards List (~3-4 items) with Expand Button
+                // 2. Exercises List
+                Text(
+                    text = "Упражнения:",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
                 if (filteredExercises.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         exercisesToShow.forEach { ex ->
-                            val isSelected = exerciseNameInput.equals(ex.name, ignoreCase = true)
+                            val isAdded = addedExerciseInputs.any { it.exerciseName.equals(ex.name, ignoreCase = true) }
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        exerciseNameInput = ex.name
-                                        selectedUnit = ex.defaultUnit
+                                        if (isAdded) {
+                                            addedExerciseInputs = addedExerciseInputs.filter { !it.exerciseName.equals(ex.name, ignoreCase = true) }
+                                        } else {
+                                            val input = ExerciseResultInput(
+                                                exerciseId = ex.id,
+                                                exerciseName = ex.name,
+                                                result = 0.0,
+                                                unit = ex.defaultUnit,
+                                                sets = null,
+                                                reps = 10
+                                            )
+                                            addedExerciseInputs = addedExerciseInputs + input
+                                        }
                                     },
                                 shape = RoundedCornerShape(8.dp),
                                 colors = CardDefaults.cardColors(
-                                    containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                                    containerColor = if (isAdded) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
                                 )
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
                                         text = ex.name,
                                         style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = if (isAdded) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isAdded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                         fontSize = 11.sp
                                     )
-                                    if (isSelected) {
+                                    if (isAdded) {
                                         Icon(
                                             imageVector = Icons.Default.Check,
-                                            contentDescription = null,
+                                            contentDescription = "Добавлено",
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(16.dp)
                                         )
@@ -735,13 +777,13 @@ fun AddTrainingDialog(
                             }
                         }
 
-                        if (filteredExercises.size > 3) {
+                        if (filteredExercises.size > 4) {
                             TextButton(
                                 onClick = { showAllExercisesInList = !showAllExercisesInList },
                                 modifier = Modifier.align(Alignment.CenterHorizontally)
                             ) {
                                 Text(
-                                    text = if (showAllExercisesInList) "Свернуть" else "Показать все упражнения (${filteredExercises.size})...",
+                                    text = if (showAllExercisesInList) "Свернуть" else "Показать все (${filteredExercises.size})...",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -750,176 +792,380 @@ fun AddTrainingDialog(
                     }
                 }
 
-                OutlinedTextField(
-                    value = exerciseNameInput,
-                    onValueChange = { exerciseNameInput = it },
-                    label = { Text("Название упражнения") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                // Result Toggle Switch
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = "Указать результат:", style = MaterialTheme.typography.labelSmall, fontSize = 11.sp)
-                    Switch(checked = hasResult, onCheckedChange = { hasResult = it })
-                }
-
-                if (hasResult) {
-                    // Result Unit Chips (Matching App Scheme Colors)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        ResultUnit.entries.forEach { unit ->
-                            FilterChip(
-                                selected = selectedUnit == unit,
-                                onClick = { selectedUnit = unit },
-                                label = { Text(getUnitTitle(unit), fontSize = 10.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.primary
-                                )
-                            )
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = resultValueText,
-                        onValueChange = { input ->
-                            resultValueText = input.filter { it.isDigit() || it == '.' }
-                        },
-                        label = { Text("Значение (${getUnitTitle(selectedUnit)})") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                // Sets & Reps Toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = "Указать подходы и повторения:", style = MaterialTheme.typography.labelSmall, fontSize = 11.sp)
-                    Switch(checked = hasSeries, onCheckedChange = { hasSeries = it })
-                }
-
-                if (hasSeries) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedTextField(
-                            value = setsText,
-                            onValueChange = { input -> setsText = input.filter { it.isDigit() } },
-                            label = { Text("Подходов") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = repsText,
-                            onValueChange = { input -> repsText = input.filter { it.isDigit() } },
-                            label = { Text("Повторений") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-
-                // PROMINENT BUTTON: Add Exercise to Current Training Session
+                // 3. Button 'Добавить новое упражнение'
                 Button(
-                    onClick = {
-                        if (exerciseNameInput.isNotBlank()) {
-                            val valDouble = if (hasResult) (resultValueText.toDoubleOrNull() ?: 0.0) else 0.0
-                            val sets = if (hasSeries) setsText.toIntOrNull() else null
-                            val reps = if (hasSeries) repsText.toIntOrNull() else null
-
-                            val input = ExerciseResultInput(
-                                exerciseId = System.currentTimeMillis(),
-                                exerciseName = exerciseNameInput,
-                                result = valDouble,
-                                unit = selectedUnit,
-                                sets = sets,
-                                reps = reps
-                            )
-                            addedExerciseInputs = addedExerciseInputs + input
-
-                            // Clear inputs for next exercise entry
-                            exerciseNameInput = ""
-                            resultValueText = ""
-                        }
-                    },
+                    onClick = { showCreateExerciseModal = true },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.primary)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
                 ) {
-                    Icon(imageVector = Icons.Default.AddCircleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "+ Добавить упражнение в список", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "Добавить новое упражнение", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
 
-                // List of Added Exercises in this dialog session
+                // 4. Selected Exercises Cards with Paired Result Units & Individual Sets/Reps
                 if (addedExerciseInputs.isNotEmpty()) {
+                    HorizontalDivider()
                     Text(
-                        text = "Добавлено упражнений (${addedExerciseInputs.size}):",
+                        text = "Параметры выбранных упражнений (${addedExerciseInputs.size}):",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
+
                     addedExerciseInputs.forEachIndexed { index, input ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val resPart = if (input.result > 0) " — ${input.result} ${getUnitTitle(input.unit)}" else ""
-                            val setsPart = if (input.sets != null) " (${input.sets}x${input.reps ?: 1})" else ""
-                            Text(
-                                text = "• ${input.exerciseName}$resPart$setsPart",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(
-                                onClick = {
-                                    addedExerciseInputs = addedExerciseInputs.filterIndexed { i, _ -> i != index }
-                                },
-                                modifier = Modifier.size(20.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Удалить",
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                        ExerciseResultEditorCard(
+                            input = input,
+                            onUpdate = { updatedInput ->
+                                addedExerciseInputs = addedExerciseInputs.mapIndexed { i, item ->
+                                    if (i == index) updatedInput else item
+                                }
+                            },
+                            onRemove = {
+                                addedExerciseInputs = addedExerciseInputs.filterIndexed { i, _ -> i != index }
                             }
-                        }
+                        )
                     }
                 }
             }
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    onConfirm(
-                        initialDate,
-                        TrainingType.STRENGTH,
-                        intensity.toInt(),
-                        durationText.toIntOrNull() ?: 60,
-                        notesText,
-                        addedExerciseInputs,
-                        hopText.toDoubleOrNull(),
-                        stepText.toDoubleOrNull(),
-                        jumpText.toDoubleOrNull(),
-                        speedText.toDoubleOrNull()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onDismiss) {
+                    Text("Отмена")
+                }
+
+                Button(
+                    onClick = {
+                        onConfirm(
+                            initialDate,
+                            addedExerciseInputs
+                        )
+                    }
+                ) {
+                    Text("Сохранить")
+                }
+            }
+        }
+    )
+
+    // Sub-Dialog: Create New Exercise
+    if (showCreateExerciseModal) {
+        CreateNewExerciseDialog(
+            onDismiss = { showCreateExerciseModal = false },
+            onConfirm = { name, category, equipmentWeight ->
+                onSaveNewExerciseToDb(name, category)
+
+                val input = ExerciseResultInput(
+                    exerciseId = System.currentTimeMillis(),
+                    exerciseName = name,
+                    result = equipmentWeight ?: 0.0,
+                    unit = ResultUnit.KG,
+                    primaryValue = equipmentWeight?.toInt(),
+                    sets = null,
+                    reps = 10
+                )
+                addedExerciseInputs = addedExerciseInputs + input
+                showCreateExerciseModal = false
+            }
+        )
+    }
+}
+
+// Editor Card for Individual Exercise Result, Paired Units, and Sets/Reps
+@Composable
+fun ExerciseResultEditorCard(
+    input: ExerciseResultInput,
+    onUpdate: (ExerciseResultInput) -> Unit,
+    onRemove: () -> Unit
+) {
+    var hasResult by remember(input) { mutableStateOf(input.result > 0 || input.primaryValue != null) }
+    var pairedUnitType by remember(input) {
+        mutableStateOf(
+            when (input.unit) {
+                ResultUnit.SECONDS -> PairedUnitType.SECONDS_MS
+                ResultUnit.KG -> PairedUnitType.KG_G
+                ResultUnit.M -> PairedUnitType.M_CM
+                ResultUnit.REPS -> PairedUnitType.REPS_ONLY
+                else -> PairedUnitType.KG_G
+            }
+        )
+    }
+
+    var primaryValStr by remember(input) { mutableStateOf(input.primaryValue?.toString() ?: "") }
+    var secondaryValStr by remember(input) { mutableStateOf(input.secondaryValue?.toString() ?: "") }
+
+    var setsStr by remember(input) { mutableStateOf(input.sets?.toString() ?: "") }
+    var repsStr by remember(input) { mutableStateOf(input.reps?.toString() ?: "") }
+
+    fun calculateAndEmit() {
+        val p = primaryValStr.filter { it.isDigit() }.toIntOrNull()
+        val s = secondaryValStr.filter { it.isDigit() }.toIntOrNull()
+        val setsVal = setsStr.filter { it.isDigit() }.toIntOrNull()
+        val repsVal = repsStr.filter { it.isDigit() }.toIntOrNull()
+
+        val (calcResult, unit) = if (hasResult) {
+            when (pairedUnitType) {
+                PairedUnitType.SECONDS_MS -> {
+                    val totalSec = (p ?: 0) + (s ?: 0) / 1000.0
+                    totalSec to ResultUnit.SECONDS
+                }
+                PairedUnitType.KG_G -> {
+                    val totalKg = (p ?: 0) + (s ?: 0) / 1000.0
+                    totalKg to ResultUnit.KG
+                }
+                PairedUnitType.M_CM -> {
+                    val totalM = (p ?: 0) + (s ?: 0) / 100.0
+                    totalM to ResultUnit.M
+                }
+                PairedUnitType.REPS_ONLY -> {
+                    (p ?: 0).toDouble() to ResultUnit.REPS
+                }
+            }
+        } else {
+            0.0 to ResultUnit.KG
+        }
+
+        onUpdate(
+            input.copy(
+                result = calcResult,
+                unit = unit,
+                primaryValue = p,
+                secondaryValue = s,
+                sets = setsVal,
+                reps = repsVal
+            )
+        )
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f))
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // Header Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "• ${input.exerciseName}",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = onRemove, modifier = Modifier.size(20.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Удалить",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp)
                     )
                 }
+            }
+
+            // 1. Result Toggle & Paired Unit Fields
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Сохранить тренировку")
+                Text(text = "Результат (опционально):", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
+                Switch(
+                    checked = hasResult,
+                    onCheckedChange = {
+                        hasResult = it
+                        calculateAndEmit()
+                    }
+                )
+            }
+
+            if (hasResult) {
+                // Unit Pair Selector Chips
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    FilterChip(
+                        selected = pairedUnitType == PairedUnitType.KG_G,
+                        onClick = { pairedUnitType = PairedUnitType.KG_G; calculateAndEmit() },
+                        label = { Text("🏋️ Кг / Г", fontSize = 9.sp) }
+                    )
+                    FilterChip(
+                        selected = pairedUnitType == PairedUnitType.M_CM,
+                        onClick = { pairedUnitType = PairedUnitType.M_CM; calculateAndEmit() },
+                        label = { Text("📏 М / См", fontSize = 9.sp) }
+                    )
+                    FilterChip(
+                        selected = pairedUnitType == PairedUnitType.SECONDS_MS,
+                        onClick = { pairedUnitType = PairedUnitType.SECONDS_MS; calculateAndEmit() },
+                        label = { Text("⏱ Сек / Мс", fontSize = 9.sp) }
+                    )
+                    FilterChip(
+                        selected = pairedUnitType == PairedUnitType.REPS_ONLY,
+                        onClick = { pairedUnitType = PairedUnitType.REPS_ONLY; calculateAndEmit() },
+                        label = { Text("🔢 Раз", fontSize = 9.sp) }
+                    )
+                }
+
+                // Dual Input Fields (Два окошка для ввода значений)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val label1 = when (pairedUnitType) {
+                        PairedUnitType.SECONDS_MS -> "Секунды"
+                        PairedUnitType.KG_G -> "Килограммы"
+                        PairedUnitType.M_CM -> "Метры"
+                        PairedUnitType.REPS_ONLY -> "Количество раз"
+                    }
+
+                    OutlinedTextField(
+                        value = primaryValStr,
+                        onValueChange = {
+                            primaryValStr = it.filter { char -> char.isDigit() }
+                            calculateAndEmit()
+                        },
+                        label = { Text(label1, fontSize = 9.sp) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+
+                    if (pairedUnitType != PairedUnitType.REPS_ONLY) {
+                        val label2 = when (pairedUnitType) {
+                            PairedUnitType.SECONDS_MS -> "Миллисекунды"
+                            PairedUnitType.KG_G -> "Граммы"
+                            PairedUnitType.M_CM -> "Сантиметры"
+                            else -> ""
+                        }
+
+                        OutlinedTextField(
+                            value = secondaryValStr,
+                            onValueChange = {
+                                secondaryValStr = it.filter { char -> char.isDigit() }
+                                calculateAndEmit()
+                            },
+                            label = { Text(label2, fontSize = 9.sp) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                    }
+                }
+            }
+
+            // 2. Sets & Reps Inputs
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = setsStr,
+                    onValueChange = {
+                        setsStr = it.filter { char -> char.isDigit() }
+                        calculateAndEmit()
+                    },
+                    label = { Text("Подходов (опцион.)", fontSize = 9.sp) },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = repsStr,
+                    onValueChange = {
+                        repsStr = it.filter { char -> char.isDigit() }
+                        calculateAndEmit()
+                    },
+                    label = { Text("Повторений", fontSize = 9.sp) },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true
+                )
+            }
+        }
+    }
+}
+
+// Sub-Dialog: Create New Exercise
+@Composable
+fun CreateNewExerciseDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, category: String, equipmentWeight: Double?) -> Unit
+) {
+    var nameText by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf("Силовые") }
+    var weightText by remember { mutableStateOf("") }
+
+    val availableCategories = listOf("Силовые", "Прыжковые", "Беговые", "ОФП", "Восстановление", "Другой")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "Новое Упражнение", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = nameText,
+                    onValueChange = { nameText = it },
+                    label = { Text("Название упражнения") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text(
+                    text = "Вид упражнения:",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    availableCategories.forEach { cat ->
+                        FilterChip(
+                            selected = selectedCategory == cat,
+                            onClick = { selectedCategory = cat },
+                            label = { Text(cat, fontSize = 10.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = weightText,
+                    onValueChange = { input -> weightText = input.filter { it.isDigit() || it == '.' } },
+                    label = { Text("Вес снаряда (кг) [если со снарядом]") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (nameText.isNotBlank()) {
+                        onConfirm(nameText, selectedCategory, weightText.toDoubleOrNull())
+                    }
+                }
+            ) {
+                Text("Сохранить")
             }
         },
         dismissButton = {
@@ -930,7 +1176,7 @@ fun AddTrainingDialog(
     )
 }
 
-// Dialog: Mark Skipped Day with Custom Reason Input
+// Dialog: Mark Skipped Day
 @Composable
 fun MarkSkippedDayDialog(
     initialDate: Long,
@@ -989,6 +1235,51 @@ fun MarkSkippedDayDialog(
             }
         }
     )
+}
+
+fun formatPairedResult(res: ExerciseResult): String {
+    if (res.result <= 0) return ""
+    return when (res.resultUnit) {
+        ResultUnit.SECONDS -> {
+            val totalMs = (res.result * 1000).toInt()
+            val sec = totalMs / 1000
+            val ms = totalMs % 1000
+            if (ms > 0) "$sec сек $ms мс" else "$sec сек"
+        }
+        ResultUnit.KG -> {
+            val totalG = (res.result * 1000).toInt()
+            val kg = totalG / 1000
+            val g = totalG % 1000
+            if (g > 0) "$kg кг $g г" else "$kg кг"
+        }
+        ResultUnit.M -> {
+            val totalCm = (res.result * 100).toInt()
+            val m = totalCm / 100
+            val cm = totalCm % 100
+            if (cm > 0) "$m м $cm см" else "$m м"
+        }
+        ResultUnit.CM -> "${res.result.toInt()} см"
+        ResultUnit.REPS -> "${res.result.toInt()} раз"
+    }
+}
+
+fun extractPrimarySecondaryValues(res: ExerciseResult): Pair<Int?, Int?> {
+    if (res.result <= 0) return null to null
+    return when (res.resultUnit) {
+        ResultUnit.SECONDS -> {
+            val totalMs = (res.result * 1000).toInt()
+            (totalMs / 1000) to (totalMs % 1000)
+        }
+        ResultUnit.KG -> {
+            val totalG = (res.result * 1000).toInt()
+            (totalG / 1000) to (totalG % 1000)
+        }
+        ResultUnit.M -> {
+            val totalCm = (res.result * 100).toInt()
+            (totalCm / 100) to (totalCm % 100)
+        }
+        else -> res.result.toInt() to null
+    }
 }
 
 fun getUnitTitle(unit: ResultUnit): String {

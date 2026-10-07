@@ -12,6 +12,8 @@ data class ExerciseResultInput(
     val exerciseName: String,
     val result: Double,
     val unit: ResultUnit,
+    val primaryValue: Int? = null,
+    val secondaryValue: Int? = null,
     val sets: Int? = null,
     val reps: Int? = null
 )
@@ -184,7 +186,6 @@ class DiaryViewModel(
             )
 
             exerciseInputs.forEach { input ->
-                // Ensure exercise is saved in DB for future autocomplete
                 val existing = repository.getAllExercises().first().find { it.name.equals(input.exerciseName, ignoreCase = true) }
                 val exId = existing?.id ?: repository.insertExercise(
                     Exercise(
@@ -218,6 +219,40 @@ class DiaryViewModel(
                         stepPhase = stepPhase,
                         jumpPhase = jumpPhase,
                         attemptNumber = 1
+                    )
+                )
+            }
+        }
+    }
+
+    fun updateTrainingSessionWithExercises(
+        sessionId: Long,
+        date: Long,
+        exerciseInputs: List<ExerciseResultInput>
+    ) {
+        viewModelScope.launch {
+            val oldResults = repository.getResultsForTraining(sessionId).first()
+            oldResults.forEach { repository.deleteExerciseResult(it) }
+
+            exerciseInputs.forEach { input ->
+                val existing = repository.getAllExercises().first().find { it.name.equals(input.exerciseName, ignoreCase = true) }
+                val exId = existing?.id ?: repository.insertExercise(
+                    Exercise(
+                        name = input.exerciseName,
+                        categoryName = "Пользовательские",
+                        defaultUnit = input.unit
+                    )
+                )
+
+                repository.insertExerciseResult(
+                    ExerciseResult(
+                        exerciseId = exId,
+                        trainingSessionId = sessionId,
+                        date = date,
+                        result = input.result,
+                        resultUnit = input.unit,
+                        sets = input.sets,
+                        reps = input.reps
                     )
                 )
             }
