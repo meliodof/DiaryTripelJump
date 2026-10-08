@@ -15,7 +15,8 @@ data class ExerciseResultInput(
     val primaryValue: Int? = null,
     val secondaryValue: Int? = null,
     val sets: Int? = null,
-    val reps: Int? = null
+    val reps: Int? = null,
+    val setResults: List<Double> = emptyList()
 )
 
 class DiaryViewModel(
@@ -195,15 +196,19 @@ class DiaryViewModel(
                     )
                 )
 
+                val setResJson = if (input.setResults.isNotEmpty()) input.setResults.joinToString(",") else null
+
                 repository.insertExerciseResult(
                     ExerciseResult(
                         exerciseId = exId,
+                        exerciseName = input.exerciseName,
                         trainingSessionId = sessionId,
                         date = date,
                         result = input.result,
                         resultUnit = input.unit,
                         sets = input.sets,
-                        reps = input.reps
+                        reps = input.reps,
+                        setResultsJson = setResJson
                     )
                 )
             }
@@ -244,15 +249,19 @@ class DiaryViewModel(
                     )
                 )
 
+                val setResJson = if (input.setResults.isNotEmpty()) input.setResults.joinToString(",") else null
+
                 repository.insertExerciseResult(
                     ExerciseResult(
                         exerciseId = exId,
+                        exerciseName = input.exerciseName,
                         trainingSessionId = sessionId,
                         date = date,
                         result = input.result,
                         resultUnit = input.unit,
                         sets = input.sets,
-                        reps = input.reps
+                        reps = input.reps,
+                        setResultsJson = setResJson
                     )
                 )
             }

@@ -116,16 +116,10 @@ data class Exercise(
     tableName = "exercise_results",
     foreignKeys = [
         ForeignKey(
-            entity = Exercise::class,
-            parentColumns = ["id"],
-            childColumns = ["exerciseId"],
-            onDelete = ForeignKey.CASCADE
-        ),
-        ForeignKey(
             entity = TrainingSession::class,
             parentColumns = ["id"],
             childColumns = ["trainingSessionId"],
-            onDelete = ForeignKey.SET_NULL
+            onDelete = ForeignKey.CASCADE
         )
     ],
     indices = [Index("exerciseId"), Index("trainingSessionId"), Index("date")]
@@ -133,12 +127,14 @@ data class Exercise(
 data class ExerciseResult(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val exerciseId: Long,
+    val exerciseName: String = "",
     val trainingSessionId: Long?,
     val date: Long,
     val result: Double,
     val resultUnit: ResultUnit,
     val sets: Int? = null,
     val reps: Int? = null,
+    val setResultsJson: String? = null,
     val stage: ExerciseStage = ExerciseStage.MAIN,
     val hurdleHeightCm: Double? = null,
     val notes: String? = null
