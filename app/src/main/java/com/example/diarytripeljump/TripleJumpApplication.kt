@@ -1,6 +1,7 @@
 package com.example.diarytripeljump
 
 import android.app.Application
+import android.content.Context
 import com.example.diarytripeljump.data.SeedDatabase
 import com.example.diarytripeljump.data.TripleJumpDatabase
 import com.example.diarytripeljump.data.TripleJumpRepository
@@ -38,9 +39,16 @@ class TripleJumpApplication : Application() {
             controlIndicatorDao = database.controlIndicatorDao()
         )
 
-        applicationScope.launch {
-            val seedDatabase = SeedDatabase(repository)
-            seedDatabase.seedInitialData()
+        // Безопасный запуск первичного заполнения ТОЛЬКО 1 РАЗ при первом запуске приложения
+        val prefs = getSharedPreferences("triple_jump_prefs", MODE_PRIVATE)
+        val isSeeded = prefs.getBoolean("is_db_seeded", false)
+
+        if (!isSeeded) {
+            applicationScope.launch {
+                val seedDatabase = SeedDatabase(repository)
+                seedDatabase.seedInitialData()
+                prefs.edit().putBoolean("is_db_seeded", true).apply()
+            }
         }
     }
 }

@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.diarytripeljump.data.Competition
 import com.example.diarytripeljump.data.Exercise
 import com.example.diarytripeljump.data.ExerciseResult
 import com.example.diarytripeljump.data.ResultUnit
@@ -40,6 +41,7 @@ fun TrainingsScreen(
 ) {
     val trainingsList by viewModel.allTrainingsWithExercises.collectAsState()
     val rawExercisesList by viewModel.allExercises.collectAsState()
+    val competitionsList by viewModel.allCompetitions.collectAsState()
 
     // Deduplicate exercises by name
     val exercisesList = remember(rawExercisesList) {
@@ -79,13 +81,14 @@ fun TrainingsScreen(
             )
         }
 
-        // 2. Compact Calendar Widget
+        // 2. Compact Calendar Widget with Competitions & Legend
         CompactTrainingCalendarWidget(
             currentMonth = calendarMonth,
             onMonthChange = { newMonth -> calendarMonth = newMonth },
             selectedDateMillis = selectedDateMillis,
             onDateSelected = { selectedDateMillis = it },
-            trainingsList = trainingsList
+            trainingsList = trainingsList,
+            competitionsList = competitionsList
         )
 
         // 3. Action Buttons Row Directly Under Calendar
@@ -343,12 +346,35 @@ fun TrainingsScreen(
 }
 
 @Composable
+fun LegendItem(color: Color, label: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(color)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
 fun CompactTrainingCalendarWidget(
     currentMonth: Calendar,
     onMonthChange: (Calendar) -> Unit,
     selectedDateMillis: Long?,
     onDateSelected: (Long) -> Unit,
-    trainingsList: List<TrainingWithExercises>
+    trainingsList: List<TrainingWithExercises>,
+    competitionsList: List<Competition> = emptyList()
 ) {
     val monthFormat = SimpleDateFormat("LLLL yyyy", Locale.forLanguageTag("ru"))
     val monthTitle = remember(currentMonth) { monthFormat.format(currentMonth.time).replaceFirstChar { it.uppercase() } }
@@ -360,6 +386,17 @@ fun CompactTrainingCalendarWidget(
             val key = "${cal.get(Calendar.YEAR)}_${cal.get(Calendar.DAY_OF_YEAR)}"
             val currentList = map[key] ?: emptyList()
             map[key] = currentList + item
+        }
+        map
+    }
+
+    val competitionsByDay = remember(competitionsList, currentMonth) {
+        val map = mutableMapOf<String, List<Competition>>()
+        competitionsList.forEach { comp ->
+            val cal = Calendar.getInstance().apply { timeInMillis = comp.date }
+            val key = "${cal.get(Calendar.YEAR)}_${cal.get(Calendar.DAY_OF_YEAR)}"
+            val currentList = map[key] ?: emptyList()
+            map[key] = currentList + comp
         }
         map
     }
@@ -457,6 +494,7 @@ fun CompactTrainingCalendarWidget(
                             val dayNum = dayCal.get(Calendar.DAY_OF_MONTH)
                             val dayKey = "${dayCal.get(Calendar.YEAR)}_${dayCal.get(Calendar.DAY_OF_YEAR)}"
                             val dayTrainings = trainingsByDay[dayKey] ?: emptyList()
+                            val dayCompetitions = competitionsByDay[dayKey] ?: emptyList()
 
                             val isSelected = remember(selectedDateMillis, dayCal) {
                                 if (selectedDateMillis == null) false
@@ -480,7 +518,7 @@ fun CompactTrainingCalendarWidget(
                                 Text(
                                     text = dayNum.toString(),
                                     style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = if (isSelected || dayTrainings.isNotEmpty()) FontWeight.Bold else FontWeight.Normal,
+                                    fontWeight = if (isSelected || dayTrainings.isNotEmpty() || dayCompetitions.isNotEmpty()) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                                     fontSize = 12.sp
                                 )
@@ -489,10 +527,17 @@ fun CompactTrainingCalendarWidget(
                                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    if (dayTrainings.isNotEmpty()) {
-                                        dayTrainings.take(3).forEach { item ->
+                                    if (dayCompetitions.isNotEmpty()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(5.dp)
+                                                .clip(CircleShape)
+                                                .background(if (isSelected) MaterialTheme.colorScheme.onPrimary else Color(0xFF1976D2))
+                                        )
+                                    } else if (dayTrainings.isNotEmpty()) {
+                                        dayTrainings.take(2).forEach { item ->
                                             val dotColor = if (item.training.isSkipped) MaterialTheme.colorScheme.error
-                                            else getTrainingTypeColor(item.training.trainingType)
+                                            else Color(0xFF1E4D3B)
 
                                             Box(
                                                 modifier = Modifier
@@ -509,6 +554,20 @@ fun CompactTrainingCalendarWidget(
                         }
                     }
                 }
+            }
+
+            // Legend Row Under Calendar
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp, bottom = 2.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LegendItem(color = Color(0xFF1E4D3B), label = "Тренировки")
+                LegendItem(color = MaterialTheme.colorScheme.error, label = "Пропуски")
+                LegendItem(color = Color(0xFF1976D2), label = "Соревнования")
             }
         }
     }
@@ -685,6 +744,7 @@ fun AddTrainingDialog(
     ) -> Unit,
     onSaveNewExerciseToDb: (name: String, category: String) -> Unit
 ) {
+    // Categories Filter (Plural): Беговые упражнения, Упражнения на технику тройного прыжка, Силовые упражнения, Прыжковые упражнения, ОФП
     var selectedCategoryFilter by remember { mutableIntStateOf(0) }
     var showAllExercisesInList by remember { mutableStateOf(false) }
 
@@ -720,7 +780,7 @@ fun AddTrainingDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // 1. Category Chips
+                // 1. Category Chips (Plural Form)
                 Text(
                     text = "Виды упражнений:",
                     style = MaterialTheme.typography.labelMedium,

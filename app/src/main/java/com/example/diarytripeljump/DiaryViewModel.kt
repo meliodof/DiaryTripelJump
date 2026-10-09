@@ -135,12 +135,38 @@ class DiaryViewModel(
     }
 
     // --- CRUD: Competitions ---
-    fun addCompetition(name: String, location: String, date: Long, eventType: String) {
+    fun addCompetition(
+        name: String,
+        country: String? = "Россия",
+        city: String? = "Москва",
+        streetAndNumber: String? = null,
+        location: String? = null,
+        address: String? = null,
+        eventTime: String? = null,
+        hasQualification: Boolean = false,
+        qualificationStandard: String? = null,
+        didNotQualifyForFinal: Boolean = false,
+        placement: String? = null,
+        attemptsJson: String? = null,
+        date: Long = System.currentTimeMillis(),
+        eventType: String = "Тройной прыжок"
+    ) {
         viewModelScope.launch {
+            val fullAddr = address ?: listOfNotNull(country, city, streetAndNumber).joinToString(", ")
             repository.insertCompetition(
                 Competition(
                     name = name,
-                    location = location,
+                    country = country,
+                    city = city,
+                    streetAndNumber = streetAndNumber,
+                    location = fullAddr,
+                    address = fullAddr,
+                    eventTime = eventTime,
+                    hasQualification = hasQualification,
+                    qualificationStandard = qualificationStandard,
+                    didNotQualifyForFinal = didNotQualifyForFinal,
+                    placement = placement,
+                    attemptsJson = attemptsJson,
                     date = date,
                     eventType = eventType,
                     status = CompetitionStatus.UPCOMING

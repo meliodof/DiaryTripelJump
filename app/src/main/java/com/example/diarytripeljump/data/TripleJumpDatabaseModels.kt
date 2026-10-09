@@ -20,14 +20,25 @@ data class AthleteProfile(
 data class Competition(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
+    val country: String? = "Россия",
+    val city: String? = "Москва",
+    val streetAndNumber: String? = null,
     val location: String? = null,
-    val date: Long,
+    val address: String? = null,
+    val date: Long = System.currentTimeMillis(),
+    val eventTime: String? = null,
+    val hasQualification: Boolean = false,
+    val qualificationStandard: String? = null,
+    val didNotQualifyForFinal: Boolean = false,
+    val placement: String? = null,
+    val attemptsJson: String? = null,
     val eventType: String = "Тройной прыжок",
-    val status: CompetitionStatus = CompetitionStatus.COMPLETED,
+    val status: CompetitionStatus = CompetitionStatus.UPCOMING,
+    val skipReason: String? = null,
     val notes: String? = null
 )
 
-enum class CompetitionStatus { UPCOMING, COMPLETED, CANCELLED }
+enum class CompetitionStatus { ONGOING, UPCOMING, COMPLETED, SKIPPED, CANCELLED }
 
 @Entity(
     tableName = "triple_jump_results",

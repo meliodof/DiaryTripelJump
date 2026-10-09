@@ -24,7 +24,7 @@ import androidx.room.TypeConverters
         CorrectionHint::class,
         ControlIndicator::class
     ],
-    version = 6,
+    version = 8,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -56,6 +56,7 @@ abstract class TripleJumpDatabase : RoomDatabase() {
                     TripleJumpDatabase::class.java,
                     "triple_jump_database"
                 )
+                    .setJournalMode(JournalMode.TRUNCATE)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
