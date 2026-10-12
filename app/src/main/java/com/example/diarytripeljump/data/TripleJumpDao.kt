@@ -19,6 +19,9 @@ interface AthleteProfileDao {
 
     @Update
     suspend fun update(profile: AthleteProfile)
+
+    @Query("DELETE FROM athlete_profile")
+    suspend fun deleteProfile()
 }
 
 @Dao
@@ -40,6 +43,9 @@ interface CompetitionDao {
 
     @Delete
     suspend fun delete(competition: Competition)
+
+    @Query("DELETE FROM competitions")
+    suspend fun deleteAllCompetitions()
 }
 
 @Dao
@@ -68,6 +74,9 @@ interface TripleJumpResultDao {
 
     @Delete
     suspend fun delete(result: TripleJumpResult)
+
+    @Query("DELETE FROM triple_jump_results")
+    suspend fun deleteAllResults()
 }
 
 @Dao
@@ -106,6 +115,9 @@ interface TrainingSessionDao {
 
     @Delete
     suspend fun delete(session: TrainingSession)
+
+    @Query("DELETE FROM training_sessions")
+    suspend fun deleteAllTrainings()
 }
 
 @Dao
@@ -166,6 +178,9 @@ interface ExerciseResultDao {
 
     @Delete
     suspend fun delete(result: ExerciseResult)
+
+    @Query("DELETE FROM exercise_results")
+    suspend fun deleteAllExerciseResults()
 }
 
 @Dao

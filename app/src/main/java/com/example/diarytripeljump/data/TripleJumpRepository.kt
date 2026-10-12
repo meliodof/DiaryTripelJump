@@ -19,6 +19,13 @@ class TripleJumpRepository(
     private val correctionHintDao: CorrectionHintDao,
     private val controlIndicatorDao: ControlIndicatorDao
 ) {
+    suspend fun clearAllDatabaseData() {
+        competitionDao.deleteAllCompetitions()
+        tripleJumpResultDao.deleteAllResults()
+        trainingSessionDao.deleteAllTrainings()
+        exerciseResultDao.deleteAllExerciseResults()
+    }
+
     // Athlete Profile
     fun getProfile(): Flow<AthleteProfile?> = athleteProfileDao.getProfile()
     suspend fun insertProfile(profile: AthleteProfile) = athleteProfileDao.insert(profile)

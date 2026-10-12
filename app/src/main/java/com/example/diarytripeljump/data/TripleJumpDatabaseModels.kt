@@ -8,11 +8,16 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "athlete_profile")
 data class AthleteProfile(
     @PrimaryKey val id: Int = 1,
-    val name: String? = null,
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val nickname: String? = null,
+    val avatarUriString: String? = null,
+    val greetingPreference: String? = "NAME",
     val specialization: String? = "Тройной прыжок",
     val birthDate: Long? = null,
     val height: Double? = null,
     val weight: Double? = null,
+    val customPbMeters: Double? = null,
     val notes: String? = null
 )
 
@@ -52,9 +57,16 @@ enum class CompetitionStatus { ONGOING, UPCOMING, COMPLETED, SKIPPED, CANCELLED 
 )
 data class TripleJumpResult(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val competitionId: Long?,
-    val date: Long,
+    val competitionId: Long? = null,
+    val eventName: String = "Тройной прыжок",
+    val date: Long = System.currentTimeMillis(),
     val result: Double,
+    val resultUnit: ResultUnit = ResultUnit.M,
+    val isIndoor: Boolean = false,
+    val isAntiRecord: Boolean = false,
+    val recordLevel: String = "PB",
+    val exerciseCategory: String = "Прыжковые",
+    val isCompetition: Boolean = true,
     val weatherConditions: String? = null,
     val notes: String? = null
 )

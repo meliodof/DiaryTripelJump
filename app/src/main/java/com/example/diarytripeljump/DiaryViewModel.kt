@@ -26,6 +26,9 @@ class DiaryViewModel(
     private val _uiState = MutableStateFlow(DiaryUiState())
     val uiState: StateFlow<DiaryUiState> = _uiState.asStateFlow()
 
+    val athleteProfile: StateFlow<AthleteProfile?> = repository.getProfile()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     val allCompetitions: StateFlow<List<Competition>> = repository.getAllCompetitions()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -49,6 +52,42 @@ class DiaryViewModel(
         _uiState.update { it.copy(isDarkTheme = !it.isDarkTheme) }
     }
 
+    fun updateAthleteProfile(
+        firstName: String,
+        lastName: String,
+        nickname: String,
+        avatarUriString: String?,
+        greetingPreference: String,
+        birthDate: Long?,
+        height: Double?,
+        weight: Double?,
+        customPbMeters: Double?
+    ) {
+        viewModelScope.launch {
+            repository.insertProfile(
+                AthleteProfile(
+                    id = 1,
+                    firstName = firstName,
+                    lastName = lastName,
+                    nickname = nickname,
+                    avatarUriString = avatarUriString,
+                    greetingPreference = greetingPreference,
+                    birthDate = birthDate,
+                    height = height,
+                    weight = weight,
+                    customPbMeters = customPbMeters
+                )
+            )
+        }
+    }
+
+    fun updateAthleteProfileAvatar(uriString: String) {
+        viewModelScope.launch {
+            val current = repository.getProfile().first() ?: AthleteProfile()
+            repository.insertProfile(current.copy(avatarUriString = uriString))
+        }
+    }
+
     private fun loadData() {
         viewModelScope.launch {
             repository.getRecentResults(10).collect { results ->
@@ -56,10 +95,10 @@ class DiaryViewModel(
                     tripleJumpResults = results.map { result ->
                         TripleJumpResultUi(
                             id = result.id,
-                            event = "Тройной прыжок",
-                            result = String.format(Locale.getDefault(), "%.2f м", result.result),
+                            event = result.eventName,
+                            result = formatResult(result.result, result.resultUnit),
                             date = formatDate(result.date),
-                            isPB = isPersonalBest(result.result)
+                            isPB = result.recordLevel == "PB"
                         )
                     }
                 )}
@@ -98,16 +137,22 @@ class DiaryViewModel(
 
             val trainingCount = repository.getTrainingCountBySeason(seasonStart, seasonEnd)
             val competitionCount = repository.getAllCompetitions().first().size
+            val resultsList = repository.getRecentResults(100).first()
+
+            val bestResultVal = resultsList.maxOfOrNull { it.result } ?: 0.0
+            val avgResultVal = if (resultsList.isNotEmpty()) resultsList.map { it.result }.average() else 0.0
+            val pbCount = resultsList.count { it.recordLevel == "PB" }
+            val sbCount = resultsList.count { it.recordLevel == "SB" }
 
             _uiState.update { it.copy(
                 seasonStats = SeasonStats(
                     year = year,
                     totalCompetitions = competitionCount,
                     totalTrainings = trainingCount,
-                    personalRecords = 5,
-                    seasonalRecords = 8,
-                    bestTripleJump = 14.5,
-                    averageTripleJump = 13.8
+                    personalRecords = pbCount,
+                    seasonalRecords = sbCount,
+                    bestTripleJump = bestResultVal,
+                    averageTripleJump = avgResultVal
                 )
             )}
         }
@@ -320,21 +365,33 @@ class DiaryViewModel(
     }
 
     // --- CRUD: Triple Jump Results & Records ---
-    fun addTripleJumpResult(
+    fun addRecordResult(
+        eventName: String,
         result: Double,
-        date: Long,
-        weatherConditions: String,
-        notes: String,
-        competitionId: Long? = null
+        unit: ResultUnit = ResultUnit.M,
+        isIndoor: Boolean = false,
+        isAntiRecord: Boolean = false,
+        recordLevel: String = "PB",
+        exerciseCategory: String = "Прыжковые",
+        isCompetition: Boolean = true,
+        weatherConditions: String? = null,
+        notes: String? = null,
+        date: Long = System.currentTimeMillis()
     ) {
         viewModelScope.launch {
             repository.insertTripleJumpResult(
                 TripleJumpResult(
-                    competitionId = competitionId,
-                    date = date,
+                    eventName = eventName,
                     result = result,
-                    weatherConditions = weatherConditions,
-                    notes = notes
+                    resultUnit = unit,
+                    isIndoor = isIndoor,
+                    isAntiRecord = isAntiRecord,
+                    recordLevel = recordLevel,
+                    exerciseCategory = exerciseCategory,
+                    isCompetition = isCompetition,
+                    weatherConditions = if (isIndoor) null else weatherConditions,
+                    notes = notes,
+                    date = date
                 )
             )
         }
@@ -390,11 +447,6 @@ class DiaryViewModel(
             ResultUnit.REPS -> "${value.toInt()} раз"
             ResultUnit.SECONDS -> "${value.toInt()} сек"
         }
-    }
-
-    private suspend fun isPersonalBest(result: Double): Boolean {
-        val best = repository.getPersonalBest().first()
-        return best != null && result >= best.result
     }
 }
 

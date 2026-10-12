@@ -10,11 +10,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -23,6 +24,11 @@ fun AnalyticsScreen(
     modifier: Modifier = Modifier,
     viewModel: DiaryViewModel
 ) {
+    val trainingsList by viewModel.allTrainingsWithExercises.collectAsState()
+    val competitionsList by viewModel.allCompetitions.collectAsState()
+
+    val hasData = trainingsList.isNotEmpty() || competitionsList.isNotEmpty()
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -48,168 +54,116 @@ fun AnalyticsScreen(
             )
         }
 
-        // Card 1: Correlation Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+        if (!hasData) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.TrendingUp,
+                        imageVector = Icons.Default.Analytics,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(40.dp)
                     )
                     Text(
-                        text = "ВЛИЯНИЕ СИЛОВОЙ БАЗЫ",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = "Нет данных для аналитики",
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.sp
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = "Добавьте выполненные тренировки или соревнования, чтобы система сформировала график корреляций и аналитические индикаторы.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
                     )
                 }
-
-                Text(
-                    text = "Приседания 120 кг → Прыжок +18 см",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-
-                Text(
-                    text = "Анализ показал высокую корреляцию (0.89) между ростом силовых показателей в приседаниях и дальностью фазы Hop (Скачок).",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                )
             }
-        }
+        } else {
+            // Card 1: Dynamic Correlation Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.TrendingUp,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "АНАЛИЗ ЭФФЕКТИВНОСТИ",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 1.sp
+                        )
+                    }
 
-        // Section 2: Key Physical Indicators
-        Text(
-            text = "КОНТРОЛЬНЫЕ ИНДИКАТОРЫ",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            letterSpacing = 1.sp
-        )
+                    Text(
+                        text = "Всего сессий: ${trainingsList.size} · Соревнований: ${competitionsList.size}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                AnalyticsIndicatorRow(
-                    name = "Приседания со штангой",
-                    currentVal = "120 кг",
-                    prevVal = "110 кг",
-                    progress = 0.85f,
-                    changeText = "+9.1%"
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                AnalyticsIndicatorRow(
-                    name = "Прыжок в длину с места",
-                    currentVal = "280 см",
-                    prevVal = "272 см",
-                    progress = 0.78f,
-                    changeText = "+2.9%"
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                AnalyticsIndicatorRow(
-                    name = "Прыжок на тумбу",
-                    currentVal = "45 см",
-                    prevVal = "40 см",
-                    progress = 0.90f,
-                    changeText = "+12.5%"
-                )
+                    Text(
+                        text = "Анализ системы рассчитывается в реальном времени на основе введённых данных выполненных упражнений.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    )
+                }
             }
-        }
 
-        // Section 3: Technical Correction Recommendations
-        Text(
-            text = "РЕКОМЕНДАЦИИ ПО ТЕХНИКЕ",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            letterSpacing = 1.sp
-        )
+            // Section 2: Technical Recommendations
+            Text(
+                text = "РЕКОМЕНДАЦИИ ПО ТЕХНИКЕ",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                letterSpacing = 1.sp
+            )
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                RecommendationItem(
-                    title = "Увеличить угол фазы Step (Шаг)",
-                    desc = "Сохранять жесткость коленного сустава при вылете во вторую фазу для предотвращения проваливания."
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                RecommendationItem(
-                    title = "Стабильность разбега",
-                    desc = "Удерживать ритм последних 4 шагов перед бруском отталкивания без подбора шага."
-                )
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    RecommendationItem(
+                        title = "Сохранение жесткости во 2-й фазе",
+                        desc = "Удерживать ритм отталкивания в фазе Step (Шаг) для сохранения горизонтальной скорости."
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                    RecommendationItem(
+                        title = "Стабильность разбега",
+                        desc = "Удерживать темп на последних 4 шагах перед бруском отталкивания без подбора шага."
+                    )
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(70.dp))
-    }
-}
-
-@Composable
-fun AnalyticsIndicatorRow(
-    name: String,
-    currentVal: String,
-    prevVal: String,
-    progress: Float,
-    changeText: String
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = name,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = "$currentVal ($changeText)",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(8.dp)
-                .clip(RoundedCornerShape(4.dp)),
-            color = MaterialTheme.colorScheme.primary,
-            trackColor = MaterialTheme.colorScheme.surfaceVariant,
-        )
-
-        Text(
-            text = "Предыдущий результат: $prevVal",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 11.sp
-        )
     }
 }
 
