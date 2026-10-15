@@ -25,18 +25,29 @@ import com.example.diarytripeljump.data.Competition
 import com.example.diarytripeljump.data.CompetitionStatus
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
+import com.example.diarytripeljump.ui.components.*
+import com.example.diarytripeljump.ui.theme.NumberLarge
+import com.example.diarytripeljump.ui.theme.extraColors
 
 @Composable
 fun CompetitionsScreen(
     modifier: Modifier = Modifier,
-    viewModel: DiaryViewModel
+    viewModel: DiaryViewModel,
+    onOpenProfile: () -> Unit = {}
 ) {
     val competitionsList by viewModel.allCompetitions.collectAsState()
+    val athleteProfile by viewModel.athleteProfile.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editingCompetition by remember { mutableStateOf<Competition?>(null) }
     var itemToDelete by remember { mutableStateOf<Competition?>(null) }
     var skippingCompetition by remember { mutableStateOf<Competition?>(null) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
     // Categorize competitions
     val nowMillis = System.currentTimeMillis()
@@ -56,105 +67,96 @@ fun CompetitionsScreen(
         !ongoingList.contains(comp) && !upcomingList.contains(comp)
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // 1. Header Section
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = "КАЛЕНДАРЬ СТАРТОВ",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                letterSpacing = 1.sp
-            )
-            Text(
-                text = "Предстоящие и прошедшие соревнования",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.onBackground
+    val listState = rememberLazyListState()
+    val fabExpanded by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+
+    AppScreenScaffold(
+        modifier = modifier,
+        title = "Старты",
+        avatarUri = athleteProfile?.avatarUriString,
+        onOpenProfile = onOpenProfile,
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = { showAddDialog = true },
+                expanded = fabExpanded,
+                icon = { Icon(imageVector = Icons.Default.Add, contentDescription = null) },
+                text = { Text(text = "Старт") },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
             )
         }
-
-        // 2. Button 'Добавить соревнование' Directly Under Header
-        Button(
-            onClick = { showAddDialog = true },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-            contentPadding = PaddingValues(vertical = 10.dp)
-        ) {
-            Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(text = "Добавить соревнование", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-        }
-
-        // 3. Categorized Competitions Lists
+    ) { inner ->
         LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            contentPadding = PaddingValues(bottom = 80.dp)
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = screenContentPadding(inner, extraBottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // SECTION 1: Текущие соревнования
-            if (ongoingList.isNotEmpty()) {
-                item {
-                    SectionHeaderTitle(title = "🏆 ТЕКУЩИЕ СОРЕВНОВАНИЯ (СЕГОДНЯ)")
-                }
-                items(ongoingList) { competition ->
-                    CompetitionCardItem(
-                        competition = competition,
-                        onEditClick = { editingCompetition = competition },
-                        onDeleteClick = { itemToDelete = competition },
-                        onSkipClick = { skippingCompetition = competition }
-                    )
-                }
+            item {
+                SegmentedControl(
+                    options = listOf(
+                        "Предстоящие (${ongoingList.size + upcomingList.size})",
+                        "Архив (${completedOrSkippedList.size})"
+                    ),
+                    selectedIndex = selectedTab,
+                    onSelect = { selectedTab = it }
+                )
             }
 
-            // SECTION 2: Предстоящие соревнования
-            item {
-                SectionHeaderTitle(title = "📅 ПРЕДСТОЯЩИЕ СОРЕВНОВАНИЯ (${upcomingList.size})")
-            }
-            if (upcomingList.isNotEmpty()) {
-                items(upcomingList) { competition ->
-                    CompetitionCardItem(
-                        competition = competition,
-                        onEditClick = { editingCompetition = competition },
-                        onDeleteClick = { itemToDelete = competition },
-                        onSkipClick = { skippingCompetition = competition }
-                    )
-                }
-            } else {
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) {
-                        Text(
-                            text = "Нет запланированных предстоящих соревнований",
-                            modifier = Modifier.padding(16.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+            if (selectedTab == 0) {
+                if (ongoingList.isNotEmpty()) {
+                    item { SectionHeader(title = "Сегодня") }
+                    items(ongoingList, key = { it.id }) { competition ->
+                        CompetitionCardItem(
+                            competition = competition,
+                            onEditClick = { editingCompetition = competition },
+                            onDeleteClick = { itemToDelete = competition },
+                            onSkipClick = { skippingCompetition = competition }
                         )
                     }
                 }
-            }
 
-            // SECTION 3: Прошедшие и Пропущенные соревнования
-            if (completedOrSkippedList.isNotEmpty()) {
-                item {
-                    SectionHeaderTitle(title = "🏁 ПРОШЕДШИЕ И ПРОПУЩЕННЫЕ СОРЕВНОВАНИЯ (${completedOrSkippedList.size})")
+                if (upcomingList.isNotEmpty()) {
+                    item { SectionHeader(title = "Впереди") }
+                    items(upcomingList, key = { it.id }) { competition ->
+                        CompetitionCardItem(
+                            competition = competition,
+                            onEditClick = { editingCompetition = competition },
+                            onDeleteClick = { itemToDelete = competition },
+                            onSkipClick = { skippingCompetition = competition }
+                        )
+                    }
                 }
-                items(completedOrSkippedList) { competition ->
-                    CompetitionCardItem(
-                        competition = competition,
-                        onEditClick = { editingCompetition = competition },
-                        onDeleteClick = { itemToDelete = competition },
-                        onSkipClick = { skippingCompetition = competition }
-                    )
+
+                if (ongoingList.isEmpty() && upcomingList.isEmpty()) {
+                    item {
+                        EmptyState(
+                            icon = Icons.Default.EmojiEvents,
+                            title = "Нет запланированных стартов",
+                            message = "Добавьте соревнование, и оно появится здесь с обратным отсчётом.",
+                            actionLabel = "Добавить старт",
+                            onAction = { showAddDialog = true }
+                        )
+                    }
+                }
+            } else {
+                if (completedOrSkippedList.isNotEmpty()) {
+                    items(completedOrSkippedList, key = { it.id }) { competition ->
+                        CompetitionCardItem(
+                            competition = competition,
+                            onEditClick = { editingCompetition = competition },
+                            onDeleteClick = { itemToDelete = competition },
+                            onSkipClick = { skippingCompetition = competition }
+                        )
+                    }
+                } else {
+                    item {
+                        EmptyState(
+                            icon = Icons.Default.Flag,
+                            title = "Архив пуст",
+                            message = "Прошедшие и пропущенные соревнования появятся здесь."
+                        )
+                    }
                 }
             }
         }
@@ -255,18 +257,21 @@ fun CompetitionsScreen(
     }
 }
 
-@Composable
-fun SectionHeaderTitle(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        letterSpacing = 1.sp,
-        modifier = Modifier.padding(top = 4.dp)
-    )
+private val ShortMonthsUpper = listOf("ЯНВ", "ФЕВ", "МАР", "АПР", "МАЙ", "ИЮН", "ИЮЛ", "АВГ", "СЕН", "ОКТ", "НОЯ", "ДЕК")
+
+private fun compDaysUntil(timestamp: Long): Int {
+    fun startOfDay(millis: Long): Long = Calendar.getInstance().apply {
+        timeInMillis = millis
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+    val diff = startOfDay(timestamp) - startOfDay(System.currentTimeMillis())
+    return Math.round(diff / 86_400_000.0).toInt()
 }
 
+/** Карточка старта в стиле «билета»: слева плашка с датой, справа название, статусы и детали. */
 @Composable
 fun CompetitionCardItem(
     competition: Competition,
@@ -274,218 +279,190 @@ fun CompetitionCardItem(
     onDeleteClick: () -> Unit,
     onSkipClick: () -> Unit
 ) {
+    val cs = MaterialTheme.colorScheme
+    val extra = MaterialTheme.extraColors
     val isSkipped = competition.status == CompetitionStatus.SKIPPED
     val isOngoing = competition.status == CompetitionStatus.ONGOING
+    val days = compDaysUntil(competition.date)
+    val isToday = isOngoing || (days == 0 && !isSkipped)
+    val isFuture = days > 0 && !isSkipped && competition.status != CompetitionStatus.COMPLETED
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSkipped) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)
-            else MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    val badgeContainer = when {
+        isSkipped -> cs.errorContainer
+        isToday -> cs.primary
+        isFuture -> cs.tertiaryContainer
+        else -> cs.surfaceContainerHigh
+    }
+    val badgeContent = when {
+        isSkipped -> cs.onErrorContainer
+        isToday -> cs.onPrimary
+        isFuture -> cs.onTertiaryContainer
+        else -> cs.onSurfaceVariant
+    }
+
+    val cal = remember(competition.date) { Calendar.getInstance().apply { timeInMillis = competition.date } }
+    val monthLabel = ShortMonthsUpper[cal.get(Calendar.MONTH)]
+    val dayLabel = cal.get(Calendar.DAY_OF_MONTH).toString()
+    val fullAddr = competition.address ?: competition.location
+
+    AppCard(
+        containerColor = if (isSkipped) cs.errorContainer.copy(alpha = 0.2f) else cs.surface
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, top = 16.dp, bottom = 16.dp, end = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Header Row: Status Badge & Actions
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // Плашка с датой
+            Column(
+                modifier = Modifier
+                    .width(56.dp)
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(badgeContainer)
+                    .padding(vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Text(
+                    text = monthLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = badgeContent.copy(alpha = 0.85f)
+                )
+                Text(
+                    text = dayLabel,
+                    style = NumberLarge,
+                    color = badgeContent
+                )
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        text = competition.name,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(top = 2.dp),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = cs.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    OverflowMenu(
+                        modifier = Modifier.offset(y = (-8).dp),
+                        actions = buildList {
+                            add(MenuAction("Редактировать", Icons.Default.Edit, onClick = onEditClick))
+                            if (!isSkipped) add(MenuAction("Пропустить старт", Icons.Default.Block, onClick = onSkipClick))
+                            add(MenuAction("Удалить", Icons.Default.DeleteOutline, destructive = true, onClick = onDeleteClick))
+                        }
+                    )
+                }
+
+                // Статусы
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = if (isSkipped) Icons.Default.Block else Icons.Default.EmojiEvents,
-                        contentDescription = null,
-                        tint = if (isSkipped) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = if (isSkipped) "ПРОПУЩЕНО" else if (isOngoing) "СЕГОДНЯ" else "СОРЕВНОВАНИЕ",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isSkipped) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
-                        letterSpacing = 1.sp
-                    )
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    IconButton(onClick = onEditClick, modifier = Modifier.size(26.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Редактировать",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
+                    when {
+                        isSkipped -> StatusPill("Пропущено", cs.onErrorContainer, cs.errorContainer, icon = Icons.Default.Block)
+                        isToday -> StatusPill("Сегодня", cs.onPrimary, cs.primary)
+                        isFuture -> StatusPill(
+                            "Через $days ${pluralRu(days, "день", "дня", "дней")}",
+                            cs.onTertiaryContainer,
+                            cs.tertiaryContainer
                         )
                     }
-
-                    if (!isSkipped) {
-                        IconButton(onClick = onSkipClick, modifier = Modifier.size(26.dp)) {
-                            Icon(
-                                imageVector = Icons.Default.Block,
-                                contentDescription = "Пропуск",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-
-                    IconButton(onClick = onDeleteClick, modifier = Modifier.size(26.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.DeleteOutline,
-                            contentDescription = "Удалить",
-                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = competition.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
-
-                if (!competition.placement.isNullOrBlank()) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer
-                    ) {
-                        Text(
+                    if (!competition.placement.isNullOrBlank()) {
+                        StatusPill(
                             text = competition.placement,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontSize = 11.sp
+                            contentColor = extra.onGoldContainer,
+                            containerColor = extra.goldContainer,
+                            icon = Icons.Default.EmojiEvents
                         )
                     }
-                }
-            }
-
-            if (isSkipped && !competition.skipReason.isNullOrBlank()) {
-                Text(
-                    text = "Причина пропуска: ${competition.skipReason}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-            // Address, Date & Event Time Details
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                val fullAddr = competition.address ?: competition.location
-                if (!fullAddr.isNullOrBlank()) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Place,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = "Адрес: $fullAddr",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    if (competition.hasQualification) {
+                        StatusPill(
+                            text = "Квалификация",
+                            contentColor = cs.onSecondaryContainer,
+                            containerColor = cs.secondaryContainer
                         )
                     }
                 }
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Event,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = "Дата: ${formatDate(competition.date)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                if (isSkipped && !competition.skipReason.isNullOrBlank()) {
+                    Text(
+                        text = "Причина: ${competition.skipReason}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.error
+                    )
+                }
 
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (!fullAddr.isNullOrBlank()) {
+                        CompetitionInfoRow(icon = Icons.Default.Place, text = fullAddr)
+                    }
                     if (!competition.eventTime.isNullOrBlank()) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Schedule,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "Время вида: ${competition.eventTime}",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        CompetitionInfoRow(icon = Icons.Default.Schedule, text = "Время вида: ${competition.eventTime}")
                     }
-                }
-
-                if (competition.hasQualification) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircleOutline,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = "Квалификация: Есть" + if (!competition.qualificationStandard.isNullOrBlank()) " (Норматив: ${competition.qualificationStandard})" else "",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                    if (competition.hasQualification && !competition.qualificationStandard.isNullOrBlank()) {
+                        CompetitionInfoRow(icon = Icons.Default.CheckCircleOutline, text = "Норматив: ${competition.qualificationStandard}")
                     }
                 }
 
                 if (!competition.attemptsJson.isNullOrBlank()) {
-                    Text(
-                        text = "Попытки: ${competition.attemptsJson}",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = cs.surfaceContainerLow,
+                        modifier = Modifier.padding(end = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Timer,
+                                contentDescription = null,
+                                tint = cs.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Попытки: ${competition.attemptsJson}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                color = cs.onSurface
+                            )
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CompetitionInfoRow(icon: ImageVector, text: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(end = 12.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp)
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

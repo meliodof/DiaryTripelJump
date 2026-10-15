@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.diarytripeljump.data.Competition
+import com.example.diarytripeljump.data.EquipmentItem
 import com.example.diarytripeljump.data.Exercise
 import com.example.diarytripeljump.data.ExerciseResult
 import com.example.diarytripeljump.data.ResultUnit
@@ -37,11 +39,13 @@ import java.util.*
 @Composable
 fun TrainingsScreen(
     modifier: Modifier = Modifier,
-    viewModel: DiaryViewModel
+    viewModel: DiaryViewModel,
+    onOpenProfile: () -> Unit = {}
 ) {
     val trainingsList by viewModel.allTrainingsWithExercises.collectAsState()
     val rawExercisesList by viewModel.allExercises.collectAsState()
     val competitionsList by viewModel.allCompetitions.collectAsState()
+    val equipmentList by viewModel.allEquipment.collectAsState()
 
     // Deduplicate exercises by name
     val exercisesList = remember(rawExercisesList) {
@@ -250,6 +254,7 @@ fun TrainingsScreen(
     if (showAddTrainingDialog) {
         AddTrainingDialog(
             exercisesList = exercisesList,
+            equipmentList = equipmentList,
             initialDate = selectedDateMillis ?: System.currentTimeMillis(),
             existingInputs = emptyList(),
             dialogTitle = "Новая Тренировка",
@@ -268,6 +273,15 @@ fun TrainingsScreen(
             onSaveNewExerciseToDb = { name, category ->
                 val inferredUnit = getInferredUnitForExercise(name)
                 viewModel.saveExerciseToDatabase(name = name, categoryName = category, defaultUnit = inferredUnit)
+            },
+            onDeleteMasterExercise = { exercise ->
+                viewModel.deleteExerciseMaster(exercise)
+            },
+            onAddEquipment = { name, unit, value ->
+                viewModel.addEquipmentItem(name, unit, value)
+            },
+            onDeleteEquipment = { item ->
+                viewModel.deleteEquipmentItem(item)
             }
         )
     }
@@ -277,8 +291,7 @@ fun TrainingsScreen(
         val session = editingTrainingItem!!.training
         val existingInputs = remember(editingTrainingItem) {
             editingTrainingItem!!.exerciseResults.map { exRes ->
-                val exName = if (exRes.exerciseName.isNotBlank()) exRes.exerciseName
-                             else exercisesList.find { it.id == exRes.exerciseId }?.name ?: "Упражнение"
+                val exName = exRes.exerciseName.ifBlank { exercisesList.find { it.id == exRes.exerciseId }?.name ?: "Упражнение" }
                 val (pVal, sVal) = extractPrimarySecondaryValues(exRes)
                 val setResList = exRes.setResultsJson?.split(",")?.mapNotNull { it.toDoubleOrNull() } ?: emptyList()
                 val inferredUnit = getInferredUnitForExercise(exName, exRes.resultUnit)
@@ -292,6 +305,11 @@ fun TrainingsScreen(
                     secondaryValue = sVal,
                     sets = exRes.sets,
                     reps = exRes.reps,
+                    isSingleLeg = exRes.isSingleLeg,
+                    hasWeight = exRes.hasWeight,
+                    hasHurdles = exRes.hasHurdles,
+                    hurdleHeightCm = exRes.hurdleHeightCm,
+                    hurdleCount = exRes.hurdleCount,
                     setResults = setResList
                 )
             }
@@ -299,6 +317,7 @@ fun TrainingsScreen(
 
         AddTrainingDialog(
             exercisesList = exercisesList,
+            equipmentList = equipmentList,
             initialDate = session.date,
             existingInputs = existingInputs,
             dialogTitle = "Редактировать Тренировку",
@@ -314,6 +333,15 @@ fun TrainingsScreen(
             onSaveNewExerciseToDb = { name, category ->
                 val inferredUnit = getInferredUnitForExercise(name)
                 viewModel.saveExerciseToDatabase(name = name, categoryName = category, defaultUnit = inferredUnit)
+            },
+            onDeleteMasterExercise = { exercise ->
+                viewModel.deleteExerciseMaster(exercise)
+            },
+            onAddEquipment = { name, unit, value ->
+                viewModel.addEquipmentItem(name, unit, value)
+            },
+            onDeleteEquipment = { item ->
+                viewModel.deleteEquipmentItem(item)
             }
         )
     }
@@ -376,7 +404,7 @@ fun CompactTrainingCalendarWidget(
     trainingsList: List<TrainingWithExercises>,
     competitionsList: List<Competition> = emptyList()
 ) {
-    val monthFormat = SimpleDateFormat("LLLL yyyy", Locale.forLanguageTag("ru"))
+    val monthFormat = SimpleDateFormat("MMMM yyyy", Locale("ru"))
     val monthTitle = remember(currentMonth) { monthFormat.format(currentMonth.time).replaceFirstChar { it.uppercase() } }
 
     val trainingsByDay = remember(trainingsList, currentMonth) {
@@ -471,7 +499,7 @@ fun CompactTrainingCalendarWidget(
 
                 val maxDays = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
                 val list = mutableListOf<Calendar?>()
-                for (i in 0 until firstDayOfWeek) list.add(null)
+                repeat(firstDayOfWeek) { list.add(null) }
                 for (d in 1..maxDays) {
                     val dayCal = cal.clone() as Calendar
                     dayCal.set(Calendar.DAY_OF_MONTH, d)
@@ -573,7 +601,7 @@ fun CompactTrainingCalendarWidget(
     }
 }
 
-// Collapsible Training Session Card with 1st Exercise Preview
+// Collapsible Training Session Card
 @Composable
 fun TrainingSessionCard(
     trainingItem: TrainingWithExercises,
@@ -599,7 +627,6 @@ fun TrainingSessionCard(
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Header Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -672,17 +699,19 @@ fun TrainingSessionCard(
 
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     exercisesListToRender.forEach { exRes ->
-                        val exName = if (exRes.exerciseName.isNotBlank()) exRes.exerciseName
-                                     else exercisesList.find { it.id == exRes.exerciseId }?.name ?: "Упражнение"
+                        val exName = exRes.exerciseName.ifBlank { exercisesList.find { it.id == exRes.exerciseId }?.name ?: "Упражнение" }
+
+                        val singleLegPart = if (exRes.isSingleLeg) " (на одной ноге)" else ""
+                        val hurdlePart = if (exRes.hasHurdles && exRes.hurdleCount != null) " [барьеры: ${exRes.hurdleCount} шт по ${exRes.hurdleHeightCm?.toInt() ?: 0} см]" else ""
 
                         val setBreakdownFormatted = formatSetResultsBreakdown(exRes)
 
                         val setsInfo = when {
-                            setBreakdownFormatted.isNotBlank() -> setBreakdownFormatted
-                            exRes.sets != null && exRes.sets > 0 && exRes.reps != null && exRes.reps > 0 -> "${exRes.sets} подходов × ${exRes.reps} повторений"
-                            exRes.reps != null && exRes.reps > 0 -> "${exRes.reps} повторений"
-                            exRes.sets != null && exRes.sets > 0 -> "${exRes.sets} подходов"
-                            else -> ""
+                            setBreakdownFormatted.isNotBlank() -> "$setBreakdownFormatted$singleLegPart$hurdlePart"
+                            exRes.sets != null && exRes.sets > 0 && exRes.reps != null && exRes.reps > 0 -> "${exRes.sets} подходов × ${exRes.reps} повторений$singleLegPart$hurdlePart"
+                            exRes.reps != null && exRes.reps > 0 -> "${exRes.reps} повторений$singleLegPart$hurdlePart"
+                            exRes.sets != null && exRes.sets > 0 -> "${exRes.sets} подходов$singleLegPart$hurdlePart"
+                            else -> "$singleLegPart$hurdlePart".trim()
                         }
 
                         Row(
@@ -730,10 +759,11 @@ fun TrainingSessionCard(
     }
 }
 
-// Dialog: Add/Edit Training with Explicit Separated Exercise Cards & Confirmation Popups
+// Dialog: Add/Edit Training
 @Composable
 fun AddTrainingDialog(
     exercisesList: List<Exercise>,
+    equipmentList: List<EquipmentItem>,
     initialDate: Long,
     existingInputs: List<ExerciseResultInput> = emptyList(),
     dialogTitle: String = "Новая Тренировка",
@@ -742,17 +772,20 @@ fun AddTrainingDialog(
         date: Long,
         exerciseInputs: List<ExerciseResultInput>
     ) -> Unit,
-    onSaveNewExerciseToDb: (name: String, category: String) -> Unit
+    onSaveNewExerciseToDb: (name: String, category: String) -> Unit,
+    onDeleteMasterExercise: (Exercise) -> Unit,
+    onAddEquipment: (name: String, unit: ResultUnit, value: Double) -> Unit,
+    onDeleteEquipment: (EquipmentItem) -> Unit
 ) {
-    // Categories Filter (Plural): Беговые упражнения, Упражнения на технику тройного прыжка, Силовые упражнения, Прыжковые упражнения, ОФП
     var selectedCategoryFilter by remember { mutableIntStateOf(0) }
     var showAllExercisesInList by remember { mutableStateOf(false) }
 
     var showCreateExerciseModal by remember { mutableStateOf(false) }
+    var showCatalogModal by remember { mutableStateOf(false) }
+    var showInventoryModal by remember { mutableStateOf(false) }
 
     var addedExerciseInputs by remember { mutableStateOf(existingInputs) }
 
-    // Deletion & Save Confirmation States
     var itemToDeleteIndex by remember { mutableStateOf<Int?>(null) }
     var showSaveConfirmDialog by remember { mutableStateOf(false) }
 
@@ -773,14 +806,28 @@ fun AddTrainingDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(text = dialogTitle, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = dialogTitle, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary, fontSize = 18.sp)
+                Row {
+                    IconButton(onClick = { showInventoryModal = true }) {
+                        Icon(imageVector = Icons.Default.ShoppingBag, contentDescription = "Инвентарь", tint = MaterialTheme.colorScheme.primary)
+                    }
+                    IconButton(onClick = { showCatalogModal = true }) {
+                        Icon(imageVector = Icons.AutoMirrored.Filled.MenuBook, contentDescription = "Справочник упражнений", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
         },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // 1. Category Chips (Plural Form)
+                // Category Chips
                 Text(
                     text = "Виды упражнений:",
                     style = MaterialTheme.typography.labelMedium,
@@ -826,7 +873,7 @@ fun AddTrainingDialog(
                     )
                 }
 
-                // 2. Exercises List
+                // Exercises Selection List
                 Text(
                     text = "Упражнения:",
                     style = MaterialTheme.typography.labelMedium,
@@ -904,19 +951,42 @@ fun AddTrainingDialog(
                     }
                 }
 
-                // 3. Button 'Добавить новое упражнение'
-                Button(
-                    onClick = { showCreateExerciseModal = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "Добавить новое упражнение", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Button(
+                        onClick = { showCreateExerciseModal = true },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+                    ) {
+                        Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Новое упражнение", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    OutlinedButton(
+                        onClick = { showCatalogModal = true },
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(imageVector = Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Справочник", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    OutlinedButton(
+                        onClick = { showInventoryModal = true },
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.ShoppingBag, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "🎒 Инвентарь", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
 
-                // 4. Selected Exercises Cards with Prominent Separation
+                // Selected Exercises Cards with Separation
                 if (addedExerciseInputs.isNotEmpty()) {
                     HorizontalDivider()
                     Text(
@@ -929,6 +999,7 @@ fun AddTrainingDialog(
                     addedExerciseInputs.forEachIndexed { index, input ->
                         ExerciseResultEditorCard(
                             input = input,
+                            equipmentList = equipmentList,
                             onUpdate = { updatedInput ->
                                 addedExerciseInputs = addedExerciseInputs.mapIndexed { i, item ->
                                     if (i == index) updatedInput else item
@@ -967,7 +1038,26 @@ fun AddTrainingDialog(
         }
     )
 
-    // Delete Confirmation Popup Dialog
+    // Inventory Manager Modal
+    if (showInventoryModal) {
+        InventoryManagerModalDialog(
+            equipmentList = equipmentList,
+            onDismiss = { showInventoryModal = false },
+            onAddEquipment = onAddEquipment,
+            onDeleteEquipment = onDeleteEquipment
+        )
+    }
+
+    // Exercise Catalog Modal
+    if (showCatalogModal) {
+        ExerciseCatalogModalDialog(
+            exercisesList = exercisesList,
+            onDismiss = { showCatalogModal = false },
+            onDeleteExercise = onDeleteMasterExercise
+        )
+    }
+
+    // Delete Confirmation Popup
     if (itemToDeleteIndex != null) {
         val targetItem = addedExerciseInputs.getOrNull(itemToDeleteIndex!!)
         AlertDialog(
@@ -980,7 +1070,7 @@ fun AddTrainingDialog(
                         addedExerciseInputs = addedExerciseInputs.filterIndexed { i, _ -> i != itemToDeleteIndex }
                         itemToDeleteIndex = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
                 ) {
                     Text("Удалить")
                 }
@@ -993,7 +1083,7 @@ fun AddTrainingDialog(
         )
     }
 
-    // Save Confirmation Popup Dialog
+    // Save Confirmation Popup
     if (showSaveConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showSaveConfirmDialog = false },
@@ -1041,10 +1131,352 @@ fun AddTrainingDialog(
     }
 }
 
-// Editor Card with Explicit Border & Header Bar for Each Exercise
+// Modal Form: Inventory / Equipment Manager (Name, Unit kg or cm, Value)
+@Composable
+fun InventoryManagerModalDialog(
+    equipmentList: List<EquipmentItem>,
+    onDismiss: () -> Unit,
+    onAddEquipment: (name: String, unit: ResultUnit, value: Double) -> Unit,
+    onDeleteEquipment: (EquipmentItem) -> Unit
+) {
+    var nameText by remember { mutableStateOf("") }
+    var selectedUnit by remember { mutableStateOf(ResultUnit.KG) } // KG or CM
+    var valueText by remember { mutableStateOf("20") }
+    var showNameError by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(text = "🎒 Инвентарь и Оборудование", fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 450.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Form to add new equipment
+                Text(text = "Добавить инвентарь:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+
+                OutlinedTextField(
+                    value = nameText,
+                    onValueChange = {
+                        nameText = it
+                        if (it.isNotBlank()) showNameError = false
+                    },
+                    label = { Text("Название (например: Штанга, Гантели, Барьеры)") },
+                    isError = showNameError && nameText.isBlank(),
+                    supportingText = if (showNameError && nameText.isBlank()) {
+                        { Text("Это поле обязательно для заполнения", color = MaterialTheme.colorScheme.error) }
+                    } else null,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text(text = "Единица измерения:", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    FilterChip(
+                        selected = selectedUnit == ResultUnit.KG,
+                        onClick = { selectedUnit = ResultUnit.KG },
+                        label = { Text("🏋️ Вес (кг)", fontSize = 10.sp) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = selectedUnit == ResultUnit.CM,
+                        onClick = { selectedUnit = ResultUnit.CM },
+                        label = { Text("📐 Высота (см)", fontSize = 10.sp) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = valueText,
+                    onValueChange = { valueText = it.filter { char -> char.isDigit() || char == '.' } },
+                    label = { Text("Значение (${if (selectedUnit == ResultUnit.KG) "кг" else "см"})") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                Button(
+                    onClick = {
+                        if (nameText.isNotBlank()) {
+                            onAddEquipment(nameText, selectedUnit, valueText.toDoubleOrNull() ?: 0.0)
+                            nameText = ""
+                        } else {
+                            showNameError = true
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Добавить в инвентарь", fontSize = 11.sp)
+                }
+
+                HorizontalDivider()
+
+                // List of created inventory
+                Text(text = "Сохранённый инвентарь (${equipmentList.size}):", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+
+                if (equipmentList.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        equipmentList.forEach { item ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(text = item.name, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = "${item.value.toInt()} ${if (item.unit == ResultUnit.KG) "кг" else "см"}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { onDeleteEquipment(item) },
+                                        modifier = Modifier.size(22.dp)
+                                    ) {
+                                        Icon(imageVector = Icons.Default.DeleteOutline, contentDescription = "Удалить", tint = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Text(text = "Инвентарь пока не добавлен", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Закрыть")
+            }
+        }
+    )
+}
+
+// Modal Form: Exercise Catalog (Grouped by Category, Alphabetically Sorted, Searchable & Deletable)
+@Composable
+fun ExerciseCatalogModalDialog(
+    exercisesList: List<Exercise>,
+    onDismiss: () -> Unit,
+    onDeleteExercise: (Exercise) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedCatFilter by remember { mutableIntStateOf(0) }
+    var exerciseToDelete by remember { mutableStateOf<Exercise?>(null) }
+
+    val filteredList = remember(exercisesList, searchQuery, selectedCatFilter) {
+        exercisesList.filter { ex ->
+            val matchesQuery = ex.name.contains(searchQuery, ignoreCase = true)
+            val matchesCat = when (selectedCatFilter) {
+                1 -> ex.categoryName?.contains("бег", ignoreCase = true) == true
+                2 -> ex.categoryName?.contains("техник", ignoreCase = true) == true || ex.categoryName?.contains("тройн", ignoreCase = true) == true
+                3 -> ex.categoryName?.contains("силов", ignoreCase = true) == true
+                4 -> ex.categoryName?.contains("прыжк", ignoreCase = true) == true
+                5 -> ex.categoryName?.contains("офп", ignoreCase = true) == true
+                else -> true
+            }
+            matchesQuery && matchesCat
+        }
+    }
+
+    val groupedSortedExercises = remember(filteredList) {
+        filteredList.groupBy { it.categoryName ?: "Разное" }
+            .mapValues { entry -> entry.value.sortedBy { it.name.lowercase() } }
+            .toSortedMap()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(text = "📚 Справочник упражнений", fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 450.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Search Field
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    label = { Text("Поиск упражнения...") },
+                    leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(imageVector = Icons.Default.Close, contentDescription = "Очистить")
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                // Filter Chips
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    FilterChip(
+                        selected = selectedCatFilter == 0,
+                        onClick = { selectedCatFilter = 0 },
+                        label = { Text("Все", fontSize = 10.sp) }
+                    )
+                    FilterChip(
+                        selected = selectedCatFilter == 1,
+                        onClick = { selectedCatFilter = 1 },
+                        label = { Text("🏃 Беговые", fontSize = 10.sp) }
+                    )
+                    FilterChip(
+                        selected = selectedCatFilter == 2,
+                        onClick = { selectedCatFilter = 2 },
+                        label = { Text("📐 Техника тройного", fontSize = 10.sp) }
+                    )
+                    FilterChip(
+                        selected = selectedCatFilter == 3,
+                        onClick = { selectedCatFilter = 3 },
+                        label = { Text("💪 Силовые", fontSize = 10.sp) }
+                    )
+                    FilterChip(
+                        selected = selectedCatFilter == 4,
+                        onClick = { selectedCatFilter = 4 },
+                        label = { Text("🦘 Прыжковые", fontSize = 10.sp) }
+                    )
+                    FilterChip(
+                        selected = selectedCatFilter == 5,
+                        onClick = { selectedCatFilter = 5 },
+                        label = { Text("🏋️ ОФП", fontSize = 10.sp) }
+                    )
+                }
+
+                HorizontalDivider()
+
+                // Grouped & Alphabetically Sorted Exercises
+                if (groupedSortedExercises.isNotEmpty()) {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        groupedSortedExercises.forEach { (categoryName, exercises) ->
+                            item {
+                                Text(
+                                    text = categoryName.uppercase(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    letterSpacing = 1.sp,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+
+                            items(exercises) { ex ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = ex.name,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        IconButton(
+                                            onClick = { exerciseToDelete = ex },
+                                            modifier = Modifier.size(20.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.DeleteOutline,
+                                                contentDescription = "Удалить из базы",
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Упражнения не найдены",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Закрыть")
+            }
+        }
+    )
+
+    // Master Exercise Deletion Confirmation Popup
+    if (exerciseToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { exerciseToDelete = null },
+            title = { Text(text = "Удаление из базы", fontWeight = FontWeight.Bold) },
+            text = { Text(text = "Вы действительно хотите полностью удалить упражнение '${exerciseToDelete?.name}' из базы данных?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteExercise(exerciseToDelete!!)
+                        exerciseToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
+                ) {
+                    Text("Удалить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { exerciseToDelete = null }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
+}
+
+// Editor Card for Individual Exercise
 @Composable
 fun ExerciseResultEditorCard(
     input: ExerciseResultInput,
+    equipmentList: List<EquipmentItem> = emptyList(),
     onUpdate: (ExerciseResultInput) -> Unit,
     onRemove: () -> Unit
 ) {
@@ -1052,18 +1484,32 @@ fun ExerciseResultEditorCard(
 
     var setsStr by remember(input) { mutableStateOf(input.sets?.toString() ?: "") }
     var repsStr by remember(input) { mutableStateOf(input.reps?.toString() ?: "") }
+
+    var isSingleLeg by remember(input) { mutableStateOf(input.isSingleLeg) }
+    var hasWeight by remember(input) { mutableStateOf(input.hasWeight) }
     var equipmentWeightStr by remember(input) { mutableStateOf(if (input.result > 0) input.result.toString() else "") }
+
+    var hasHurdles by remember(input) { mutableStateOf(input.hasHurdles) }
+    var hurdleHeightStr by remember(input) { mutableStateOf(input.hurdleHeightCm?.toInt()?.toString() ?: "84") }
+    var hurdleCountStr by remember(input) { mutableStateOf(input.hurdleCount?.toString() ?: "5") }
 
     fun calculateAndEmit(newSetResults: List<Double> = input.setResults) {
         val setsVal = setsStr.filter { it.isDigit() }.toIntOrNull()
         val repsVal = repsStr.filter { it.isDigit() }.toIntOrNull()
-        val parsedWeight = equipmentWeightStr.filter { it.isDigit() || it == '.' }.toDoubleOrNull() ?: 0.0
+        val parsedWeight = if (hasWeight) (equipmentWeightStr.filter { it.isDigit() || it == '.' }.toDoubleOrNull() ?: 0.0) else 0.0
+        val hurdleH = if (hasHurdles) hurdleHeightStr.filter { it.isDigit() || it == '.' }.toDoubleOrNull() else null
+        val hurdleC = if (hasHurdles) hurdleCountStr.filter { it.isDigit() }.toIntOrNull() else null
 
         onUpdate(
             input.copy(
                 result = parsedWeight,
                 sets = setsVal,
                 reps = repsVal,
+                isSingleLeg = isSingleLeg,
+                hasWeight = hasWeight,
+                hasHurdles = hasHurdles,
+                hurdleHeightCm = hurdleH,
+                hurdleCount = hurdleC,
                 setResults = newSetResults
             )
         )
@@ -1107,17 +1553,113 @@ fun ExerciseResultEditorCard(
                 }
             }
 
-            // Equipment Weight Field Directly Editable on 'Новая тренировка' Form!
-            OutlinedTextField(
-                value = equipmentWeightStr,
-                onValueChange = { newWeight ->
-                    equipmentWeightStr = newWeight.filter { it.isDigit() || it == '.' }
-                    calculateAndEmit()
-                },
-                label = { Text("Вес снаряда (кг) [если со снарядом]", fontSize = 9.sp) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
+            // Toggles Row: Single Leg, Has Weight, Has Hurdles
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(
+                    selected = isSingleLeg,
+                    onClick = {
+                        isSingleLeg = !isSingleLeg
+                        calculateAndEmit()
+                    },
+                    label = { Text("🦶 На одной ноге", fontSize = 9.sp) }
+                )
+
+                FilterChip(
+                    selected = hasWeight,
+                    onClick = {
+                        hasWeight = !hasWeight
+                        calculateAndEmit()
+                    },
+                    label = { Text(if (hasWeight) "🏋️ Со снарядом" else "🚫 Без веса", fontSize = 9.sp) }
+                )
+
+                FilterChip(
+                    selected = hasHurdles,
+                    onClick = {
+                        hasHurdles = !hasHurdles
+                        calculateAndEmit()
+                    },
+                    label = { Text("📐 С барьерами", fontSize = 9.sp) }
+                )
+            }
+
+            // Equipment Selection from Inventory
+            if (equipmentList.isNotEmpty()) {
+                Text(text = "🎒 Выбрать из инвентаря:", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    equipmentList.forEach { eq ->
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                if (eq.unit == ResultUnit.KG) {
+                                    hasWeight = true
+                                    equipmentWeightStr = eq.value.toInt().toString()
+                                } else if (eq.unit == ResultUnit.CM) {
+                                    hasHurdles = true
+                                    hurdleHeightStr = eq.value.toInt().toString()
+                                }
+                                calculateAndEmit()
+                            },
+                            label = { Text("${eq.name} (${eq.value.toInt()} ${if (eq.unit == ResultUnit.KG) "кг" else "см"})", fontSize = 8.sp) }
+                        )
+                    }
+                }
+            }
+
+            // Equipment Weight Field (Shown ONLY if hasWeight is ON)
+            if (hasWeight) {
+                OutlinedTextField(
+                    value = equipmentWeightStr,
+                    onValueChange = { newWeight ->
+                        equipmentWeightStr = newWeight.filter { it.isDigit() || it == '.' }
+                        calculateAndEmit()
+                    },
+                    label = { Text("Вес снаряда (кг)", fontSize = 9.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            }
+
+            // Hurdle Fields (Shown ONLY if hasHurdles is ON)
+            if (hasHurdles) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedTextField(
+                        value = hurdleHeightStr,
+                        onValueChange = {
+                            hurdleHeightStr = it.filter { char -> char.isDigit() || char == '.' }
+                            calculateAndEmit()
+                        },
+                        label = { Text("Высота барьеров (см)", fontSize = 9.sp) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = hurdleCountStr,
+                        onValueChange = {
+                            hurdleCountStr = it.filter { char -> char.isDigit() }
+                            calculateAndEmit()
+                        },
+                        label = { Text("Количество (шт)", fontSize = 9.sp) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                }
+            }
 
             // Sets & Reps Inputs with Validation
             Row(
@@ -1265,7 +1807,7 @@ fun PerSetResultsModalDialog(
     )
 }
 
-// Sub-Dialog: Create New Exercise (Category Singular Form with Red Validation Error Text)
+// Sub-Dialog: Create New Exercise
 @Composable
 fun CreateNewExerciseDialog(
     onDismiss: () -> Unit,

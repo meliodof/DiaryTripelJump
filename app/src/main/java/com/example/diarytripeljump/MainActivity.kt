@@ -1,16 +1,15 @@
 package com.example.diarytripeljump
 
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
 import com.example.diarytripeljump.ui.theme.DiaryTripelJumpTheme
 
 class MainActivity : ComponentActivity() {
@@ -23,14 +22,33 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val uiState by viewModel.uiState.collectAsState()
-            DiaryTripelJumpTheme(darkTheme = uiState.isDarkTheme) {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    MainScreen(
-                        modifier = Modifier.padding(innerPadding),
-                        viewModel = viewModel
+            val darkTheme = uiState.isDarkTheme
+
+            // Иконки системных панелей подстраиваются под тему приложения, а не системы
+            DisposableEffect(darkTheme) {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(
+                        lightScrim = Color.TRANSPARENT,
+                        darkScrim = Color.TRANSPARENT,
+                        detectDarkMode = { darkTheme }
+                    ),
+                    navigationBarStyle = SystemBarStyle.auto(
+                        lightScrim = LIGHT_SCRIM,
+                        darkScrim = DARK_SCRIM,
+                        detectDarkMode = { darkTheme }
                     )
-                }
+                )
+                onDispose { }
+            }
+
+            DiaryTripelJumpTheme(darkTheme = darkTheme) {
+                MainScreen(viewModel = viewModel)
             }
         }
+    }
+
+    private companion object {
+        val LIGHT_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
+        val DARK_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
     }
 }

@@ -1,146 +1,278 @@
 package com.example.diarytripeljump
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+
+/** Маршруты приложения. */
+object Routes {
+    const val HOME = "home"
+    const val TRAININGS = "trainings"
+    const val COMPETITIONS = "competitions"
+    const val RECORDS = "records"
+    const val ANALYTICS = "analytics"
+    const val PROFILE = "profile"
+}
+
+/** Пункты нижней навигации (вкладки верхнего уровня). */
+enum class TopLevelDestination(
+    val route: String,
+    val label: String,
+    val icon: ImageVector,
+    val selectedIcon: ImageVector
+) {
+    HOME(Routes.HOME, "Главная", Icons.Outlined.Home, Icons.Filled.Home),
+    TRAININGS(Routes.TRAININGS, "Тренировки", Icons.Outlined.FitnessCenter, Icons.Filled.FitnessCenter),
+    COMPETITIONS(Routes.COMPETITIONS, "Старты", Icons.Outlined.EmojiEvents, Icons.Filled.EmojiEvents),
+    RECORDS(Routes.RECORDS, "Рекорды", Icons.Outlined.MilitaryTech, Icons.Filled.MilitaryTech),
+    ANALYTICS(Routes.ANALYTICS, "Аналитика", Icons.Outlined.BarChart, Icons.Filled.BarChart)
+}
+
+/** Переход между вкладками: одна запись в стеке, состояние вкладок сохраняется. */
+fun NavHostController.navigateTopLevel(route: String) {
+    navigate(route) {
+        popUpTo(graph.findStartDestination().id) { saveState = true }
+        launchSingleTop = true
+        restoreState = true
+    }
+}
+
+private const val TAB_ENTER_MS = 240
+private const val TAB_EXIT_MS = 90
 
 @Composable
 fun MainScreen(
-    modifier: Modifier = Modifier,
-    viewModel: DiaryViewModel
+    viewModel: DiaryViewModel,
+    modifier: Modifier = Modifier
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
+    val navController = rememberNavController()
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val destination = backStackEntry?.destination
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        // Content Area
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = 72.dp)
-        ) {
-            when (selectedTab) {
-                0 -> DiaryScreen(
-                    viewModel = viewModel,
-                    onNavigateToTab = { selectedTab = it },
-                    onNavigateToProfile = { selectedTab = 5 } // Навигация в отдельный Профиль
-                )
-                1 -> TrainingsScreen(viewModel = viewModel)
-                2 -> CompetitionsScreen(viewModel = viewModel)
-                3 -> ResultsScreen(viewModel = viewModel)
-                4 -> AnalyticsScreen(viewModel = viewModel)
-                5 -> ProfileScreen(viewModel = viewModel)
+    val currentTop = TopLevelDestination.entries.firstOrNull { top ->
+        destination?.hierarchy?.any { it.route == top.route } == true
+    }
+    val showNavigation = currentTop != null
+    val isWide = LocalConfiguration.current.screenWidthDp >= 600
+
+    val onSelectTab: (TopLevelDestination) -> Unit = { navController.navigateTopLevel(it.route) }
+    val onNavigate: (String) -> Unit = { route -> navController.navigateTopLevel(route) }
+    val onOpenProfile: () -> Unit = {
+        navController.navigate(Routes.PROFILE) { launchSingleTop = true }
+    }
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        bottomBar = {
+            AnimatedVisibility(
+                visible = showNavigation && !isWide,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+            ) {
+                AppNavigationBar(current = currentTop, onSelect = onSelectTab)
             }
         }
-
-        // Floating Bottom Navigation Bar
-        Surface(
+    ) { innerPadding ->
+        Row(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-                .height(68.dp),
-            shape = RoundedCornerShape(34.dp),
-            color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 8.dp
+                .fillMaxSize()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding)
         ) {
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+            if (showNavigation && isWide) {
+                AppNavigationRail(current = currentTop, onSelect = onSelectTab)
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+                contentAlignment = Alignment.TopCenter
             ) {
-                NavItem(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    icon = Icons.Default.Home,
-                    label = "Главная"
-                )
-                NavItem(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    icon = Icons.Default.FitnessCenter,
-                    label = "Тренировки"
-                )
-                NavItem(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    icon = Icons.Default.EmojiEvents,
-                    label = "Старты"
-                )
-                NavItem(
-                    selected = selectedTab == 3,
-                    onClick = { selectedTab = 3 },
-                    icon = Icons.Default.MilitaryTech,
-                    label = "Рекорды"
-                )
-                NavItem(
-                    selected = selectedTab == 4,
-                    onClick = { selectedTab = 4 },
-                    icon = Icons.Default.BarChart,
-                    label = "Аналитика"
-                )
+                NavHost(
+                    navController = navController,
+                    startDestination = Routes.HOME,
+                    modifier = Modifier
+                        .widthIn(max = 720.dp)
+                        .fillMaxSize(),
+                    // «Fade through» для переключения вкладок
+                    enterTransition = {
+                        fadeIn(tween(TAB_ENTER_MS, delayMillis = TAB_EXIT_MS)) +
+                            scaleIn(tween(TAB_ENTER_MS, delayMillis = TAB_EXIT_MS), initialScale = 0.96f)
+                    },
+                    exitTransition = { fadeOut(tween(TAB_EXIT_MS)) },
+                    popEnterTransition = {
+                        fadeIn(tween(TAB_ENTER_MS, delayMillis = TAB_EXIT_MS)) +
+                            scaleIn(tween(TAB_ENTER_MS, delayMillis = TAB_EXIT_MS), initialScale = 0.96f)
+                    },
+                    popExitTransition = { fadeOut(tween(TAB_EXIT_MS)) }
+                ) {
+                    composable(Routes.HOME) {
+                        DiaryScreen(
+                            viewModel = viewModel,
+                            onNavigate = onNavigate,
+                            onOpenProfile = onOpenProfile
+                        )
+                    }
+                    composable(Routes.TRAININGS) {
+                        TrainingsScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
+                    }
+                    composable(Routes.COMPETITIONS) {
+                        CompetitionsScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
+                    }
+                    composable(Routes.RECORDS) {
+                        ResultsScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
+                    }
+                    composable(Routes.ANALYTICS) {
+                        AnalyticsScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
+                    }
+                    composable(
+                        route = Routes.PROFILE,
+                        // Профиль — «push»-экран: въезжает справа, назад — уезжает вправо
+                        enterTransition = {
+                            slideIntoContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Start,
+                                animationSpec = tween(300)
+                            ) + fadeIn(tween(300))
+                        },
+                        exitTransition = { fadeOut(tween(TAB_EXIT_MS)) },
+                        popEnterTransition = {
+                            fadeIn(tween(TAB_ENTER_MS)) + scaleIn(tween(TAB_ENTER_MS), initialScale = 0.96f)
+                        },
+                        popExitTransition = {
+                            slideOutOfContainer(
+                                AnimatedContentTransitionScope.SlideDirection.End,
+                                animationSpec = tween(300)
+                            ) + fadeOut(tween(300))
+                        }
+                    ) {
+                        ProfileScreen(
+                            viewModel = viewModel,
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun NavItem(
-    selected: Boolean,
-    onClick: () -> Unit,
-    icon: ImageVector,
-    label: String
+private fun AppNavigationBar(
+    current: TopLevelDestination?,
+    onSelect: (TopLevelDestination) -> Unit
 ) {
-    val activeColor = MaterialTheme.colorScheme.primary
-    val inactiveColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-    val pillBg = MaterialTheme.colorScheme.primaryContainer
-
-    Column(
-        modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .clickable { onClick() }
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .width(44.dp)
-                .height(28.dp)
-                .clip(CircleShape)
-                .background(if (selected) pillBg else Color.Transparent),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = if (selected) activeColor else inactiveColor,
-                modifier = Modifier.size(20.dp)
+    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+        TopLevelDestination.entries.forEach { item ->
+            val selected = item == current
+            NavigationBarItem(
+                selected = selected,
+                onClick = { onSelect(item) },
+                icon = {
+                    Icon(
+                        imageVector = if (selected) item.selectedIcon else item.icon,
+                        contentDescription = item.label
+                    )
+                },
+                label = {
+                    Text(
+                        text = item.label,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip
+                    )
+                },
+                alwaysShowLabel = true,
+                colors = NavigationBarItemDefaults.colors(
+                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                    selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             )
         }
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = if (selected) activeColor else inactiveColor,
-            fontSize = 10.sp
-        )
+    }
+}
+
+/** На планшетах и в ландшафте нижняя панель заменяется боковой навигацией. */
+@Composable
+private fun AppNavigationRail(
+    current: TopLevelDestination?,
+    onSelect: (TopLevelDestination) -> Unit
+) {
+    NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+        TopLevelDestination.entries.forEach { item ->
+            val selected = item == current
+            NavigationRailItem(
+                selected = selected,
+                onClick = { onSelect(item) },
+                icon = {
+                    Icon(
+                        imageVector = if (selected) item.selectedIcon else item.icon,
+                        contentDescription = item.label
+                    )
+                },
+                label = { Text(text = item.label, fontSize = 11.sp, maxLines = 1) },
+                alwaysShowLabel = true,
+                colors = NavigationRailItemDefaults.colors(
+                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                    selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            )
+        }
     }
 }

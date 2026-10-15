@@ -11,6 +11,7 @@ class TripleJumpRepository(
     private val customExerciseCategoryDao: CustomExerciseCategoryDao,
     private val exerciseDao: ExerciseDao,
     private val exerciseResultDao: ExerciseResultDao,
+    private val equipmentDao: EquipmentDao,
     private val trainingJumpResultDao: TrainingJumpResultDao,
     private val preparationPeriodDao: PreparationPeriodDao,
     private val analyticsDao: AnalyticsDao,
@@ -25,6 +26,11 @@ class TripleJumpRepository(
         trainingSessionDao.deleteAllTrainings()
         exerciseResultDao.deleteAllExerciseResults()
     }
+
+    // Equipment / Inventory
+    fun getAllEquipment(): Flow<List<EquipmentItem>> = equipmentDao.getAllEquipment()
+    suspend fun insertEquipment(item: EquipmentItem): Long = equipmentDao.insert(item)
+    suspend fun deleteEquipment(item: EquipmentItem) = equipmentDao.delete(item)
 
     // Athlete Profile
     fun getProfile(): Flow<AthleteProfile?> = athleteProfileDao.getProfile()

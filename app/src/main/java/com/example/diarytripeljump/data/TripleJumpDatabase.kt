@@ -22,9 +22,10 @@ import androidx.room.TypeConverters
         AnalyticsIndicator::class,
         AnalyticsResult::class,
         CorrectionHint::class,
-        ControlIndicator::class
+        ControlIndicator::class,
+        EquipmentItem::class
     ],
-    version = 11,
+    version = 14,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -44,6 +45,7 @@ abstract class TripleJumpDatabase : RoomDatabase() {
     abstract fun analyticsResultDao(): AnalyticsResultDao
     abstract fun correctionHintDao(): CorrectionHintDao
     abstract fun controlIndicatorDao(): ControlIndicatorDao
+    abstract fun equipmentDao(): EquipmentDao
 
     companion object {
         @Volatile

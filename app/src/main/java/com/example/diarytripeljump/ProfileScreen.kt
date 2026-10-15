@@ -27,11 +27,17 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.diarytripeljump.data.AthleteProfile
 import java.util.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.ui.text.style.TextOverflow
+import com.example.diarytripeljump.ui.components.*
+import com.example.diarytripeljump.ui.theme.extraColors
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     modifier: Modifier = Modifier,
-    viewModel: DiaryViewModel
+    viewModel: DiaryViewModel,
+    onBack: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val athleteProfile by viewModel.athleteProfile.collectAsState()
@@ -75,237 +81,186 @@ fun ProfileScreen(
         if (n.isNotBlank()) if (n.startsWith("@")) n else "@$n" else "@jumper_alex"
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
-    ) {
-        // Header
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                text = "ЛИЧНЫЙ КАБИНЕТ",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                letterSpacing = 1.sp
-            )
-            Text(
-                text = "Профиль Атлета",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.onBackground
+    val cs = MaterialTheme.colorScheme
+
+    Scaffold(
+        modifier = modifier,
+        containerColor = cs.background,
+        topBar = {
+            TopAppBar(
+                title = { Text(text = "Профиль", fontWeight = FontWeight.ExtraBold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showEditDialog = true }) {
+                        Icon(imageVector = Icons.Default.Edit, contentDescription = "Редактировать профиль")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
             )
         }
-
-        // Birthday Congratulation Banner (If today is athlete's birthday!)
-        if (isBirthday) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFB300)),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = "🎉", fontSize = 32.sp)
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "С ДНЁМ РОЖДЕНИЯ!",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.Black
-                        )
-                        Text(
-                            text = "Желаем новых личных рекордов, высоких результатов и побед на всех стартах!",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.Black.copy(alpha = 0.85f),
-                            fontWeight = FontWeight.Medium
-                        )
+    ) { inner ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = inner.calculateTopPadding() + 4.dp,
+                    bottom = inner.calculateBottomPadding() + 24.dp
+                ),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            if (isBirthday) {
+                val extra = MaterialTheme.extraColors
+                Surface(shape = MaterialTheme.shapes.large, color = extra.goldContainer) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "🎉", style = MaterialTheme.typography.displaySmall)
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("С днём рождения!", style = MaterialTheme.typography.titleMedium, color = extra.onGoldContainer)
+                            Text(
+                                "Желаем новых личных рекордов, высоких результатов и побед на всех стартах!",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = extra.onGoldContainer.copy(alpha = 0.85f)
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        // Profile Card Header with Avatar Picker
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(22.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-        ) {
-            Row(
-                modifier = Modifier.padding(20.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // Шапка: большой аватар, имя, ник, специализация
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(68.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                        .clickable {
-                            imagePickerLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                Box(contentAlignment = Alignment.BottomEnd) {
+                    Box(
+                        modifier = Modifier
+                            .size(112.dp)
+                            .clip(CircleShape)
+                            .background(cs.primaryContainer)
+                            .clickable {
+                                imagePickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!athleteProfile?.avatarUriString.isNullOrBlank()) {
+                            AsyncImage(
+                                model = athleteProfile?.avatarUriString,
+                                contentDescription = "Аватар",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
                             )
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (!athleteProfile?.avatarUriString.isNullOrBlank()) {
-                        AsyncImage(
-                            model = athleteProfile?.avatarUriString,
-                            contentDescription = "Аватар",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = "Добавить фото",
+                                tint = cs.onPrimaryContainer,
+                                modifier = Modifier.size(56.dp)
+                            )
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(cs.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
                             imageVector = Icons.Default.AddAPhoto,
-                            contentDescription = "Добавить фото",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp)
+                            contentDescription = null,
+                            tint = cs.onPrimary,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
-
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = fullName,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = nicknameText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = "Специализация: ${athleteProfile?.specialization ?: "Тройной прыжок"}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(text = fullName, style = MaterialTheme.typography.headlineSmall, color = cs.onBackground)
+                Text(text = nicknameText, style = MaterialTheme.typography.titleSmall, color = cs.primary)
+                StatusPill(
+                    text = athleteProfile?.specialization ?: "Тройной прыжок",
+                    contentColor = cs.onPrimaryContainer,
+                    containerColor = cs.primaryContainer
+                )
             }
-        }
 
-        // Physical Parameters & Age Card (With Edit Button placed under Age)
-        Text(
-            text = "АНТРОПОМЕТРИЯ И ВОЗРАСТ",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            letterSpacing = 1.sp
-        )
+            // Показатели
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatTile(
+                    value = if (athleteProfile?.height != null && athleteProfile!!.height!! > 0) "${athleteProfile!!.height!!.toInt()}" else "—",
+                    label = "Рост, см",
+                    icon = Icons.Default.Height,
+                    tint = cs.tertiary,
+                    modifier = Modifier.weight(1f)
+                )
+                StatTile(
+                    value = if (athleteProfile?.weight != null && athleteProfile!!.weight!! > 0) "${athleteProfile!!.weight!!.toInt()}" else "—",
+                    label = "Вес, кг",
+                    icon = Icons.Default.MonitorWeight,
+                    tint = cs.secondary,
+                    modifier = Modifier.weight(1f)
+                )
+                StatTile(
+                    value = calculatedPbMeters.removeSuffix(" м"),
+                    label = "Рекорд, м",
+                    icon = Icons.Default.EmojiEvents,
+                    tint = MaterialTheme.extraColors.gold,
+                    modifier = Modifier.weight(1f)
+                )
+            }
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
+            AppCard {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ProfileParamColumn(
-                        value = if (athleteProfile?.height != null && athleteProfile!!.height!! > 0) "${athleteProfile!!.height!!.toInt()} см" else "— см",
-                        label = "Рост"
-                    )
-                    VerticalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.height(36.dp))
-                    ProfileParamColumn(
-                        value = if (athleteProfile?.weight != null && athleteProfile!!.weight!! > 0) "${athleteProfile!!.weight!!.toInt()} кг" else "— кг",
-                        label = "Вес"
-                    )
-                    VerticalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.height(36.dp))
-                    ProfileParamColumn(
-                        value = calculatedPbMeters,
-                        label = "Рекорд (PB)"
-                    )
-                }
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Age in LARGE Bold Numbers, Birth Date Subtitle, and Edit Button Underneath!
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = ageText,
-                        style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontSize = 28.sp
-                    )
-                    Text(
-                        text = birthDateFormattedText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    OutlinedButton(
-                        onClick = { showEditDialog = true },
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Редактировать профиль", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    IconBadge(icon = Icons.Default.Cake, tint = cs.primary)
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(text = ageText, style = MaterialTheme.typography.titleLarge, color = cs.onSurface)
+                        Text(text = birthDateFormattedText, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     }
                 }
             }
-        }
 
-        // App Settings & Preferences
-        Text(
-            text = "НАСТРОЙКИ ПРИЛОЖЕНИЯ",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            letterSpacing = 1.sp
-        )
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                ProfileOptionRow(
-                    icon = if (uiState.isDarkTheme) Icons.Default.DarkMode else Icons.Default.LightMode,
-                    title = "Тема оформления",
-                    subtitle = if (uiState.isDarkTheme) "Тёмная тема" else "Светлая тема",
-                    onClick = { viewModel.toggleTheme() }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                ProfileOptionRow(
-                    icon = Icons.Default.RecordVoiceOver,
-                    title = "Обращение в приложении",
-                    subtitle = if (athleteProfile?.greetingPreference == "NICKNAME") "По никнейму ($nicknameText)" else "По имени ($fullName)",
-                    onClick = { showEditDialog = true }
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SectionHeader(title = "Настройки")
+                AppCard {
+                    ProfileOptionRow(
+                        icon = if (uiState.isDarkTheme) Icons.Default.DarkMode else Icons.Default.LightMode,
+                        title = "Тёмная тема",
+                        subtitle = if (uiState.isDarkTheme) "Включена" else "Выключена",
+                        onClick = { viewModel.toggleTheme() },
+                        trailing = {
+                            Switch(checked = uiState.isDarkTheme, onCheckedChange = { viewModel.toggleTheme() })
+                        }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(start = 70.dp), color = cs.outlineVariant)
+                    ProfileOptionRow(
+                        icon = Icons.Default.RecordVoiceOver,
+                        title = "Обращение в приложении",
+                        subtitle = if (athleteProfile?.greetingPreference == "NICKNAME") "По никнейму ($nicknameText)" else "По имени ($fullName)",
+                        onClick = { showEditDialog = true }
+                    )
+                }
             }
         }
-
-        Spacer(modifier = Modifier.height(70.dp))
     }
 
     if (showEditDialog) {
@@ -593,18 +548,8 @@ fun ProfileParamColumn(value: String, label: String) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.ExtraBold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 10.sp
-        )
+        Text(text = value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+        Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -613,44 +558,23 @@ fun ProfileOptionRow(
     icon: ImageVector,
     title: String,
     subtitle: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
+    Surface(onClick = onClick, color = Color.Transparent) {
+        Row(
             modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 11.sp
-            )
+            IconBadge(icon = icon, tint = MaterialTheme.colorScheme.primary)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(text = title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+                Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (trailing != null) trailing()
         }
     }
 }

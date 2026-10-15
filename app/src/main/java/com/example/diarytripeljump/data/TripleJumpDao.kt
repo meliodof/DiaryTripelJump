@@ -184,6 +184,18 @@ interface ExerciseResultDao {
 }
 
 @Dao
+interface EquipmentDao {
+    @Query("SELECT * FROM equipment_inventory ORDER BY name")
+    fun getAllEquipment(): Flow<List<EquipmentItem>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(item: EquipmentItem): Long
+
+    @Delete
+    suspend fun delete(item: EquipmentItem)
+}
+
+@Dao
 interface TrainingJumpResultDao {
     @Query("SELECT * FROM training_jump_results WHERE trainingSessionId = :sessionId")
     fun getJumpResultsForTraining(sessionId: Long): Flow<List<TrainingJumpResult>>

@@ -29,6 +29,7 @@ class TripleJumpApplication : Application() {
             customExerciseCategoryDao = database.customExerciseCategoryDao(),
             exerciseDao = database.exerciseDao(),
             exerciseResultDao = database.exerciseResultDao(),
+            equipmentDao = database.equipmentDao(),
             trainingJumpResultDao = database.trainingJumpResultDao(),
             preparationPeriodDao = database.preparationPeriodDao(),
             analyticsDao = database.analyticsDao(),

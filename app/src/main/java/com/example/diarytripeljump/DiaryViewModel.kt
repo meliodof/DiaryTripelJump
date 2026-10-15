@@ -16,6 +16,11 @@ data class ExerciseResultInput(
     val secondaryValue: Int? = null,
     val sets: Int? = null,
     val reps: Int? = null,
+    val isSingleLeg: Boolean = false,
+    val hasWeight: Boolean = true,
+    val hasHurdles: Boolean = false,
+    val hurdleHeightCm: Double? = null,
+    val hurdleCount: Int? = null,
     val setResults: List<Double> = emptyList()
 )
 
@@ -38,6 +43,9 @@ class DiaryViewModel(
     val allExercises: StateFlow<List<Exercise>> = repository.getAllExercises()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val allEquipment: StateFlow<List<EquipmentItem>> = repository.getAllEquipment()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val rawTripleJumpResults: StateFlow<List<TripleJumpResult>> = repository.getRecentResults(50)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -50,6 +58,18 @@ class DiaryViewModel(
 
     fun toggleTheme() {
         _uiState.update { it.copy(isDarkTheme = !it.isDarkTheme) }
+    }
+
+    fun addEquipmentItem(name: String, unit: ResultUnit, value: Double) {
+        viewModelScope.launch {
+            repository.insertEquipment(EquipmentItem(name = name, unit = unit, value = value))
+        }
+    }
+
+    fun deleteEquipmentItem(item: EquipmentItem) {
+        viewModelScope.launch {
+            repository.deleteEquipment(item)
+        }
     }
 
     fun updateAthleteProfile(
@@ -179,6 +199,12 @@ class DiaryViewModel(
         }
     }
 
+    fun deleteExerciseMaster(exercise: Exercise) {
+        viewModelScope.launch {
+            repository.deleteExercise(exercise)
+        }
+    }
+
     // --- CRUD: Competitions ---
     fun addCompetition(
         name: String,
@@ -279,9 +305,37 @@ class DiaryViewModel(
                         resultUnit = input.unit,
                         sets = input.sets,
                         reps = input.reps,
+                        isSingleLeg = input.isSingleLeg,
+                        hasWeight = input.hasWeight,
+                        hasHurdles = input.hasHurdles,
+                        hurdleHeightCm = input.hurdleHeightCm,
+                        hurdleCount = input.hurdleCount,
                         setResultsJson = setResJson
                     )
                 )
+
+                // Auto Interconnection: Check if this result is a new Record (PB / Best)
+                if (input.result > 0) {
+                    val exCat = when {
+                        input.exerciseName.contains("бег", ignoreCase = true) -> "Беговые"
+                        input.exerciseName.contains("силов", ignoreCase = true) || input.exerciseName.contains("присед", ignoreCase = true) -> "Силовые"
+                        else -> "Прыжковые"
+                    }
+                    repository.insertTripleJumpResult(
+                        TripleJumpResult(
+                            eventName = input.exerciseName,
+                            result = input.result,
+                            resultUnit = input.unit,
+                            date = date,
+                            isIndoor = false,
+                            isAntiRecord = false,
+                            recordLevel = "PB",
+                            exerciseCategory = exCat,
+                            isCompetition = false,
+                            notes = "Автоматический рекорд из тренировки"
+                        )
+                    )
+                }
             }
 
             if (hopPhase != null || stepPhase != null || jumpPhase != null) {
@@ -332,6 +386,11 @@ class DiaryViewModel(
                         resultUnit = input.unit,
                         sets = input.sets,
                         reps = input.reps,
+                        isSingleLeg = input.isSingleLeg,
+                        hasWeight = input.hasWeight,
+                        hasHurdles = input.hasHurdles,
+                        hurdleHeightCm = input.hurdleHeightCm,
+                        hurdleCount = input.hurdleCount,
                         setResultsJson = setResJson
                     )
                 )

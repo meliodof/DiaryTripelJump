@@ -119,6 +119,14 @@ enum class TrainingType {
 
 enum class ExerciseStage { WARMUP, MAIN, COOLDOWN }
 
+@Entity(tableName = "equipment_inventory")
+data class EquipmentItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val unit: ResultUnit = ResultUnit.KG,
+    val value: Double = 0.0
+)
+
 @Entity(tableName = "exercise_categories")
 data class CustomExerciseCategory(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -157,9 +165,13 @@ data class ExerciseResult(
     val resultUnit: ResultUnit,
     val sets: Int? = null,
     val reps: Int? = null,
+    val isSingleLeg: Boolean = false,
+    val hasWeight: Boolean = true,
+    val hasHurdles: Boolean = false,
+    val hurdleHeightCm: Double? = null,
+    val hurdleCount: Int? = null,
     val setResultsJson: String? = null,
     val stage: ExerciseStage = ExerciseStage.MAIN,
-    val hurdleHeightCm: Double? = null,
     val notes: String? = null
 )
 

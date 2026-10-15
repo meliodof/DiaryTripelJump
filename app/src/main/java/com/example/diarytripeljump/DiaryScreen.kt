@@ -1,47 +1,101 @@
 package com.example.diarytripeljump
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsTopHeight
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Event
+import androidx.compose.material.icons.filled.EventAvailable
+import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.MilitaryTech
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.mutableStateOf
 import com.example.diarytripeljump.data.Competition
+import com.example.diarytripeljump.data.CompetitionStatus
 import com.example.diarytripeljump.data.SeasonStats
+import com.example.diarytripeljump.data.TrainingWithExercises
+import com.example.diarytripeljump.ui.components.AppCard
+import com.example.diarytripeljump.ui.components.EmptyState
+import com.example.diarytripeljump.ui.components.IconBadge
+import com.example.diarytripeljump.ui.components.ProfileAvatarButton
+import com.example.diarytripeljump.ui.components.SectionHeader
+import com.example.diarytripeljump.ui.components.StatTile
+import com.example.diarytripeljump.ui.components.StatusPill
+import com.example.diarytripeljump.ui.components.ToggleChip
+import com.example.diarytripeljump.ui.components.pluralRu
+import com.example.diarytripeljump.ui.components.screenContentPadding
+import com.example.diarytripeljump.ui.theme.NumberMedium
+import com.example.diarytripeljump.ui.theme.extraColors
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun DiaryScreen(
     modifier: Modifier = Modifier,
     viewModel: DiaryViewModel,
-    onNavigateToTab: (Int) -> Unit = {},
-    onNavigateToProfile: () -> Unit = {}
+    onNavigate: (String) -> Unit = {},
+    onOpenProfile: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val athleteProfile by viewModel.athleteProfile.collectAsState()
+    val trainings by viewModel.allTrainingsWithExercises.collectAsState()
+    val competitions by viewModel.allCompetitions.collectAsState()
 
-    val currentDateUpper = SimpleDateFormat("EEEE, d MMMM", Locale.forLanguageTag("ru")).format(Date()).uppercase()
+    val dateText = remember {
+        SimpleDateFormat("EEEE, d MMMM", Locale.forLanguageTag("ru"))
+            .format(Date())
+            .replaceFirstChar { it.uppercase() }
+    }
 
     val displayGreeting = remember(athleteProfile) {
         val baseGreeting = when (Calendar.getInstance()[Calendar.HOUR_OF_DAY]) {
-            in 5..11 -> "Добрый день"
+            in 5..11 -> "Доброе утро"
             in 12..17 -> "Добрый день"
             in 18..22 -> "Добрый вечер"
             else -> "Доброй ночи"
@@ -52,552 +106,559 @@ fun DiaryScreen(
         } else {
             athleteProfile?.firstName ?: ""
         }
-
         if (nameToUse.isNotBlank()) "$baseGreeting, $nameToUse" else baseGreeting
     }
 
     val isBirthday = isTodayBirthday(athleteProfile?.birthDate)
-
     var selectedResultFilter by remember { mutableIntStateOf(0) }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
-    ) {
-        // 1. Header Row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = currentDateUpper,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    letterSpacing = 1.sp
-                )
-                Text(
-                    text = displayGreeting,
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-            }
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = { viewModel.toggleTheme() },
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                ) {
-                    Icon(
-                        imageVector = if (uiState.isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                        contentDescription = "Сменить тему",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                        .clickable { onNavigateToProfile() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "Профиль",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
+    Scaffold(
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            // Полоса под статус-баром: контент прокручивается под неё и не налезает на часы/иконки
+            Spacer(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .windowInsetsTopHeight(WindowInsets.statusBars)
+                    .background(MaterialTheme.colorScheme.background)
+            )
         }
+    ) { inner ->
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = screenContentPadding(inner, extraTop = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            item {
+                HomeHeader(
+                    dateText = dateText,
+                    greeting = displayGreeting,
+                    avatarUri = athleteProfile?.avatarUriString,
+                    onOpenProfile = onOpenProfile
+                )
+            }
 
-        // Birthday Congratulation Banner (If today is athlete's birthday!)
-        if (isBirthday) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFB300)),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = "🎉", fontSize = 32.sp)
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "С ДНЁМ РОЖДЕНИЯ!",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.Black
-                        )
-                        Text(
-                            text = "Желаем новых личных рекордов, высоких результатов и побед на всех стартах!",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.Black.copy(alpha = 0.85f),
-                            fontWeight = FontWeight.Medium
-                        )
+            if (isBirthday) {
+                item { BirthdayBanner() }
+            }
+
+            item {
+                val next = uiState.upcomingCompetitions.firstOrNull()
+                if (next != null) {
+                    NextCompetitionHero(competition = next, onClick = { onNavigate(Routes.COMPETITIONS) })
+                } else {
+                    EmptyState(
+                        icon = Icons.Default.EventAvailable,
+                        title = "Ближайших стартов нет",
+                        message = "Добавьте соревнование — здесь появится обратный отсчёт до старта.",
+                        actionLabel = "Добавить старт",
+                        onAction = { onNavigate(Routes.COMPETITIONS) }
+                    )
+                }
+            }
+
+            item {
+                WeekOverviewCard(
+                    trainings = trainings,
+                    competitions = competitions,
+                    onClick = { onNavigate(Routes.TRAININGS) }
+                )
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SectionHeader(
+                        title = "Сезон ${uiState.seasonStats?.year ?: Calendar.getInstance()[Calendar.YEAR]}",
+                        actionLabel = "Рекорды",
+                        onAction = { onNavigate(Routes.RECORDS) }
+                    )
+                    SeasonStatsRow(
+                        stats = uiState.seasonStats,
+                        onTrainingsClick = { onNavigate(Routes.TRAININGS) },
+                        onCompetitionsClick = { onNavigate(Routes.COMPETITIONS) },
+                        onRecordsClick = { onNavigate(Routes.RECORDS) }
+                    )
+                }
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SectionHeader(
+                        title = "Последние результаты",
+                        actionLabel = "Все",
+                        onAction = { onNavigate(Routes.RECORDS) }
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ToggleChip(label = "Все", selected = selectedResultFilter == 0, onClick = { selectedResultFilter = 0 })
+                        ToggleChip(label = "Старты", selected = selectedResultFilter == 1, onClick = { selectedResultFilter = 1 })
+                        ToggleChip(label = "Тренировки", selected = selectedResultFilter == 2, onClick = { selectedResultFilter = 2 })
                     }
                 }
             }
-        }
 
-        // 2. Next Competition Card
-        if (uiState.upcomingCompetitions.isNotEmpty()) {
-            val nextComp = uiState.upcomingCompetitions.first()
-            NextCompetitionCard(
-                competition = nextComp,
-                isDarkTheme = uiState.isDarkTheme,
-                onCardClick = { onNavigateToTab(2) }
-            )
-        } else {
-            EmptyNextCompetitionCard(
-                onCardClick = { onNavigateToTab(2) }
-            )
-        }
-
-        // 3. Блок статистики сезона
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "${uiState.seasonStats?.year ?: 2025} СЕЗОН",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    letterSpacing = 1.sp
-                )
-                Text(
-                    text = "Статистика",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable { onNavigateToTab(3) }
-                )
-            }
-
-            SeasonStatsCard(stats = uiState.seasonStats)
-        }
-
-        // 4. Последние результаты
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "ПОСЛЕДНИЕ РЕЗУЛЬТАТЫ",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    letterSpacing = 1.sp
-                )
-                Text(
-                    text = "Все рекорды",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable { onNavigateToTab(3) }
-                )
-            }
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                FilterChipItem(
-                    title = "Все",
-                    isSelected = selectedResultFilter == 0,
-                    onClick = { selectedResultFilter = 0 }
-                )
-                FilterChipItem(
-                    title = "🏆 Соревнования",
-                    isSelected = selectedResultFilter == 1,
-                    onClick = { selectedResultFilter = 1 }
-                )
-                FilterChipItem(
-                    title = "💪 Тренировки",
-                    isSelected = selectedResultFilter == 2,
-                    onClick = { selectedResultFilter = 2 }
-                )
-            }
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-            ) {
+            item {
                 val showCompetitions = selectedResultFilter == 0 || selectedResultFilter == 1
                 val showTrainings = selectedResultFilter == 0 || selectedResultFilter == 2
 
-                val hasResults = (showCompetitions && uiState.tripleJumpResults.isNotEmpty()) ||
-                        (showTrainings && uiState.favoriteExerciseResults.isNotEmpty())
+                val rows = buildList {
+                    if (showCompetitions) {
+                        uiState.tripleJumpResults.take(3).forEach {
+                            add(RecentRow(it.event, it.result, it.date, it.isPB, isCompetition = true))
+                        }
+                    }
+                    if (showTrainings) {
+                        uiState.favoriteExerciseResults.take(3).forEach {
+                            add(RecentRow(it.exercise, it.result, it.date, it.isPB, isCompetition = false))
+                        }
+                    }
+                }
 
-                if (!hasResults) {
-                    Text(
-                        text = "Нет сохраненных результатов в базе данных",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
+                if (rows.isEmpty()) {
+                    EmptyState(
+                        icon = Icons.Default.MilitaryTech,
+                        title = "Пока нет результатов",
+                        message = "Добавьте тренировки или рекорды — они появятся здесь."
                     )
                 } else {
-                    Column {
-                        if (showCompetitions && uiState.tripleJumpResults.isNotEmpty()) {
-                            uiState.tripleJumpResults.take(3).forEachIndexed { index, result ->
-                                ResultRowItem(
-                                    category = result.event.uppercase(),
-                                    resultText = result.result,
-                                    dateText = result.date,
-                                    isPB = result.isPB,
-                                    tagText = "СОРЕВНОВАНИЕ",
-                                    tagColor = MaterialTheme.colorScheme.primary,
-                                    icon = Icons.AutoMirrored.Filled.DirectionsRun,
-                                    iconTint = MaterialTheme.colorScheme.primary,
-                                    onClick = { onNavigateToTab(3) }
+                    AppCard {
+                        rows.forEachIndexed { index, row ->
+                            RecentResultRow(
+                                row = row,
+                                onClick = { onNavigate(if (row.isCompetition) Routes.RECORDS else Routes.TRAININGS) }
+                            )
+                            if (index < rows.lastIndex) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(start = 68.dp),
+                                    color = MaterialTheme.colorScheme.outlineVariant
                                 )
-                                if (index < uiState.tripleJumpResults.take(3).size - 1 || (showTrainings && uiState.favoriteExerciseResults.isNotEmpty())) {
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
-                                }
-                            }
-                        }
-
-                        if (showTrainings && uiState.favoriteExerciseResults.isNotEmpty()) {
-                            uiState.favoriteExerciseResults.take(3).forEachIndexed { index, exercise ->
-                                ResultRowItem(
-                                    category = exercise.exercise.uppercase(),
-                                    resultText = exercise.result,
-                                    dateText = exercise.date,
-                                    isPB = exercise.isPB,
-                                    tagText = "ТРЕНИРОВКА",
-                                    tagColor = MaterialTheme.colorScheme.secondary,
-                                    icon = Icons.Default.FitnessCenter,
-                                    iconTint = MaterialTheme.colorScheme.secondary,
-                                    onClick = { onNavigateToTab(1) }
-                                )
-                                if (index < uiState.favoriteExerciseResults.take(3).size - 1) {
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
-                                }
                             }
                         }
                     }
                 }
             }
         }
-
-        Spacer(modifier = Modifier.height(70.dp))
     }
 }
 
 @Composable
-fun EmptyNextCompetitionCard(
-    onCardClick: () -> Unit
+private fun HomeHeader(
+    dateText: String,
+    greeting: String,
+    avatarUri: String?,
+    onOpenProfile: () -> Unit
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onCardClick() },
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                text = "БЛИЖАЙШИЙ СТАРТ",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                letterSpacing = 1.sp
-            )
-            Text(
-                text = "Запланированных соревнований нет",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = "Нажмите, чтобы открыть календарь стартов и добавить соревнование.",
-                style = MaterialTheme.typography.bodySmall,
+                text = dateText,
+                style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Text(
+                text = greeting,
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
         }
+        ProfileAvatarButton(avatarUri = avatarUri, onClick = onOpenProfile, size = 44.dp)
     }
 }
 
 @Composable
-fun FilterChipItem(
-    title: String,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
+private fun BirthdayBanner() {
+    val extra = MaterialTheme.extraColors
     Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.clickable { onClick() }
-    ) {
-        Text(
-            text = title,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-fun NextCompetitionCard(
-    competition: Competition,
-    isDarkTheme: Boolean,
-    onCardClick: () -> Unit
-) {
-    val containerBg = if (isDarkTheme) Color(0xFF1C1C1E) else MaterialTheme.colorScheme.primaryContainer
-    val titleColor = if (isDarkTheme) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
-    val subtitleColor = if (isDarkTheme) Color(0xFFA1A1A6) else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onCardClick() },
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = containerBg),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "БЛИЖАЙШИЙ СТАРТ",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.secondary,
-                    letterSpacing = 1.sp
-                )
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = competition.name,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = titleColor
-                )
-                Text(
-                    text = "${formatDate(competition.date)} · ${competition.location ?: "Место уточняется"}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = subtitleColor
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun SeasonStatsCard(stats: SeasonStats?) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        shape = MaterialTheme.shapes.large,
+        color = extra.goldContainer
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceAround,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            StatItem(value = "${stats?.totalCompetitions ?: 0}", label = "Стартов")
-            VerticalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.height(28.dp))
-            StatItem(value = "${stats?.totalTrainings ?: 0}", label = "Тренировок")
-            VerticalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.height(28.dp))
-            val bestText = if (stats?.bestTripleJump != null && stats.bestTripleJump > 0) String.format(Locale.getDefault(), "%.2f м", stats.bestTripleJump) else "— м"
-            StatItem(value = bestText, label = "Лучший прыжок")
+            Text(text = "🎉", style = MaterialTheme.typography.displaySmall)
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "С днём рождения!",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = extra.onGoldContainer
+                )
+                Text(
+                    text = "Желаем новых личных рекордов, высоких результатов и побед на всех стартах!",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = extra.onGoldContainer.copy(alpha = 0.85f)
+                )
+            }
+        }
+    }
+}
+
+/** Hero-карточка с обратным отсчётом до ближайшего старта. */
+@Composable
+private fun NextCompetitionHero(
+    competition: Competition,
+    onClick: () -> Unit
+) {
+    val extra = MaterialTheme.extraColors
+    val onHero = extra.onHero
+    val days = daysUntil(competition.date)
+    val countdown = when {
+        days <= 0 -> "Сегодня"
+        days == 1 -> "Завтра"
+        else -> "Через $days ${pluralRu(days, "день", "дня", "дней")}"
+    }
+    val place = listOfNotNull(competition.location, competition.address)
+        .firstOrNull { it.isNotBlank() } ?: "Место уточняется"
+
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.extraLarge,
+        color = Color.Transparent
+    ) {
+        Box(
+            modifier = Modifier.background(
+                Brush.linearGradient(listOf(extra.heroStart, extra.heroEnd))
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    StatusPill(
+                        text = "Ближайший старт",
+                        contentColor = onHero,
+                        containerColor = onHero.copy(alpha = 0.18f),
+                        icon = Icons.Default.EmojiEvents
+                    )
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = "Открыть старты",
+                        tint = onHero.copy(alpha = 0.9f)
+                    )
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = countdown,
+                        style = MaterialTheme.typography.headlineLarge,
+                        color = onHero
+                    )
+                    Text(
+                        text = competition.name,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = onHero.copy(alpha = 0.92f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    HeroInfo(icon = Icons.Default.Event, text = formatDateShort(competition.date), color = onHero)
+                    HeroInfo(icon = Icons.Default.Place, text = place, color = onHero, modifier = Modifier.weight(1f))
+                }
+            }
         }
     }
 }
 
 @Composable
-fun StatItem(value: String, label: String) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+private fun HeroInfo(
+    icon: ImageVector,
+    text: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
+        Icon(imageVector = icon, contentDescription = null, tint = color.copy(alpha = 0.85f), modifier = Modifier.size(16.dp))
         Text(
-            text = value,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.ExtraBold,
-            color = MaterialTheme.colorScheme.onSurface
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = color.copy(alpha = 0.92f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+private data class WeekDay(
+    val label: String,
+    val number: Int,
+    val isToday: Boolean,
+    val trained: Boolean,
+    val skipped: Boolean,
+    val competition: Boolean
+)
+
+/** Полоса «Эта неделя»: пн–вс, отметки тренировок, пропусков и стартов. */
+@Composable
+private fun WeekOverviewCard(
+    trainings: List<TrainingWithExercises>,
+    competitions: List<Competition>,
+    onClick: () -> Unit
+) {
+    val week = remember(trainings, competitions) { buildWeek(trainings, competitions) }
+    val trainedCount = week.count { it.trained }
+
+    AppCard(onClick = onClick) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Эта неделя",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "$trainedCount ${pluralRu(trainedCount, "тренировка", "тренировки", "тренировок")}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Row(modifier = Modifier.fillMaxWidth()) {
+                week.forEach { day ->
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = day.label,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (day.isToday) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        WeekDayCircle(day)
+                    }
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                LegendDot(color = MaterialTheme.colorScheme.primary, label = "Тренировка")
+                LegendDot(color = MaterialTheme.colorScheme.tertiary, label = "Старт")
+                LegendDot(color = MaterialTheme.colorScheme.error, label = "Пропуск")
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeekDayCircle(day: WeekDay) {
+    val cs = MaterialTheme.colorScheme
+    val (bg, fg) = when {
+        day.competition -> cs.tertiary to cs.onTertiary
+        day.trained -> cs.primary to cs.onPrimary
+        day.skipped -> cs.errorContainer to cs.onErrorContainer
+        else -> Color.Transparent to cs.onSurface
+    }
+    var modifier = Modifier
+        .size(36.dp)
+        .clip(CircleShape)
+        .background(bg)
+    if (day.isToday && bg == Color.Transparent) {
+        modifier = modifier.border(BorderStroke(2.dp, cs.primary), CircleShape)
+    }
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        if (day.trained && !day.competition) {
+            Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = fg, modifier = Modifier.size(18.dp))
+        } else {
+            Text(
+                text = day.number.toString(),
+                style = NumberMedium,
+                color = if (day.isToday && bg == Color.Transparent) cs.primary else fg
+            )
+        }
+    }
+}
+
+@Composable
+private fun LegendDot(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(color)
         )
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 11.sp
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
 
 @Composable
-fun ResultRowItem(
-    category: String,
-    resultText: String,
-    dateText: String,
-    isPB: Boolean,
-    tagText: String,
-    tagColor: Color,
-    icon: ImageVector,
-    iconTint: Color,
+private fun SeasonStatsRow(
+    stats: SeasonStats?,
+    onTrainingsClick: () -> Unit,
+    onCompetitionsClick: () -> Unit,
+    onRecordsClick: () -> Unit
+) {
+    val best = stats?.bestTripleJump
+    val bestText = if (best != null && best > 0) String.format(Locale.getDefault(), "%.2f", best) else "—"
+
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        StatTile(
+            value = "${stats?.totalCompetitions ?: 0}",
+            label = "Стартов",
+            icon = Icons.Default.EmojiEvents,
+            tint = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.weight(1f),
+            onClick = onCompetitionsClick
+        )
+        StatTile(
+            value = "${stats?.totalTrainings ?: 0}",
+            label = "Тренировок",
+            icon = Icons.Default.FitnessCenter,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f),
+            onClick = onTrainingsClick
+        )
+        StatTile(
+            value = bestText,
+            label = "Лучший, м",
+            icon = Icons.AutoMirrored.Filled.TrendingUp,
+            tint = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.weight(1f),
+            onClick = onRecordsClick
+        )
+    }
+}
+
+private data class RecentRow(
+    val title: String,
+    val result: String,
+    val date: String,
+    val isPB: Boolean,
+    val isCompetition: Boolean
+)
+
+@Composable
+private fun RecentResultRow(
+    row: RecentRow,
     onClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    val cs = MaterialTheme.colorScheme
+    val tint = if (row.isCompetition) cs.tertiary else cs.primary
+    val icon = if (row.isCompetition) Icons.AutoMirrored.Filled.DirectionsRun else Icons.Default.FitnessCenter
+
+    Surface(onClick = onClick, color = Color.Transparent) {
         Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(tagColor.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = tagColor,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+            IconBadge(icon = icon, tint = tint)
 
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = category,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = tagColor.copy(alpha = 0.15f)
-                    ) {
-                        Text(
-                            text = tagText,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = tagColor,
-                            fontSize = 8.sp
-                        )
-                    }
-                }
-
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = dateText,
+                    text = row.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = cs.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = (if (row.isCompetition) "Старт" else "Тренировка") + " · " + row.date,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp
+                    color = cs.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-        }
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            if (isPB) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.secondary
-                ) {
-                    Text(
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(text = row.result, style = NumberMedium, color = cs.onSurface)
+                if (row.isPB) {
+                    StatusPill(
                         text = "PB",
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        fontSize = 9.sp
+                        contentColor = MaterialTheme.extraColors.onGoldContainer,
+                        containerColor = MaterialTheme.extraColors.goldContainer,
+                        icon = Icons.Default.Star
                     )
                 }
             }
-            Text(
-                text = resultText,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
 
-private fun formatDate(timestamp: Long): String {
-    val calendar = Calendar.getInstance()
-    calendar.timeInMillis = timestamp
-    val day = calendar[Calendar.DAY_OF_MONTH]
-    val month = when (calendar[Calendar.MONTH]) {
-        Calendar.JANUARY -> "Янв"
-        Calendar.FEBRUARY -> "Фев"
-        Calendar.MARCH -> "Мар"
-        Calendar.APRIL -> "Апр"
-        Calendar.MAY -> "Май"
-        Calendar.JUNE -> "Июн"
-        Calendar.JULY -> "Июл"
-        Calendar.AUGUST -> "Авг"
-        Calendar.SEPTEMBER -> "Сен"
-        Calendar.OCTOBER -> "Окт"
-        Calendar.NOVEMBER -> "Ноя"
-        Calendar.DECEMBER -> "Дек"
-        else -> ""
+private fun buildWeek(
+    trainings: List<TrainingWithExercises>,
+    competitions: List<Competition>
+): List<WeekDay> {
+    val cal = Calendar.getInstance().apply { firstDayOfWeek = Calendar.MONDAY }
+    val todayKey = dayKey(cal.timeInMillis)
+    cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+
+    val trainedKeys = trainings.filter { !it.training.isSkipped }.map { dayKey(it.training.date) }.toSet()
+    val skippedKeys = trainings.filter { it.training.isSkipped }.map { dayKey(it.training.date) }.toSet()
+    val competitionKeys = competitions
+        .filter { it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED }
+        .map { dayKey(it.date) }
+        .toSet()
+
+    val labels = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
+    return labels.map { label ->
+        val key = dayKey(cal.timeInMillis)
+        val day = WeekDay(
+            label = label,
+            number = cal.get(Calendar.DAY_OF_MONTH),
+            isToday = key == todayKey,
+            trained = key in trainedKeys,
+            skipped = key in skippedKeys && key !in trainedKeys,
+            competition = key in competitionKeys
+        )
+        cal.add(Calendar.DAY_OF_YEAR, 1)
+        day
     }
-    return "$day $month"
+}
+
+private fun dayKey(millis: Long): Int {
+    val c = Calendar.getInstance().apply { timeInMillis = millis }
+    return c.get(Calendar.YEAR) * 1000 + c.get(Calendar.DAY_OF_YEAR)
+}
+
+private fun daysUntil(timestamp: Long): Int {
+    fun startOfDay(millis: Long): Long = Calendar.getInstance().apply {
+        timeInMillis = millis
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+
+    val diff = startOfDay(timestamp) - startOfDay(System.currentTimeMillis())
+    return Math.round(diff / 86_400_000.0).toInt()
+}
+
+private fun formatDateShort(timestamp: Long): String {
+    return SimpleDateFormat("d MMM", Locale.forLanguageTag("ru")).format(Date(timestamp))
 }
