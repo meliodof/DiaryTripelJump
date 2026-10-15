@@ -50,6 +50,9 @@ interface CompetitionDao {
 
 @Dao
 interface TripleJumpResultDao {
+    @Query("SELECT * FROM triple_jump_results ORDER BY date DESC")
+    fun getAllResults(): Flow<List<TripleJumpResult>>
+
     @Query("SELECT * FROM triple_jump_results ORDER BY date DESC LIMIT :limit")
     fun getRecentResults(limit: Int = 10): Flow<List<TripleJumpResult>>
 
@@ -157,6 +160,9 @@ interface ExerciseResultDao {
     """)
     fun getFavoriteExerciseResults(): Flow<List<ExerciseResultWithExercise>>
 
+    @Query("SELECT * FROM exercise_results ORDER BY date DESC")
+    fun getAllExerciseResults(): Flow<List<ExerciseResult>>
+
     @Query("SELECT * FROM exercise_results WHERE exerciseId = :exerciseId ORDER BY date DESC")
     fun getResultsForExercise(exerciseId: Long): Flow<List<ExerciseResult>>
 
@@ -181,18 +187,6 @@ interface ExerciseResultDao {
 
     @Query("DELETE FROM exercise_results")
     suspend fun deleteAllExerciseResults()
-}
-
-@Dao
-interface EquipmentDao {
-    @Query("SELECT * FROM equipment_inventory ORDER BY name")
-    fun getAllEquipment(): Flow<List<EquipmentItem>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(item: EquipmentItem): Long
-
-    @Delete
-    suspend fun delete(item: EquipmentItem)
 }
 
 @Dao
@@ -306,4 +300,16 @@ interface ControlIndicatorDao {
 
     @Delete
     suspend fun delete(control: ControlIndicator)
+}
+
+@Dao
+interface InventoryDao {
+    @Query("SELECT * FROM inventory_items ORDER BY name COLLATE NOCASE")
+    fun getAll(): Flow<List<InventoryItem>>
+
+    @Insert
+    suspend fun insert(item: InventoryItem): Long
+
+    @Delete
+    suspend fun delete(item: InventoryItem)
 }

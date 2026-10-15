@@ -56,7 +56,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.mutableStateOf
 import com.example.diarytripeljump.data.Competition
 import com.example.diarytripeljump.data.CompetitionStatus
+import com.example.diarytripeljump.data.RecordEvent
 import com.example.diarytripeljump.data.SeasonStats
+import com.example.diarytripeljump.data.formatRecordDelta
+import com.example.diarytripeljump.data.formatRecordValue
 import com.example.diarytripeljump.data.TrainingWithExercises
 import com.example.diarytripeljump.ui.components.AppCard
 import com.example.diarytripeljump.ui.components.EmptyState
@@ -86,6 +89,7 @@ fun DiaryScreen(
     val athleteProfile by viewModel.athleteProfile.collectAsState()
     val trainings by viewModel.allTrainingsWithExercises.collectAsState()
     val competitions by viewModel.allCompetitions.collectAsState()
+    val recordEvents by viewModel.recordEvents.collectAsState()
 
     val dateText = remember {
         SimpleDateFormat("EEEE, d MMMM", Locale.forLanguageTag("ru"))
@@ -185,7 +189,8 @@ fun DiaryScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SectionHeader(
-                        title = "Последние результаты",
+                        title = "Обновления рекордов",
+                        subtitle = "Новые результаты из тренировок и стартов",
                         actionLabel = "Все",
                         onAction = { onNavigate(Routes.RECORDS) }
                     )
@@ -201,31 +206,28 @@ fun DiaryScreen(
                 val showCompetitions = selectedResultFilter == 0 || selectedResultFilter == 1
                 val showTrainings = selectedResultFilter == 0 || selectedResultFilter == 2
 
-                val rows = buildList {
-                    if (showCompetitions) {
-                        uiState.tripleJumpResults.take(3).forEach {
-                            add(RecentRow(it.event, it.result, it.date, it.isPB, isCompetition = true))
+                val rows = recordEvents
+                    .filter { event ->
+                        !event.isAnti && when (selectedResultFilter) {
+                            1 -> event.isCompetition
+                            2 -> !event.isCompetition
+                            else -> true
                         }
                     }
-                    if (showTrainings) {
-                        uiState.favoriteExerciseResults.take(3).forEach {
-                            add(RecentRow(it.exercise, it.result, it.date, it.isPB, isCompetition = false))
-                        }
-                    }
-                }
+                    .take(6)
 
                 if (rows.isEmpty()) {
                     EmptyState(
                         icon = Icons.Default.MilitaryTech,
                         title = "Пока нет результатов",
-                        message = "Добавьте тренировки или рекорды — они появятся здесь."
+                        message = "Внесите результаты в тренировке — рекорды появятся здесь автоматически."
                     )
                 } else {
                     AppCard {
                         rows.forEachIndexed { index, row ->
                             RecentResultRow(
-                                row = row,
-                                onClick = { onNavigate(if (row.isCompetition) Routes.RECORDS else Routes.TRAININGS) }
+                                event = row,
+                                onClick = { onNavigate(Routes.RECORDS) }
                             )
                             if (index < rows.lastIndex) {
                                 HorizontalDivider(
@@ -551,22 +553,17 @@ private fun SeasonStatsRow(
     }
 }
 
-private data class RecentRow(
-    val title: String,
-    val result: String,
-    val date: String,
-    val isPB: Boolean,
-    val isCompetition: Boolean
-)
-
 @Composable
 private fun RecentResultRow(
-    row: RecentRow,
+    event: RecordEvent,
     onClick: () -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
-    val tint = if (row.isCompetition) cs.tertiary else cs.primary
-    val icon = if (row.isCompetition) Icons.AutoMirrored.Filled.DirectionsRun else Icons.Default.FitnessCenter
+    val tint = if (event.isCompetition) cs.tertiary else cs.primary
+    val icon = if (event.isCompetition) Icons.AutoMirrored.Filled.DirectionsRun else Icons.Default.FitnessCenter
+    val dateText = remember(event.date) {
+        SimpleDateFormat("d MMM", Locale.forLanguageTag("ru")).format(Date(event.date))
+    }
 
     Surface(onClick = onClick, color = Color.Transparent) {
         Row(
@@ -580,14 +577,15 @@ private fun RecentResultRow(
 
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = row.title,
+                    text = event.displayName,
                     style = MaterialTheme.typography.titleSmall,
                     color = cs.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = (if (row.isCompetition) "Старт" else "Тренировка") + " · " + row.date,
+                    text = (if (event.previousValue == null) "Первый результат" else "Новый рекорд") +
+                        " · " + (if (event.isCompetition) "старт" else "тренировка") + " · " + dateText,
                     style = MaterialTheme.typography.bodySmall,
                     color = cs.onSurfaceVariant,
                     maxLines = 1,
@@ -596,13 +594,13 @@ private fun RecentResultRow(
             }
 
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(text = row.result, style = NumberMedium, color = cs.onSurface)
-                if (row.isPB) {
+                Text(text = formatRecordValue(event.value, event.unit), style = NumberMedium, color = cs.onSurface)
+                if (event.previousValue != null) {
                     StatusPill(
-                        text = "PB",
-                        contentColor = MaterialTheme.extraColors.onGoldContainer,
-                        containerColor = MaterialTheme.extraColors.goldContainer,
-                        icon = Icons.Default.Star
+                        text = formatRecordDelta(event.value, event.previousValue, event.unit),
+                        contentColor = cs.onPrimaryContainer,
+                        containerColor = cs.primaryContainer,
+                        icon = Icons.AutoMirrored.Filled.TrendingUp
                     )
                 }
             }

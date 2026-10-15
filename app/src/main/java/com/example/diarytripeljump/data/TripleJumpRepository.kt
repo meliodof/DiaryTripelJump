@@ -11,14 +11,14 @@ class TripleJumpRepository(
     private val customExerciseCategoryDao: CustomExerciseCategoryDao,
     private val exerciseDao: ExerciseDao,
     private val exerciseResultDao: ExerciseResultDao,
-    private val equipmentDao: EquipmentDao,
     private val trainingJumpResultDao: TrainingJumpResultDao,
     private val preparationPeriodDao: PreparationPeriodDao,
     private val analyticsDao: AnalyticsDao,
     private val analyticsIndicatorDao: AnalyticsIndicatorDao,
     private val analyticsResultDao: AnalyticsResultDao,
     private val correctionHintDao: CorrectionHintDao,
-    private val controlIndicatorDao: ControlIndicatorDao
+    private val controlIndicatorDao: ControlIndicatorDao,
+    private val inventoryDao: InventoryDao
 ) {
     suspend fun clearAllDatabaseData() {
         competitionDao.deleteAllCompetitions()
@@ -26,11 +26,6 @@ class TripleJumpRepository(
         trainingSessionDao.deleteAllTrainings()
         exerciseResultDao.deleteAllExerciseResults()
     }
-
-    // Equipment / Inventory
-    fun getAllEquipment(): Flow<List<EquipmentItem>> = equipmentDao.getAllEquipment()
-    suspend fun insertEquipment(item: EquipmentItem): Long = equipmentDao.insert(item)
-    suspend fun deleteEquipment(item: EquipmentItem) = equipmentDao.delete(item)
 
     // Athlete Profile
     fun getProfile(): Flow<AthleteProfile?> = athleteProfileDao.getProfile()
@@ -46,6 +41,7 @@ class TripleJumpRepository(
     suspend fun deleteCompetition(competition: Competition) = competitionDao.delete(competition)
 
     // Triple Jump Results
+    fun getAllResults(): Flow<List<TripleJumpResult>> = tripleJumpResultDao.getAllResults()
     fun getRecentResults(limit: Int = 10): Flow<List<TripleJumpResult>> = tripleJumpResultDao.getRecentResults(limit)
     fun getResultsForCompetition(competitionId: Long): Flow<List<TripleJumpResult>> = tripleJumpResultDao.getResultsForCompetition(competitionId)
     fun getPersonalBest(): Flow<TripleJumpResult?> = tripleJumpResultDao.getPersonalBest()
@@ -81,6 +77,7 @@ class TripleJumpRepository(
 
     // Exercise Results
     fun getFavoriteExerciseResults(): Flow<List<ExerciseResultWithExercise>> = exerciseResultDao.getFavoriteExerciseResults()
+    fun getAllExerciseResults(): Flow<List<ExerciseResult>> = exerciseResultDao.getAllExerciseResults()
     fun getResultsForExercise(exerciseId: Long): Flow<List<ExerciseResult>> = exerciseResultDao.getResultsForExercise(exerciseId)
     fun getResultsForTraining(sessionId: Long): Flow<List<ExerciseResult>> = exerciseResultDao.getResultsForTraining(sessionId)
     fun getPersonalBestForExercise(exerciseId: Long): Flow<ExerciseResult?> = exerciseResultDao.getPersonalBestForExercise(exerciseId)
@@ -131,4 +128,9 @@ class TripleJumpRepository(
     suspend fun insertControlIndicator(control: ControlIndicator): Long = controlIndicatorDao.insert(control)
     suspend fun updateControlIndicator(control: ControlIndicator) = controlIndicatorDao.update(control)
     suspend fun deleteControlIndicator(control: ControlIndicator) = controlIndicatorDao.delete(control)
+
+    // Inventory
+    fun getAllInventory(): Flow<List<InventoryItem>> = inventoryDao.getAll()
+    suspend fun insertInventory(item: InventoryItem): Long = inventoryDao.insert(item)
+    suspend fun deleteInventory(item: InventoryItem) = inventoryDao.delete(item)
 }

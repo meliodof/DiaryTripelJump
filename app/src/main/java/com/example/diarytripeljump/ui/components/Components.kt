@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.ButtonColors
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -483,3 +485,10 @@ fun screenContentPadding(inner: PaddingValues, extraBottom: androidx.compose.ui.
         top = inner.calculateTopPadding() + extraTop,
         bottom = inner.calculateBottomPadding() + extraBottom
     )
+
+/** Мягкая кнопка опасного действия (удаление): тонированный фон вместо насыщенно-красной заливки. */
+@Composable
+fun destructiveButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
+    containerColor = MaterialTheme.colorScheme.errorContainer,
+    contentColor = MaterialTheme.colorScheme.onErrorContainer
+)

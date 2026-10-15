@@ -119,14 +119,6 @@ enum class TrainingType {
 
 enum class ExerciseStage { WARMUP, MAIN, COOLDOWN }
 
-@Entity(tableName = "equipment_inventory")
-data class EquipmentItem(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val name: String,
-    val unit: ResultUnit = ResultUnit.KG,
-    val value: Double = 0.0
-)
-
 @Entity(tableName = "exercise_categories")
 data class CustomExerciseCategory(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -165,14 +157,25 @@ data class ExerciseResult(
     val resultUnit: ResultUnit,
     val sets: Int? = null,
     val reps: Int? = null,
-    val isSingleLeg: Boolean = false,
-    val hasWeight: Boolean = true,
-    val hasHurdles: Boolean = false,
-    val hurdleHeightCm: Double? = null,
-    val hurdleCount: Int? = null,
     val setResultsJson: String? = null,
     val stage: ExerciseStage = ExerciseStage.MAIN,
-    val notes: String? = null
+    val hurdleHeightCm: Double? = null,
+    val notes: String? = null,
+    // Упражнение выполнялось на одной ноге; legSide: "LEFT" / "RIGHT" / null (не указана)
+    val isSingleLeg: Boolean = false,
+    val legSide: String? = null,
+    // Инвентарь, использованный в упражнении (название, единица измерения CM/KG, значение)
+    val inventoryName: String? = null,
+    val inventoryUnit: ResultUnit? = null,
+    val inventoryValue: Double? = null
+)
+
+/** Инвентарь пользователя: название и единица, в которой он измеряется (см или кг). */
+@Entity(tableName = "inventory_items")
+data class InventoryItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val unit: ResultUnit = ResultUnit.CM
 )
 
 enum class ResultUnit { KG, CM, M, REPS, SECONDS }

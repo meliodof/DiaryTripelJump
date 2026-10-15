@@ -1,11 +1,11 @@
 package com.example.diarytripeljump
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,18 +20,28 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.diarytripeljump.data.AthleteProfile
 import com.example.diarytripeljump.data.ResultUnit
 import com.example.diarytripeljump.data.TripleJumpResult
-import com.example.diarytripeljump.ui.components.AppScreenScaffold
-import com.example.diarytripeljump.ui.components.DropdownFilterChip
-import com.example.diarytripeljump.ui.components.SegmentedControl
-import com.example.diarytripeljump.ui.components.screenContentPadding
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.text.style.TextOverflow
+import com.example.diarytripeljump.ui.components.*
+import com.example.diarytripeljump.ui.theme.NumberLarge
+import com.example.diarytripeljump.ui.theme.NumberMedium
+import com.example.diarytripeljump.ui.theme.extraColors
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import com.example.diarytripeljump.data.RecordSummary
+import com.example.diarytripeljump.data.formatRecordDelta
+import com.example.diarytripeljump.data.formatRecordValue
 
 @Composable
 fun ResultsScreen(
@@ -39,64 +49,26 @@ fun ResultsScreen(
     viewModel: DiaryViewModel,
     onOpenProfile: () -> Unit = {}
 ) {
-    val rawResultsList by viewModel.rawTripleJumpResults.collectAsState()
-    val trainingsList by viewModel.allTrainingsWithExercises.collectAsState()
+    // Рекорды вычисляются автоматически из тренировок и ручных записей
+    val records by viewModel.records.collectAsState()
     val athleteProfile by viewModel.athleteProfile.collectAsState()
 
+    // Dialog States
     var showAddRecordDialog by remember { mutableStateOf(false) }
-    var showRecordHistoryDialog by remember { mutableStateOf(false) }
     var isAddingAntiRecord by remember { mutableStateOf(false) }
+    var recordToDelete by remember { mutableStateOf<RecordSummary?>(null) }
+    var historyKey by remember { mutableStateOf<String?>(null) }
 
-    var selectedSourceFilter by remember { mutableIntStateOf(0) }
-    var selectedLocationFilter by remember { mutableIntStateOf(0) }
-    var selectedCategoryFilter by remember { mutableIntStateOf(0) }
-    var selectedRecordTypeFilter by remember { mutableIntStateOf(0) }
-
-    val calculatedTrainingRecords = remember(trainingsList) {
-        val list = mutableListOf<TripleJumpResult>()
-        trainingsList.forEach { trainingItem ->
-            trainingItem.exerciseResults.forEach { exRes ->
-                if (exRes.result > 0) {
-                    val exName = exRes.exerciseName.ifBlank { "Упражнение" }
-                    val inferredCat = when {
-                        exName.contains("бег", ignoreCase = true) -> "Беговые"
-                        exName.contains("силов", ignoreCase = true) || exName.contains("присед", ignoreCase = true) -> "Силовые"
-                        else -> "Прыжковые"
-                    }
-                    list.add(
-                        TripleJumpResult(
-                            id = exRes.id,
-                            eventName = exName,
-                            result = exRes.result,
-                            resultUnit = exRes.resultUnit,
-                            date = exRes.date,
-                            isIndoor = false,
-                            isAntiRecord = false,
-                            recordLevel = "PB",
-                            exerciseCategory = inferredCat,
-                            isCompetition = false,
-                            notes = "Рекорд из тренировки"
-                        )
-                    )
-                }
-            }
-        }
-        list
-    }
-
-    val combinedAllResults = remember(rawResultsList, calculatedTrainingRecords) {
-        (rawResultsList + calculatedTrainingRecords).distinctBy { "${it.eventName}_${it.result}_${it.date}" }
-            .sortedByDescending { it.date }
-    }
+    // Filter States
+    var selectedSourceFilter by rememberSaveable { mutableIntStateOf(0) } // 0: Все, 1: Соревнования, 2: Тренировки
+    var selectedLocationFilter by rememberSaveable { mutableIntStateOf(0) } // 0: Все, 1: На улице, 2: В помещении
+    var selectedCategoryFilter by rememberSaveable { mutableIntStateOf(0) } // 0: Все, 1: Прыжковые, 2: Беговые, 3: Силовые
+    var selectedRecordTypeFilter by rememberSaveable { mutableIntStateOf(0) } // 0: Рекорды, 1: Анти-рекорды
 
     val filteredResults = remember(
-        combinedAllResults,
-        selectedSourceFilter,
-        selectedLocationFilter,
-        selectedCategoryFilter,
-        selectedRecordTypeFilter
+        records, selectedSourceFilter, selectedLocationFilter, selectedCategoryFilter, selectedRecordTypeFilter
     ) {
-        combinedAllResults.filter { item ->
+        records.filter { item ->
             val matchesSource = when (selectedSourceFilter) {
                 1 -> item.isCompetition
                 2 -> !item.isCompetition
@@ -108,24 +80,26 @@ fun ResultsScreen(
                 else -> true
             }
             val matchesCategory = when (selectedCategoryFilter) {
-                1 -> item.exerciseCategory.contains("прыжк", ignoreCase = true) || item.eventName.contains("прыжок", ignoreCase = true)
-                2 -> item.exerciseCategory.contains("бег", ignoreCase = true) || item.eventName.contains("бег", ignoreCase = true) || item.eventName.contains("30 м", ignoreCase = true)
-                3 -> item.exerciseCategory.contains("силов", ignoreCase = true) || item.eventName.contains("штанг", ignoreCase = true) || item.eventName.contains("присед", ignoreCase = true)
+                1 -> item.category.contains("прыжк", ignoreCase = true) || item.name.contains("прыжок", ignoreCase = true)
+                2 -> item.category.contains("бег", ignoreCase = true) || item.name.contains("бег", ignoreCase = true)
+                3 -> item.category.contains("силов", ignoreCase = true) || item.name.contains("штанг", ignoreCase = true) || item.name.contains("присед", ignoreCase = true)
                 else -> true
             }
-            val matchesType = if (selectedRecordTypeFilter == 1) item.isAntiRecord else !item.isAntiRecord
-
+            val matchesType = if (selectedRecordTypeFilter == 1) item.isAnti else !item.isAnti
             matchesSource && matchesLocation && matchesCategory && matchesType
         }
     }
 
-    val bestJump = remember(combinedAllResults) {
-        combinedAllResults
-            .filter { !it.isAntiRecord && it.isCompetition && it.resultUnit == ResultUnit.M }
-            .maxByOrNull { it.result }
+    // Лучший результат в тройном прыжке (в метрах) для hero-карточки
+    val bestJump = remember(records) {
+        records
+            .filter { !it.isAnti && it.isCompetition && it.unit == ResultUnit.M }
+            .maxByOrNull { it.best }
     }
 
+    val hasActiveFilters = selectedSourceFilter != 0 || selectedLocationFilter != 0 || selectedCategoryFilter != 0
     val isAntiMode = selectedRecordTypeFilter == 1
+
     val listState = rememberLazyListState()
     val fabExpanded by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
 
@@ -143,8 +117,8 @@ fun ResultsScreen(
                 expanded = fabExpanded,
                 icon = { Icon(imageVector = Icons.Default.Add, contentDescription = null) },
                 text = { Text(text = if (isAntiMode) "Анти-рекорд" else "Рекорд") },
-                containerColor = if (isAntiMode) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
-                contentColor = if (isAntiMode) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary
+                containerColor = if (isAntiMode) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primary,
+                contentColor = if (isAntiMode) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimary
             )
         }
     ) { inner ->
@@ -162,21 +136,8 @@ fun ResultsScreen(
                 )
             }
 
-            // History Button
-            item {
-                OutlinedButton(
-                    onClick = { showRecordHistoryDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.History, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("📜 История обновлений рекордов (${combinedAllResults.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
-            }
-
             if (!isAntiMode && bestJump != null) {
-                item { BestResultCard(result = bestJump) }
+                item { BestResultCard(record = bestJump, onClick = { historyKey = bestJump.key }) }
             }
 
             item {
@@ -200,58 +161,73 @@ fun ResultsScreen(
                         onSelect = { selectedCategoryFilter = it }
                     )
                     DropdownFilterChip(
-                        title = "Локация",
-                        options = listOf("Все места", "На улице", "В помещении"),
+                        title = "Место",
+                        options = listOf("Везде", "На улице", "В помещении"),
                         selectedIndex = selectedLocationFilter,
                         onSelect = { selectedLocationFilter = it }
                     )
+                    if (hasActiveFilters) {
+                        TextButton(onClick = {
+                            selectedSourceFilter = 0
+                            selectedCategoryFilter = 0
+                            selectedLocationFilter = 0
+                        }) { Text(text = "Сбросить") }
+                    }
                 }
             }
 
             if (filteredResults.isNotEmpty()) {
-                items(filteredResults, key = { "rec_${it.id}_${it.date}" }) { result ->
-                    RecordCardItem(
-                        result = result,
-                        onDelete = { viewModel.deleteTripleJumpResult(result.id) }
+                item {
+                    Text(
+                        text = "${filteredResults.size} ${pluralRu(filteredResults.size, "рекорд", "рекорда", "рекордов")} · результаты из тренировок добавляются автоматически",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                items(filteredResults, key = { it.key }) { record ->
+                    RecordCard(
+                        record = record,
+                        onClick = { historyKey = record.key },
+                        onDelete = { recordToDelete = record }
                     )
                 }
             } else {
                 item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.EmojiEvents,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(32.dp)
-                            )
-                            Text(
-                                text = "Нет сохраненных результатов по выбранным фильтрам",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    EmptyState(
+                        icon = if (isAntiMode) Icons.AutoMirrored.Filled.TrendingDown else Icons.Default.EmojiEvents,
+                        title = if (hasActiveFilters) "Ничего не найдено" else if (isAntiMode) "Анти-рекордов пока нет" else "Рекордов пока нет",
+                        message = if (hasActiveFilters) "Попробуйте изменить или сбросить фильтры."
+                        else "Внесите результаты в тренировке — рекорд появится здесь сам."
+                    )
                 }
             }
         }
     }
 
-    if (showRecordHistoryDialog) {
-        RecordHistoryModalDialog(
-            historyList = combinedAllResults,
-            onDismiss = { showRecordHistoryDialog = false }
+    // История обновлений выбранного рекорда (обновляется вместе с данными)
+    val historyRecord = historyKey?.let { key -> records.find { it.key == key } }
+    if (historyRecord != null) {
+        RecordHistorySheet(record = historyRecord, onDismiss = { historyKey = null })
+    }
+
+    if (recordToDelete != null) {
+        val target = recordToDelete!!
+        AlertDialog(
+            onDismissRequest = { recordToDelete = null },
+            title = { Text(text = "Удалить запись?", fontWeight = FontWeight.Bold) },
+            text = { Text(text = "«${target.displayName}» — ${formatRecordValue(target.best, target.unit)} будет удалена. Предыдущий результат станет рекордом.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        target.deletableResultId?.let { viewModel.deleteTripleJumpResult(it) }
+                        recordToDelete = null
+                    },
+                    colors = destructiveButtonColors()
+                ) { Text("Удалить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { recordToDelete = null }) { Text("Отмена") }
+            }
         )
     }
 
@@ -278,282 +254,286 @@ fun ResultsScreen(
     }
 }
 
+/** Крупная карточка с личным рекордом в тройном прыжке. */
 @Composable
-fun BestResultCard(result: TripleJumpResult) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "🏆 ГЛАВНЫЙ РЕКОРД (PB)",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    letterSpacing = 1.sp
-                )
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.primary
-                ) {
-                    Text(
-                        text = "ОФИЦИАЛЬНО",
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        fontSize = 9.sp
-                    )
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = result.eventName,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Text(
-                        text = "${formatDateLocal(result.date)} · ${if (result.isIndoor) "🏛️ В помещении" else "☀️ На улице"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                    )
-                }
-
-                Text(
-                    text = formatResultValue(result.result, result.resultUnit),
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun RecordCardItem(
-    result: TripleJumpResult,
-    onDelete: () -> Unit
-) {
-    val tagColor = if (result.isAntiRecord) MaterialTheme.colorScheme.error
-    else if (result.isCompetition) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.secondary
-
-    val icon = when {
-        result.isAntiRecord -> Icons.AutoMirrored.Filled.TrendingDown
-        result.exerciseCategory.contains("бег", ignoreCase = true) -> Icons.AutoMirrored.Filled.DirectionsRun
-        result.exerciseCategory.contains("силов", ignoreCase = true) -> Icons.Default.FitnessCenter
-        else -> Icons.Default.EmojiEvents
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
+private fun BestResultCard(record: RecordSummary, onClick: () -> Unit) {
+    val extra = MaterialTheme.extraColors
+    AppCard(containerColor = extra.goldContainer, border = null, onClick = onClick) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .padding(18.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(tagColor.copy(alpha = 0.12f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = tagColor,
-                        modifier = Modifier.size(22.dp)
+            IconBadge(
+                icon = Icons.Default.EmojiEvents,
+                tint = extra.gold,
+                container = extra.gold.copy(alpha = 0.18f),
+                size = 52.dp,
+                iconSize = 28.dp
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "Личный рекорд",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = extra.onGoldContainer.copy(alpha = 0.8f)
+                )
+                Text(
+                    text = formatRecordValue(record.best, record.unit),
+                    style = MaterialTheme.typography.displaySmall,
+                    color = extra.onGoldContainer
+                )
+                Text(
+                    text = "${record.displayName} · ${formatFullDate(record.bestDate)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = extra.onGoldContainer.copy(alpha = 0.8f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.History,
+                contentDescription = "История рекорда",
+                tint = extra.onGoldContainer.copy(alpha = 0.7f)
+            )
+        }
+    }
+}
+
+/** Карточка рекорда: значок вида, название, бейджи, метаданные, значение и последнее улучшение. */
+@Composable
+fun RecordCard(
+    record: RecordSummary,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    val extra = MaterialTheme.extraColors
+    val tint = when {
+        record.isAnti -> cs.secondary
+        record.isCompetition -> cs.tertiary
+        else -> cs.primary
+    }
+
+    val icon = when {
+        record.isAnti -> Icons.AutoMirrored.Filled.TrendingDown
+        record.category.contains("бег", ignoreCase = true) -> Icons.AutoMirrored.Filled.DirectionsRun
+        record.category.contains("силов", ignoreCase = true) -> Icons.Default.FitnessCenter
+        else -> Icons.Default.EmojiEvents
+    }
+
+    val lastEntry = record.history.lastOrNull()
+
+    AppCard(onClick = onClick) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, top = 14.dp, bottom = 14.dp, end = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconBadge(icon = icon, tint = tint, size = 44.dp)
+
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = record.displayName,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = cs.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    when {
+                        record.isAnti -> StatusPill("Анти-рекорд", cs.onSecondaryContainer, cs.secondaryContainer, icon = Icons.AutoMirrored.Filled.TrendingDown)
+                        record.levelLabel == "PB" -> StatusPill("PB", extra.onGoldContainer, extra.goldContainer, icon = Icons.Default.Star)
+                        else -> StatusPill("SB", cs.onSecondaryContainer, cs.secondaryContainer, icon = Icons.Default.Star)
+                    }
+                    StatusPill(
+                        text = if (record.isCompetition) "Старт" else "Тренировка",
+                        contentColor = cs.onSurfaceVariant,
+                        containerColor = cs.surfaceContainerHigh
                     )
+                    if (record.history.size > 1) {
+                        StatusPill(
+                            text = "×${record.history.size}",
+                            contentColor = cs.onSurfaceVariant,
+                            containerColor = cs.surfaceContainerHigh,
+                            icon = Icons.Default.History
+                        )
+                    }
                 }
 
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = result.eventName,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                val details = buildList {
+                    add(formatFullDate(record.bestDate))
+                    if (record.isCompetition || record.isAnti) add(if (record.isIndoor) "В помещении" else "На улице")
+                    if (!record.isIndoor && !record.weather.isNullOrBlank()) add(record.weather)
+                    if (!record.inventoryLabel.isNullOrBlank()) add(record.inventoryLabel)
+                }
+                Text(
+                    text = details.joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
 
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = if (result.isAntiRecord) MaterialTheme.colorScheme.error
-                            else if (result.recordLevel == "PB") Color(0xFFFFB300)
-                            else MaterialTheme.colorScheme.secondary
-                        ) {
-                            Text(
-                                text = if (result.isAntiRecord) "📉 АНТИ-РЕКОРД" else if (result.recordLevel == "PB") "🏆 PB (Личный)" else "⭐ SB (Сезонный)",
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                                fontSize = 9.sp
-                            )
-                        }
-                    }
-
-                    val sourceText = if (result.isCompetition) "Соревнование" else "Тренировка"
-                    val locText = if (result.isIndoor) "🏛️ В помещении" else "☀️ На улице"
-                    val weatherText = if (!result.isIndoor && !result.weatherConditions.isNullOrBlank()) " · ${result.weatherConditions}" else ""
-
-                    Text(
-                        text = "${formatDateLocal(result.date)} · $sourceText · $locText$weatherText",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = formatRecordValue(record.best, record.unit),
+                    style = NumberLarge,
+                    color = cs.onSurface,
+                    maxLines = 1
+                )
+                if (lastEntry?.previousValue != null) {
+                    StatusPill(
+                        text = formatRecordDelta(lastEntry.value, lastEntry.previousValue, record.unit),
+                        contentColor = cs.onPrimaryContainer,
+                        containerColor = cs.primaryContainer
                     )
                 }
             }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = formatResultValue(result.result, result.resultUnit),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
-                    Icon(
-                        imageVector = Icons.Default.DeleteOutline,
-                        contentDescription = "Удалить рекорд",
-                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                        modifier = Modifier.size(18.dp)
-                    )
+            OverflowMenu(
+                actions = buildList {
+                    add(MenuAction("История обновлений", Icons.Default.History, onClick = onClick))
+                    if (record.deletableResultId != null) {
+                        add(MenuAction("Удалить", Icons.Default.DeleteOutline, destructive = true, onClick = onDelete))
+                    }
                 }
+            )
+        }
+    }
+}
+
+/** Нижняя панель с историей: когда и насколько обновлялся рекорд. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RecordHistorySheet(record: RecordSummary, onDismiss: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val extra = MaterialTheme.extraColors
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = cs.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(text = record.displayName, style = MaterialTheme.typography.titleLarge, color = cs.onSurface)
+                Text(
+                    text = (if (record.isAnti) "Анти-рекорд" else "Личный рекорд") + " · " +
+                        if (record.isCompetition) "старты" else "тренировки",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = cs.onSurfaceVariant
+                )
+            }
+
+            AppCard(containerColor = extra.goldContainer, border = null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Сейчас", style = MaterialTheme.typography.labelLarge, color = extra.onGoldContainer.copy(alpha = 0.8f))
+                        Text(
+                            text = formatRecordValue(record.best, record.unit),
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = extra.onGoldContainer
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(formatFullDate(record.bestDate), style = MaterialTheme.typography.bodyMedium, color = extra.onGoldContainer)
+                        Text(
+                            "Всего результатов: ${record.attempts}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = extra.onGoldContainer.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+            }
+
+            Text(text = "История обновлений", style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
+
+            val entries = record.history.reversed()
+            AppCard {
+                entries.forEachIndexed { index, entry ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconBadge(
+                            icon = if (index == 0) Icons.Default.EmojiEvents else Icons.Default.History,
+                            tint = if (index == 0) extra.gold else cs.onSurfaceVariant,
+                            size = 36.dp,
+                            iconSize = 18.dp
+                        )
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = formatRecordValue(entry.value, record.unit),
+                                style = NumberMedium,
+                                color = cs.onSurface
+                            )
+                            val meta = buildList {
+                                add(formatFullDate(entry.date))
+                                add(if (entry.isCompetition) "старт" else "тренировка")
+                                if (!entry.inventoryLabel.isNullOrBlank()) add(entry.inventoryLabel)
+                            }
+                            Text(
+                                text = meta.joinToString(" · "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = cs.onSurfaceVariant
+                            )
+                        }
+                        if (entry.previousValue != null) {
+                            StatusPill(
+                                text = formatRecordDelta(entry.value, entry.previousValue, record.unit),
+                                contentColor = cs.onPrimaryContainer,
+                                containerColor = cs.primaryContainer
+                            )
+                        } else {
+                            StatusPill(
+                                text = "Первый результат",
+                                contentColor = cs.onSurfaceVariant,
+                                containerColor = cs.surfaceContainerHigh
+                            )
+                        }
+                    }
+                    if (index < entries.lastIndex) {
+                        HorizontalDivider(color = cs.outlineVariant, modifier = Modifier.padding(start = 64.dp))
+                    }
+                }
+            }
+
+            if (entries.size == 1) {
+                Text(
+                    text = "Рекорд пока не обновлялся. Новые лучшие результаты появятся здесь автоматически.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant
+                )
             }
         }
     }
 }
 
-@Composable
-fun RecordHistoryModalDialog(
-    historyList: List<TripleJumpResult>,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(text = "📜 История обновлений рекордов", fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 420.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (historyList.isNotEmpty()) {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        items(historyList) { item ->
-                            val sourceLabel = if (item.isCompetition) "🏆 Соревнование" else "🏋️ Тренировка"
-                            val typeLabel = if (item.isAntiRecord) "📉 Анти-рекорд" else if (item.recordLevel == "PB") "🏆 PB (Личный)" else "⭐ SB (Сезонный)"
-
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(10.dp),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = item.eventName,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = formatResultValue(item.result, item.resultUnit),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "${formatDateLocal(item.date)} · $sourceLabel",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            fontSize = 10.sp
-                                        )
-                                        Text(
-                                            text = typeLabel,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (item.isAntiRecord) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                            fontSize = 10.sp
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    Text(
-                        text = "История пока пуста",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(onClick = onDismiss) {
-                Text("Закрыть")
-            }
-        }
-    )
-}
+private fun formatFullDate(timestamp: Long): String =
+    SimpleDateFormat("d MMM yyyy", Locale.forLanguageTag("ru")).format(Date(timestamp))
 
 @Composable
 fun AddRecordDialog(
@@ -576,8 +556,8 @@ fun AddRecordDialog(
 
     var selectedUnit by remember { mutableStateOf(ResultUnit.M) }
     var isIndoor by remember { mutableStateOf(false) }
-    var recordLevel by remember { mutableStateOf("PB") }
-    var selectedCategory by remember { mutableStateOf("Прыжковые") }
+    var recordLevel by remember { mutableStateOf("PB") } // PB vs SB
+    var selectedCategory by remember { mutableStateOf("Прыжковые") } // Прыжковые, Беговые, Силовые
     var isCompetition by remember { mutableStateOf(true) }
 
     var weatherText by remember { mutableStateOf("Ясно, +22°C") }
@@ -599,6 +579,7 @@ fun AddRecordDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                // Name Field
                 OutlinedTextField(
                     value = eventNameText,
                     onValueChange = {
@@ -613,6 +594,7 @@ fun AddRecordDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                // Category Selection
                 Text(text = "Вид упражнения:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 Row(
                     modifier = Modifier
@@ -636,6 +618,7 @@ fun AddRecordDialog(
                     }
                 }
 
+                // PB vs SB Selection
                 if (!isAntiRecord) {
                     Text(text = "Уровень рекорда:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                     Row(
@@ -645,18 +628,19 @@ fun AddRecordDialog(
                         FilterChip(
                             selected = recordLevel == "PB",
                             onClick = { recordLevel = "PB" },
-                            label = { Text("🏆 PB (Личный)", fontSize = 10.sp) },
+                            label = { Text("🏆 PB (Личный рекорд)", fontSize = 10.sp) },
                             modifier = Modifier.weight(1f)
                         )
                         FilterChip(
                             selected = recordLevel == "SB",
                             onClick = { recordLevel = "SB" },
-                            label = { Text("⭐ SB (Сезонный)", fontSize = 10.sp) },
+                            label = { Text("⭐ SB (Сезонный рекорд)", fontSize = 10.sp) },
                             modifier = Modifier.weight(1f)
                         )
                     }
                 }
 
+                // Source Selection: Competition vs Training
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -666,6 +650,7 @@ fun AddRecordDialog(
                     Switch(checked = isCompetition, onCheckedChange = { isCompetition = it })
                 }
 
+                // Indoor vs Outdoor Switch
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -675,6 +660,7 @@ fun AddRecordDialog(
                     Switch(checked = isIndoor, onCheckedChange = { isIndoor = it })
                 }
 
+                // Weather input field HIDDEN for indoor!
                 if (!isIndoor) {
                     OutlinedTextField(
                         value = weatherText,
@@ -684,10 +670,11 @@ fun AddRecordDialog(
                     )
                 }
 
+                // Result Input Value
                 OutlinedTextField(
                     value = resultValueText,
                     onValueChange = { input -> resultValueText = input.filter { it.isDigit() || it == '.' } },
-                    label = { Text("Результат (${getUnitTitleLocal(selectedUnit)})") },
+                    label = { Text("Результат (${getUnitTitle(selectedUnit)})") },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -741,17 +728,7 @@ fun formatResultValue(value: Double, unit: ResultUnit): String {
     }
 }
 
-fun getUnitTitleLocal(unit: ResultUnit): String {
-    return when (unit) {
-        ResultUnit.KG -> "кг"
-        ResultUnit.CM -> "см"
-        ResultUnit.M -> "м"
-        ResultUnit.REPS -> "повторений"
-        ResultUnit.SECONDS -> "сек"
-    }
-}
-
-private fun formatDateLocal(timestamp: Long): String {
+private fun formatDate(timestamp: Long): String {
     val calendar = Calendar.getInstance()
     calendar.timeInMillis = timestamp
     val day = calendar[Calendar.DAY_OF_MONTH]

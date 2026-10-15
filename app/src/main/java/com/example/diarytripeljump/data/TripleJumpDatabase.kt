@@ -5,6 +5,8 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -23,9 +25,9 @@ import androidx.room.TypeConverters
         AnalyticsResult::class,
         CorrectionHint::class,
         ControlIndicator::class,
-        EquipmentItem::class
+        InventoryItem::class
     ],
-    version = 14,
+    version = 12,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -45,9 +47,26 @@ abstract class TripleJumpDatabase : RoomDatabase() {
     abstract fun analyticsResultDao(): AnalyticsResultDao
     abstract fun correctionHintDao(): CorrectionHintDao
     abstract fun controlIndicatorDao(): ControlIndicatorDao
-    abstract fun equipmentDao(): EquipmentDao
+    abstract fun inventoryDao(): InventoryDao
 
     companion object {
+        /** 11 → 12: одна нога и инвентарь в результатах упражнений + таблица инвентаря. Данные сохраняются. */
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE exercise_results ADD COLUMN isSingleLeg INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE exercise_results ADD COLUMN legSide TEXT")
+                db.execSQL("ALTER TABLE exercise_results ADD COLUMN inventoryName TEXT")
+                db.execSQL("ALTER TABLE exercise_results ADD COLUMN inventoryUnit TEXT")
+                db.execSQL("ALTER TABLE exercise_results ADD COLUMN inventoryValue REAL")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS inventory_items (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "name TEXT NOT NULL, " +
+                        "unit TEXT NOT NULL)"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: TripleJumpDatabase? = null
 
@@ -59,6 +78,7 @@ abstract class TripleJumpDatabase : RoomDatabase() {
                     "triple_jump_database"
                 )
                     .setJournalMode(JournalMode.TRUNCATE)
+                    .addMigrations(MIGRATION_11_12)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

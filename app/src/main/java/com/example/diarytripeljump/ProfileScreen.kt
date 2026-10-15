@@ -29,6 +29,7 @@ import com.example.diarytripeljump.data.AthleteProfile
 import java.util.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.text.style.TextOverflow
+import com.example.diarytripeljump.data.ResultUnit
 import com.example.diarytripeljump.ui.components.*
 import com.example.diarytripeljump.ui.theme.extraColors
 
@@ -44,6 +45,8 @@ fun ProfileScreen(
     val rawResultsList by viewModel.rawTripleJumpResults.collectAsState()
 
     var showEditDialog by remember { mutableStateOf(false) }
+    var showCreateInventory by remember { mutableStateOf(false) }
+    val inventoryItems by viewModel.inventoryItems.collectAsState()
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -240,6 +243,56 @@ fun ProfileScreen(
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SectionHeader(
+                    title = "Инвентарь",
+                    subtitle = "Выбирается в упражнениях тренировки",
+                    actionLabel = "Добавить",
+                    onAction = { showCreateInventory = true }
+                )
+                if (inventoryItems.isEmpty()) {
+                    EmptyState(
+                        icon = Icons.Default.FitnessCenter,
+                        title = "Инвентаря пока нет",
+                        message = "Добавьте барьеры, гири, штанги — и указывайте их размер или вес в тренировках.",
+                        actionLabel = "Добавить инвентарь",
+                        onAction = { showCreateInventory = true }
+                    )
+                } else {
+                    AppCard {
+                        inventoryItems.forEachIndexed { index, item ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconBadge(icon = Icons.Default.FitnessCenter, tint = cs.primary)
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(text = item.name, style = MaterialTheme.typography.titleSmall, color = cs.onSurface)
+                                    Text(
+                                        text = if (item.unit == ResultUnit.KG) "Измеряется в килограммах" else "Измеряется в сантиметрах",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = cs.onSurfaceVariant
+                                    )
+                                }
+                                IconButton(onClick = { viewModel.deleteInventory(item) }) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteOutline,
+                                        contentDescription = "Удалить ${item.name}",
+                                        tint = cs.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            if (index < inventoryItems.lastIndex) {
+                                HorizontalDivider(modifier = Modifier.padding(start = 70.dp), color = cs.outlineVariant)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionHeader(title = "Настройки")
                 AppCard {
                     ProfileOptionRow(
@@ -261,6 +314,16 @@ fun ProfileScreen(
                 }
             }
         }
+    }
+
+    if (showCreateInventory) {
+        CreateInventoryDialog(
+            onDismiss = { showCreateInventory = false },
+            onConfirm = { name, unit ->
+                viewModel.addInventory(name, unit)
+                showCreateInventory = false
+            }
+        )
     }
 
     if (showEditDialog) {

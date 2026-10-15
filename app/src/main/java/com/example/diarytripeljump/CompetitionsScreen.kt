@@ -243,7 +243,7 @@ fun CompetitionsScreen(
                         viewModel.deleteCompetition(itemToDelete!!)
                         itemToDelete = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    colors = destructiveButtonColors()
                 ) {
                     Text("Удалить")
                 }

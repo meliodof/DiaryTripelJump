@@ -131,27 +131,6 @@ fun AnalyticsScreen(
 
                 item { WeeklyTrainingsCard(buckets = weekly) }
 
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SectionHeader(title = "Рекомендации по технике")
-                        AppCard {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(14.dp)
-                            ) {
-                                RecommendationItem(
-                                    title = "Сохранение жёсткости во 2-й фазе",
-                                    desc = "Удерживать ритм отталкивания в фазе Step (Шаг) для сохранения горизонтальной скорости."
-                                )
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                                RecommendationItem(
-                                    title = "Стабильность разбега",
-                                    desc = "Удерживать темп на последних 4 шагах перед бруском отталкивания без подбора шага."
-                                )
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -408,36 +387,6 @@ private fun WeeklyTrainingsCard(buckets: List<WeekBucket>) {
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-fun RecommendationItem(
-    title: String,
-    desc: String
-) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.Top
-    ) {
-        IconBadge(
-            icon = Icons.Default.Lightbulb,
-            tint = MaterialTheme.colorScheme.secondary,
-            size = 36.dp,
-            iconSize = 20.dp
-        )
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = desc,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }

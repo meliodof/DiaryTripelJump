@@ -29,14 +29,14 @@ class TripleJumpApplication : Application() {
             customExerciseCategoryDao = database.customExerciseCategoryDao(),
             exerciseDao = database.exerciseDao(),
             exerciseResultDao = database.exerciseResultDao(),
-            equipmentDao = database.equipmentDao(),
             trainingJumpResultDao = database.trainingJumpResultDao(),
             preparationPeriodDao = database.preparationPeriodDao(),
             analyticsDao = database.analyticsDao(),
             analyticsIndicatorDao = database.analyticsIndicatorDao(),
             analyticsResultDao = database.analyticsResultDao(),
             correctionHintDao = database.correctionHintDao(),
-            controlIndicatorDao = database.controlIndicatorDao()
+            controlIndicatorDao = database.controlIndicatorDao(),
+            inventoryDao = database.inventoryDao()
         )
 
         applicationScope.launch {
