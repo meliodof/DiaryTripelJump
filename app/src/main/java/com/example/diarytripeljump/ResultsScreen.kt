@@ -36,6 +36,10 @@ import com.example.diarytripeljump.ui.theme.NumberLarge
 import com.example.diarytripeljump.ui.theme.NumberMedium
 import com.example.diarytripeljump.ui.theme.extraColors
 import androidx.compose.material.icons.filled.History
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.ui.text.font.FontStyle
+import com.example.diarytripeljump.data.formatNumber
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -58,6 +62,7 @@ fun ResultsScreen(
     var isAddingAntiRecord by remember { mutableStateOf(false) }
     var recordToDelete by remember { mutableStateOf<RecordSummary?>(null) }
     var historyKey by remember { mutableStateOf<String?>(null) }
+    var editingKey by remember { mutableStateOf<String?>(null) }
 
     // Filter States
     var selectedSourceFilter by rememberSaveable { mutableIntStateOf(0) } // 0: Все, 1: Соревнования, 2: Тренировки
@@ -188,6 +193,7 @@ fun ResultsScreen(
                     RecordCard(
                         record = record,
                         onClick = { historyKey = record.key },
+                        onEdit = { editingKey = record.key },
                         onDelete = { recordToDelete = record }
                     )
                 }
@@ -208,6 +214,22 @@ fun ResultsScreen(
     val historyRecord = historyKey?.let { key -> records.find { it.key == key } }
     if (historyRecord != null) {
         RecordHistorySheet(record = historyRecord, onDismiss = { historyKey = null })
+    }
+
+    val editingRecord = editingKey?.let { key -> records.find { it.key == key } }
+    if (editingRecord != null) {
+        EditRecordDialog(
+            record = editingRecord,
+            onDismiss = { editingKey = null },
+            onSave = { value, date, indoor, weather, notes ->
+                viewModel.updateRecord(editingRecord, value, date, indoor, weather, notes)
+                editingKey = null
+            },
+            onResetManual = {
+                viewModel.clearRecordOverride(editingRecord.key)
+                editingKey = null
+            }
+        )
     }
 
     if (recordToDelete != null) {
@@ -301,11 +323,13 @@ private fun BestResultCard(record: RecordSummary, onClick: () -> Unit) {
     }
 }
 
-/** Карточка рекорда: значок вида, название, бейджи, метаданные, значение и последнее улучшение. */
+/** Карточка рекорда: значок вида, название, бейджи, метаданные, значение, кнопка правки и меню. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RecordCard(
     record: RecordSummary,
     onClick: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
@@ -329,9 +353,9 @@ fun RecordCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, top = 14.dp, bottom = 14.dp, end = 4.dp),
+                .padding(start = 16.dp, top = 12.dp, bottom = 8.dp, end = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.Top
         ) {
             IconBadge(icon = icon, tint = tint, size = 44.dp)
 
@@ -341,10 +365,14 @@ fun RecordCard(
                     style = MaterialTheme.typography.titleSmall,
                     color = cs.onSurface,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp)
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     when {
                         record.isAnti -> StatusPill("Анти-рекорд", cs.onSecondaryContainer, cs.secondaryContainer, icon = Icons.AutoMirrored.Filled.TrendingDown)
                         record.levelLabel == "PB" -> StatusPill("PB", extra.onGoldContainer, extra.goldContainer, icon = Icons.Default.Star)
@@ -355,6 +383,13 @@ fun RecordCard(
                         contentColor = cs.onSurfaceVariant,
                         containerColor = cs.surfaceContainerHigh
                     )
+                    if (lastEntry?.previousValue != null && !record.isManuallyEdited) {
+                        StatusPill(
+                            text = formatRecordDelta(lastEntry.value, lastEntry.previousValue, record.unit),
+                            contentColor = cs.onPrimaryContainer,
+                            containerColor = cs.primaryContainer
+                        )
+                    }
                     if (record.history.size > 1) {
                         StatusPill(
                             text = "×${record.history.size}",
@@ -363,12 +398,20 @@ fun RecordCard(
                             icon = Icons.Default.History
                         )
                     }
+                    if (record.isManuallyEdited) {
+                        StatusPill(
+                            text = "Изменено",
+                            contentColor = cs.onSurfaceVariant,
+                            containerColor = cs.surfaceContainerHigh,
+                            icon = Icons.Default.Edit
+                        )
+                    }
                 }
 
                 val details = buildList {
                     add(formatFullDate(record.bestDate))
-                    if (record.isCompetition || record.isAnti) add(if (record.isIndoor) "В помещении" else "На улице")
-                    if (!record.isIndoor && !record.weather.isNullOrBlank()) add(record.weather)
+                    add(if (record.isIndoor) "В помещении" else "На улице")
+                    if (!record.weather.isNullOrBlank()) add(record.weather)
                     if (!record.inventoryLabel.isNullOrBlank()) add(record.inventoryLabel)
                 }
                 Text(
@@ -378,33 +421,174 @@ fun RecordCard(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-            }
-
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = formatRecordValue(record.best, record.unit),
-                    style = NumberLarge,
-                    color = cs.onSurface,
-                    maxLines = 1
-                )
-                if (lastEntry?.previousValue != null) {
-                    StatusPill(
-                        text = formatRecordDelta(lastEntry.value, lastEntry.previousValue, record.unit),
-                        contentColor = cs.onPrimaryContainer,
-                        containerColor = cs.primaryContainer
+                if (!record.notes.isNullOrBlank()) {
+                    Text(
+                        text = record.notes,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant,
+                        fontStyle = FontStyle.Italic,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
 
-            OverflowMenu(
-                actions = buildList {
-                    add(MenuAction("История обновлений", Icons.Default.History, onClick = onClick))
-                    if (record.deletableResultId != null) {
-                        add(MenuAction("Удалить", Icons.Default.DeleteOutline, destructive = true, onClick = onDelete))
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = formatRecordValue(record.best, record.unit),
+                    style = NumberLarge,
+                    color = cs.onSurface,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .padding(top = 2.dp, end = 12.dp)
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onEdit) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Редактировать запись",
+                            tint = cs.primary
+                        )
                     }
+                    OverflowMenu(
+                        actions = buildList {
+                            add(MenuAction("История обновлений", Icons.Default.History, onClick = onClick))
+                            add(MenuAction("Редактировать", Icons.Default.Edit, onClick = onEdit))
+                            if (record.deletableResultId != null) {
+                                add(MenuAction("Удалить", Icons.Default.DeleteOutline, destructive = true, onClick = onDelete))
+                            }
+                        }
+                    )
                 }
-            )
+            }
         }
+    }
+}
+
+/** Ручное редактирование рекорда или анти-рекорда: результат, дата, место, условия, заметка. */
+@Composable
+private fun EditRecordDialog(
+    record: RecordSummary,
+    onDismiss: () -> Unit,
+    onSave: (value: Double, date: Long, isIndoor: Boolean, weather: String?, notes: String?) -> Unit,
+    onResetManual: () -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    var valueText by remember {
+        mutableStateOf(
+            when (record.unit) {
+                ResultUnit.M, ResultUnit.SECONDS -> String.format(Locale.US, "%.2f", record.best)
+                else -> formatNumber(record.best)
+            }
+        )
+    }
+    var date by remember { mutableStateOf(record.bestDate) }
+    var isIndoor by remember { mutableStateOf(record.isIndoor) }
+    var weather by remember { mutableStateOf(record.weather ?: "") }
+    var notes by remember { mutableStateOf(record.notes ?: "") }
+    var showValueError by remember { mutableStateOf(false) }
+    var pickingDate by remember { mutableStateOf(false) }
+
+    val unitLabel = when (record.unit) {
+        ResultUnit.M -> "м"
+        ResultUnit.CM -> "см"
+        ResultUnit.KG -> "кг"
+        ResultUnit.SECONDS -> "сек"
+        ResultUnit.REPS -> "раз"
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(
+                    text = if (record.isAnti) "Редактировать анти-рекорд" else "Редактировать рекорд",
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = record.displayName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = cs.onSurfaceVariant
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = valueText,
+                    onValueChange = { v ->
+                        valueText = v.replace(',', '.').filter { it.isDigit() || it == '.' }
+                        showValueError = false
+                    },
+                    label = { Text("Результат, $unitLabel") },
+                    isError = showValueError,
+                    supportingText = if (showValueError) {
+                        { Text("Введите число больше нуля") }
+                    } else null,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                DateField(label = "Дата", millis = date, onClick = { pickingDate = true }, modifier = Modifier.fillMaxWidth())
+
+                Text(text = "Место", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                SegmentedControl(
+                    options = listOf("На улице", "В помещении"),
+                    selectedIndex = if (isIndoor) 1 else 0,
+                    onSelect = { isIndoor = it == 1 }
+                )
+
+                OutlinedTextField(
+                    value = weather,
+                    onValueChange = { weather = it },
+                    label = { Text("Условия (погода, ветер, покрытие)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("Заметка") },
+                    minLines = 2,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (record.isManuallyEdited) {
+                    TextButton(onClick = {
+                        onResetManual()
+                    }) { Text("Вернуть автоматическое значение") }
+                } else if (record.deletableResultId == null) {
+                    Text(
+                        text = "Запись создана из тренировки. Ручная правка действует до тех пор, пока рекорд не будет улучшен новым результатом.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val parsed = valueText.toDoubleOrNull()
+                if (parsed == null || parsed <= 0.0) showValueError = true
+                else onSave(parsed, date, isIndoor, weather.trim().ifBlank { null }, notes.trim().ifBlank { null })
+            }) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
+
+    if (pickingDate) {
+        AppDatePickerDialog(
+            initialMillis = date,
+            onDismiss = { pickingDate = false },
+            onConfirm = {
+                date = it
+                pickingDate = false
+            }
+        )
     }
 }
 

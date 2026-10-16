@@ -24,6 +24,9 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,6 +39,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -310,7 +315,7 @@ fun SegmentedControl(
                 ) {
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.labelLarge,
+                        style = if (options.size >= 3) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
                         color = fg,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -492,3 +497,83 @@ fun destructiveButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
     containerColor = MaterialTheme.colorScheme.errorContainer,
     contentColor = MaterialTheme.colorScheme.onErrorContainer
 )
+
+/** Начало текущего дня; автоматически обновляется в полночь, чтобы разделы соревнований переключались сами. */
+@Composable
+fun rememberTodayStart(): Long {
+    var today by remember { mutableLongStateOf(com.example.diarytripeljump.data.startOfDay(System.currentTimeMillis())) }
+    LaunchedEffect(today) {
+        val nextMidnight = java.util.Calendar.getInstance().apply {
+            timeInMillis = today
+            add(java.util.Calendar.DAY_OF_YEAR, 1)
+        }.timeInMillis
+        kotlinx.coroutines.delay((nextMidnight - System.currentTimeMillis()).coerceAtLeast(1_000L) + 500L)
+        today = com.example.diarytripeljump.data.startOfDay(System.currentTimeMillis())
+    }
+    return today
+}
+
+/** Диалог выбора даты. Принимает и возвращает локальные миллисекунды (начало дня). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AppDatePickerDialog(
+    initialMillis: Long,
+    onDismiss: () -> Unit,
+    onConfirm: (Long) -> Unit
+) {
+    // DatePicker работает в UTC: переводим локальную дату в UTC-полночь и обратно
+    val local = java.util.Calendar.getInstance().apply { timeInMillis = initialMillis }
+    val utcInitial = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(local.get(java.util.Calendar.YEAR), local.get(java.util.Calendar.MONTH), local.get(java.util.Calendar.DAY_OF_MONTH))
+    }.timeInMillis
+    val state = rememberDatePickerState(initialSelectedDateMillis = utcInitial)
+
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                val picked = state.selectedDateMillis
+                if (picked != null) {
+                    val utc = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply { timeInMillis = picked }
+                    val result = java.util.Calendar.getInstance().apply {
+                        clear()
+                        set(utc.get(java.util.Calendar.YEAR), utc.get(java.util.Calendar.MONTH), utc.get(java.util.Calendar.DAY_OF_MONTH))
+                    }.timeInMillis
+                    onConfirm(result)
+                } else {
+                    onDismiss()
+                }
+            }) { Text("Готово") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    ) {
+        DatePicker(state = state)
+    }
+}
+
+/** Поле-кнопка выбора даты с подписью. */
+@Composable
+fun DateField(
+    label: String,
+    millis: Long,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val text = java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale.forLanguageTag("ru")).format(java.util.Date(millis))
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(text = text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+fun parseHexColor(hex: String, fallback: Color = Color(0xFF2E7D6B)): Color =
+    try { Color(android.graphics.Color.parseColor(hex)) } catch (e: IllegalArgumentException) { fallback }

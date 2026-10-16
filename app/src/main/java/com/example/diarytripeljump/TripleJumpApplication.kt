@@ -36,7 +36,10 @@ class TripleJumpApplication : Application() {
             analyticsResultDao = database.analyticsResultDao(),
             correctionHintDao = database.correctionHintDao(),
             controlIndicatorDao = database.controlIndicatorDao(),
-            inventoryDao = database.inventoryDao()
+            inventoryDao = database.inventoryDao(),
+            trainingPeriodDao = database.trainingPeriodDao(),
+            recordOverrideDao = database.recordOverrideDao(),
+            exerciseComplexDao = database.exerciseComplexDao()
         )
 
         applicationScope.launch {

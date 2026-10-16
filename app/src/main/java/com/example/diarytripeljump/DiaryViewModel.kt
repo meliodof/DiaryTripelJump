@@ -16,12 +16,16 @@ data class ExerciseResultInput(
     val secondaryValue: Int? = null,
     val sets: Int? = null,
     val reps: Int? = null,
-    val setResults: List<Double> = emptyList(),
     val isSingleLeg: Boolean = false,
     val legSide: String? = null,
+    val hasWeight: Boolean = true,
+    val hasHurdles: Boolean = false,
+    val hurdleHeightCm: Double? = null,
+    val hurdleCount: Int? = null,
     val inventoryName: String? = null,
     val inventoryUnit: ResultUnit? = null,
-    val inventoryValue: Double? = null
+    val inventoryValue: Double? = null,
+    val setResults: List<Double> = emptyList()
 )
 
 class DiaryViewModel(
@@ -49,19 +53,25 @@ class DiaryViewModel(
     private val allExerciseResults: StateFlow<List<ExerciseResult>> = repository.getAllExerciseResults()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    /** Инвентарь пользователя (название + единица измерения: см или кг). */
     val inventoryItems: StateFlow<List<InventoryItem>> = repository.getAllInventory()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    /**
-     * Рекорды вычисляются из результатов тренировок и ручных записей — новый результат
-     * автоматически создаёт или обновляет рекорд, а удаление тренировки откатывает его.
-     */
-    val records: StateFlow<List<RecordSummary>> = combine(rawTripleJumpResults, allExerciseResults) { tj, ex ->
-        RecordsEngine.build(tj, ex)
+    private val recordOverrides: StateFlow<List<RecordOverride>> = repository.getAllRecordOverrides()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val trainingPeriods: StateFlow<List<TrainingPeriod>> = repository.getAllTrainingPeriods()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allPreparationPeriods: StateFlow<List<PreparationPeriod>> = repository.getAllPreparationPeriods()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allComplexes: StateFlow<List<ExerciseComplex>> = repository.getAllComplexes()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val records: StateFlow<List<RecordSummary>> = combine(rawTripleJumpResults, allExerciseResults, recordOverrides) { tj, ex, ov ->
+        RecordsEngine.build(tj, ex, ov)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    /** Лента обновлений рекордов (новые сверху) для главного экрана. */
     val recordEvents: StateFlow<List<RecordEvent>> = records
         .map { RecordsEngine.events(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -77,6 +87,156 @@ class DiaryViewModel(
         _uiState.update { it.copy(isDarkTheme = !it.isDarkTheme) }
     }
 
+    private fun loadData() {
+        viewModelScope.launch {
+            combine(allTrainingsWithExercises, allCompetitions, records) { trainings, comps, recs ->
+                val year = Calendar.getInstance()[Calendar.YEAR]
+                val activeTrainings = trainings.filter { !it.training.isSkipped }
+                val completedComps = comps.filter { it.status == CompetitionStatus.COMPLETED || it.status == CompetitionStatus.ONGOING }
+
+                val maxTjComp = comps.mapNotNull { c ->
+                    c.attemptsJson?.split(",")?.mapNotNull { it.trim().toDoubleOrNull() }?.maxOrNull()
+                }.maxOrNull() ?: 0.0
+
+                val maxTjRaw = rawTripleJumpResults.value.filter { !it.isAntiRecord }.maxOfOrNull { it.result } ?: 0.0
+                val bestJump = maxOf(maxTjComp, maxTjRaw)
+
+                SeasonStats(
+                    year = year,
+                    totalCompetitions = completedComps.size,
+                    totalTrainings = activeTrainings.size,
+                    personalRecords = recs.count { !it.isAnti },
+                    seasonalRecords = 0,
+                    bestTripleJump = bestJump,
+                    averageTripleJump = 0.0
+                )
+            }.collect { stats ->
+                _uiState.update { it.copy(seasonStats = stats) }
+            }
+        }
+    }
+
+    // --- Exercise Complexes ---
+    fun addExerciseComplex(name: String, exerciseNames: List<String>, notes: String? = null) {
+        viewModelScope.launch {
+            repository.insertComplex(
+                ExerciseComplex(
+                    name = name,
+                    exercisesJson = exerciseNames.joinToString(","),
+                    notes = notes
+                )
+            )
+        }
+    }
+
+    fun deleteExerciseComplex(complex: ExerciseComplex) {
+        viewModelScope.launch {
+            repository.deleteComplex(complex)
+        }
+    }
+
+    // --- Preparation Periods (With Validation against duplicate start dates!) ---
+    suspend fun addPreparationPeriodValidated(name: String, startDate: Long, endDate: Long, colorHex: String = "#1E4D3B"): Boolean {
+        val existingList = repository.getAllPreparationPeriods().first()
+
+        val calNew = Calendar.getInstance().apply { timeInMillis = startDate }
+        val duplicateStartDate = existingList.any { period ->
+            val calExisting = Calendar.getInstance().apply { timeInMillis = period.startDate }
+            calExisting.get(Calendar.YEAR) == calNew.get(Calendar.YEAR) &&
+                    calExisting.get(Calendar.DAY_OF_YEAR) == calNew.get(Calendar.DAY_OF_YEAR)
+        }
+
+        if (duplicateStartDate) {
+            return false // Duplicate start date blocked!
+        }
+
+        repository.insertPreparationPeriod(
+            PreparationPeriod(
+                name = name,
+                startDate = startDate,
+                endDate = endDate,
+                colorHex = colorHex
+            )
+        )
+        return true
+    }
+
+    fun addPreparationPeriod(name: String, startDate: Long, endDate: Long, colorHex: String = "#1E4D3B") {
+        viewModelScope.launch {
+            addPreparationPeriodValidated(name, startDate, endDate, colorHex)
+        }
+    }
+
+    fun deletePreparationPeriod(period: PreparationPeriod) {
+        viewModelScope.launch {
+            repository.deletePreparationPeriod(period)
+        }
+    }
+
+    // --- Training periods ---
+    fun saveTrainingPeriod(id: Long?, name: String, start: Long, end: Long, colorHex: String) {
+        viewModelScope.launch {
+            val period = TrainingPeriod(id = id ?: 0, name = name.trim(), startDate = minOf(start, end), endDate = maxOf(start, end), colorHex = colorHex)
+            repository.insertTrainingPeriod(period)
+        }
+    }
+
+    fun deleteTrainingPeriod(period: TrainingPeriod) {
+        viewModelScope.launch { repository.deleteTrainingPeriod(period) }
+    }
+
+    // --- Manual record edits ---
+    fun updateRecord(record: RecordSummary, value: Double, date: Long, isIndoor: Boolean, weather: String?, notes: String?) {
+        viewModelScope.launch {
+            val id = record.deletableResultId
+            if (id != null) {
+                val row = repository.getAllResults().first().find { it.id == id } ?: return@launch
+                repository.updateTripleJumpResult(
+                    row.copy(
+                        result = value,
+                        date = date,
+                        isIndoor = isIndoor,
+                        weatherConditions = weather?.takeIf { it.isNotBlank() },
+                        notes = notes?.takeIf { it.isNotBlank() }
+                    )
+                )
+            } else {
+                repository.upsertRecordOverride(
+                    RecordOverride(
+                        recordKey = record.key,
+                        baseBest = record.autoBest,
+                        value = value,
+                        date = date,
+                        isIndoor = isIndoor,
+                        weather = weather?.takeIf { it.isNotBlank() },
+                        notes = notes?.takeIf { it.isNotBlank() }
+                    )
+                )
+            }
+        }
+    }
+
+    fun resetRecordOverride(recordKey: String) {
+        viewModelScope.launch { repository.deleteRecordOverride(recordKey) }
+    }
+
+    fun clearRecordOverride(recordKey: String) = resetRecordOverride(recordKey)
+
+    // --- Inventory ---
+    fun addInventory(name: String, unit: ResultUnit) {
+        val clean = name.trim()
+        if (clean.isBlank()) return
+        viewModelScope.launch {
+            val exists = repository.getAllInventory().first().any { it.name.equals(clean, ignoreCase = true) && it.unit == unit }
+            if (!exists) repository.insertInventory(InventoryItem(name = clean, unit = unit))
+        }
+    }
+
+    fun deleteInventory(item: InventoryItem) {
+        viewModelScope.launch { repository.deleteInventory(item) }
+    }
+
+    // --- Profile ---
     fun updateAthleteProfile(
         firstName: String,
         lastName: String,
@@ -113,95 +273,18 @@ class DiaryViewModel(
         }
     }
 
-    private fun loadData() {
-        viewModelScope.launch {
-            repository.getRecentResults(10).collect { results ->
-                _uiState.update { it.copy(
-                    tripleJumpResults = results.map { result ->
-                        TripleJumpResultUi(
-                            id = result.id,
-                            event = result.eventName,
-                            result = formatResult(result.result, result.resultUnit),
-                            date = formatDate(result.date),
-                            isPB = result.recordLevel == "PB"
-                        )
-                    }
-                )}
-            }
-        }
-
-        viewModelScope.launch {
-            repository.getFavoriteExerciseResults().collect { results ->
-                _uiState.update { it.copy(
-                    favoriteExerciseResults = results.map { item ->
-                        ExerciseResultUi(
-                            id = item.exerciseResult.id,
-                            exercise = item.exercise.name,
-                            result = formatResult(item.exerciseResult.result, item.exerciseResult.resultUnit),
-                            date = formatDate(item.exerciseResult.date),
-                            isPB = item.exerciseResult.result >= 100.0
-                        )
-                    }
-                )}
-            }
-        }
-
-        viewModelScope.launch {
-            repository.getUpcomingCompetitions().collect { competitions ->
-                _uiState.update { it.copy(
-                    upcomingCompetitions = competitions
-                )}
-            }
-        }
-
-        // Статистика сезона обновляется автоматически при любом изменении тренировок, стартов и рекордов
-        viewModelScope.launch {
-            combine(allTrainingsWithExercises, allCompetitions, records) { trainings, competitions, recs ->
-                val cal = Calendar.getInstance()
-                val year = cal[Calendar.YEAR]
-                fun yearOf(millis: Long): Int = Calendar.getInstance().apply { timeInMillis = millis }[Calendar.YEAR]
-
-                val trainingCount = trainings.count { !it.training.isSkipped && yearOf(it.training.date) == year }
-                val competitionCount = competitions.count {
-                    it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED && yearOf(it.date) == year
-                }
-                val jumpRecords = recs.filter { !it.isAnti && it.unit == ResultUnit.M }
-                val bestJump = (jumpRecords.filter { it.isCompetition }.ifEmpty { jumpRecords }).maxOfOrNull { it.best } ?: 0.0
-
-                SeasonStats(
-                    year = year,
-                    totalCompetitions = competitionCount,
-                    totalTrainings = trainingCount,
-                    personalRecords = recs.count { !it.isAnti },
-                    seasonalRecords = 0,
-                    bestTripleJump = bestJump,
-                    averageTripleJump = 0.0
-                )
-            }.collect { stats ->
-                _uiState.update { it.copy(seasonStats = stats) }
-            }
-        }
-    }
-
-    // --- Inventory ---
-    fun addInventory(name: String, unit: ResultUnit) {
-        val clean = name.trim()
-        if (clean.isBlank()) return
-        viewModelScope.launch {
-            val exists = repository.getAllInventory().first().any { it.name.equals(clean, ignoreCase = true) && it.unit == unit }
-            if (!exists) repository.insertInventory(InventoryItem(name = clean, unit = unit))
-        }
-    }
-
-    fun deleteInventory(item: InventoryItem) {
-        viewModelScope.launch { repository.deleteInventory(item) }
-    }
-
+    // --- Exercises ---
     fun saveExerciseToDatabase(
         name: String,
         categoryName: String?,
         categoryColorHex: String = "#1E4D3B",
-        defaultUnit: ResultUnit = ResultUnit.KG
+        defaultUnit: ResultUnit = ResultUnit.KG,
+        isSingleLeg: Boolean = false,
+        legSide: String? = null,
+        inventoryName: String? = null,
+        inventoryUnit: ResultUnit? = null,
+        inventoryValue: Double? = null,
+        equipmentName: String? = null
     ) {
         viewModelScope.launch {
             val existing = repository.getAllExercises().first().find { it.name.equals(name, ignoreCase = true) }
@@ -211,10 +294,28 @@ class DiaryViewModel(
                         name = name,
                         categoryName = categoryName,
                         categoryColorHex = categoryColorHex,
-                        defaultUnit = defaultUnit
+                        defaultUnit = defaultUnit,
+                        isSingleLeg = isSingleLeg,
+                        legSide = legSide,
+                        inventoryName = inventoryName,
+                        inventoryUnit = inventoryUnit,
+                        inventoryValue = inventoryValue,
+                        equipmentName = equipmentName
                     )
                 )
             }
+        }
+    }
+
+    fun updateExerciseMaster(exercise: Exercise) {
+        viewModelScope.launch {
+            repository.updateExercise(exercise)
+        }
+    }
+
+    fun deleteExerciseMaster(exercise: Exercise) {
+        viewModelScope.launch {
+            repository.deleteExercise(exercise)
         }
     }
 
@@ -318,14 +419,41 @@ class DiaryViewModel(
                         resultUnit = input.unit,
                         sets = input.sets,
                         reps = input.reps,
-                        setResultsJson = setResJson,
                         isSingleLeg = input.isSingleLeg,
                         legSide = if (input.isSingleLeg) input.legSide else null,
+                        hasWeight = input.hasWeight,
+                        hasHurdles = input.hasHurdles,
+                        hurdleHeightCm = input.hurdleHeightCm,
+                        hurdleCount = input.hurdleCount,
                         inventoryName = input.inventoryName?.takeIf { it.isNotBlank() },
                         inventoryUnit = if (input.inventoryName.isNullOrBlank()) null else input.inventoryUnit,
-                        inventoryValue = if (input.inventoryName.isNullOrBlank()) null else input.inventoryValue
+                        inventoryValue = if (input.inventoryName.isNullOrBlank()) null else input.inventoryValue,
+                        setResultsJson = setResJson
                     )
                 )
+
+                // Auto Interconnection: Check if this result is a new Record (PB / Best)
+                if (input.result > 0) {
+                    val exCat = when {
+                        input.exerciseName.contains("бег", ignoreCase = true) -> "Беговые"
+                        input.exerciseName.contains("силов", ignoreCase = true) || input.exerciseName.contains("присед", ignoreCase = true) -> "Силовые"
+                        else -> "Прыжковые"
+                    }
+                    repository.insertTripleJumpResult(
+                        TripleJumpResult(
+                            eventName = input.exerciseName,
+                            result = input.result,
+                            resultUnit = input.unit,
+                            date = date,
+                            isIndoor = false,
+                            isAntiRecord = false,
+                            recordLevel = "PB",
+                            exerciseCategory = exCat,
+                            isCompetition = false,
+                            notes = "Автоматический рекорд из тренировки"
+                        )
+                    )
+                }
             }
 
             if (hopPhase != null || stepPhase != null || jumpPhase != null) {
@@ -376,12 +504,16 @@ class DiaryViewModel(
                         resultUnit = input.unit,
                         sets = input.sets,
                         reps = input.reps,
-                        setResultsJson = setResJson,
                         isSingleLeg = input.isSingleLeg,
                         legSide = if (input.isSingleLeg) input.legSide else null,
+                        hasWeight = input.hasWeight,
+                        hasHurdles = input.hasHurdles,
+                        hurdleHeightCm = input.hurdleHeightCm,
+                        hurdleCount = input.hurdleCount,
                         inventoryName = input.inventoryName?.takeIf { it.isNotBlank() },
                         inventoryUnit = if (input.inventoryName.isNullOrBlank()) null else input.inventoryUnit,
-                        inventoryValue = if (input.inventoryName.isNullOrBlank()) null else input.inventoryValue
+                        inventoryValue = if (input.inventoryName.isNullOrBlank()) null else input.inventoryValue,
+                        setResultsJson = setResJson
                     )
                 )
             }
@@ -446,9 +578,15 @@ class DiaryViewModel(
         }
     }
 
+    fun updateRecordResult(result: TripleJumpResult) {
+        viewModelScope.launch {
+            repository.updateTripleJumpResult(result)
+        }
+    }
+
     fun deleteTripleJumpResult(resultId: Long) {
         viewModelScope.launch {
-            val list = repository.getRecentResults(100).first()
+            val list = repository.getAllResults().first()
             val target = list.find { it.id == resultId }
             if (target != null) {
                 repository.deleteTripleJumpResult(target)

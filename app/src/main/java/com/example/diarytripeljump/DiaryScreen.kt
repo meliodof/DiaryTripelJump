@@ -55,6 +55,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.mutableStateOf
 import com.example.diarytripeljump.data.Competition
+import com.example.diarytripeljump.data.CompetitionPhase
+import com.example.diarytripeljump.data.phase
 import com.example.diarytripeljump.data.CompetitionStatus
 import com.example.diarytripeljump.data.RecordEvent
 import com.example.diarytripeljump.data.SeasonStats
@@ -90,6 +92,7 @@ fun DiaryScreen(
     val trainings by viewModel.allTrainingsWithExercises.collectAsState()
     val competitions by viewModel.allCompetitions.collectAsState()
     val recordEvents by viewModel.recordEvents.collectAsState()
+    val todayStart = com.example.diarytripeljump.ui.components.rememberTodayStart()
 
     val dateText = remember {
         SimpleDateFormat("EEEE, d MMMM", Locale.forLanguageTag("ru"))
@@ -148,7 +151,9 @@ fun DiaryScreen(
             }
 
             item {
-                val next = uiState.upcomingCompetitions.firstOrNull()
+                val next = competitions
+                    .filter { it.phase(todayStart) != CompetitionPhase.PAST }
+                    .minByOrNull { it.date }
                 if (next != null) {
                     NextCompetitionHero(competition = next, onClick = { onNavigate(Routes.COMPETITIONS) })
                 } else {

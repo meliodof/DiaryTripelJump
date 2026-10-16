@@ -2,6 +2,7 @@ package com.example.diarytripeljump
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
@@ -20,14 +22,15 @@ import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.FitnessCenter
-import androidx.compose.material.icons.filled.Lightbulb
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,7 +43,9 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.diarytripeljump.data.ResultUnit
+import com.example.diarytripeljump.data.TripleJumpResult
 import com.example.diarytripeljump.ui.components.AppCard
 import com.example.diarytripeljump.ui.components.AppScreenScaffold
 import com.example.diarytripeljump.ui.components.EmptyState
@@ -64,22 +69,45 @@ fun AnalyticsScreen(
     val trainingsList by viewModel.allTrainingsWithExercises.collectAsState()
     val competitionsList by viewModel.allCompetitions.collectAsState()
     val rawResults by viewModel.rawTripleJumpResults.collectAsState()
+    val preparationPeriods by viewModel.allPreparationPeriods.collectAsState()
     val athleteProfile by viewModel.athleteProfile.collectAsState()
 
-    val hasData = trainingsList.isNotEmpty() || competitionsList.isNotEmpty()
+    var selectedPeriodIndex by remember { mutableIntStateOf(0) } // 0 = Всё время
 
-    val doneTrainings = remember(trainingsList) { trainingsList.count { !it.training.isSkipped } }
-    val skippedTrainings = remember(trainingsList) { trainingsList.count { it.training.isSkipped } }
+    val selectedPeriod = remember(selectedPeriodIndex, preparationPeriods) {
+        if (selectedPeriodIndex > 0 && selectedPeriodIndex <= preparationPeriods.size) {
+            preparationPeriods[selectedPeriodIndex - 1]
+        } else null
+    }
 
-    // Результаты в метрах на соревнованиях — для графика динамики (от старых к новым, последние 12)
-    val jumpSeries = remember(rawResults) {
-        rawResults
+    val filteredTrainings = remember(trainingsList, selectedPeriod) {
+        if (selectedPeriod == null) trainingsList
+        else trainingsList.filter { it.training.date >= selectedPeriod.startDate && it.training.date <= selectedPeriod.endDate }
+    }
+
+    val filteredCompetitions = remember(competitionsList, selectedPeriod) {
+        if (selectedPeriod == null) competitionsList
+        else competitionsList.filter { it.date >= selectedPeriod.startDate && it.date <= selectedPeriod.endDate }
+    }
+
+    val filteredRawResults = remember(rawResults, selectedPeriod) {
+        if (selectedPeriod == null) rawResults
+        else rawResults.filter { it.date >= selectedPeriod.startDate && it.date <= selectedPeriod.endDate }
+    }
+
+    val hasData = filteredTrainings.isNotEmpty() || filteredCompetitions.isNotEmpty()
+
+    val doneTrainings = remember(filteredTrainings) { filteredTrainings.count { !it.training.isSkipped } }
+    val skippedTrainings = remember(filteredTrainings) { filteredTrainings.count { it.training.isSkipped } }
+
+    val jumpSeries = remember(filteredRawResults) {
+        filteredRawResults
             .filter { !it.isAntiRecord && it.isCompetition && it.resultUnit == ResultUnit.M && it.result > 0 }
             .sortedBy { it.date }
             .takeLast(12)
     }
 
-    val weekly = remember(trainingsList) { buildWeeklyBuckets(trainingsList.filter { !it.training.isSkipped }.map { it.training.date }) }
+    val weekly = remember(filteredTrainings) { buildWeeklyBuckets(filteredTrainings.filter { !it.training.isSkipped }.map { it.training.date }) }
 
     AppScreenScaffold(
         modifier = modifier,
@@ -92,12 +120,46 @@ fun AnalyticsScreen(
             contentPadding = screenContentPadding(inner),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Filter Selector: "Всё время" vs Preparation Periods!
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "ФИЛЬТР ПЕРИОДА:",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        letterSpacing = 1.sp
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilterChip(
+                            selected = selectedPeriodIndex == 0,
+                            onClick = { selectedPeriodIndex = 0 },
+                            label = { Text("Всё время", fontSize = 11.sp) }
+                        )
+
+                        preparationPeriods.forEachIndexed { index, period ->
+                            FilterChip(
+                                selected = selectedPeriodIndex == index + 1,
+                                onClick = { selectedPeriodIndex = index + 1 },
+                                label = { Text("🚩 ${period.name ?: "Период"}", fontSize = 11.sp) }
+                            )
+                        }
+                    }
+                }
+            }
+
             if (!hasData) {
                 item {
                     EmptyState(
                         icon = Icons.Default.Analytics,
-                        title = "Пока нет данных",
-                        message = "Добавьте тренировки или соревнования — здесь появятся графики и ключевые показатели."
+                        title = "Нет данных за этот период",
+                        message = "В выбpанном периоде нет проведенных тренировок или соревнований."
                     )
                 }
             } else {
@@ -118,7 +180,7 @@ fun AnalyticsScreen(
                             modifier = Modifier.weight(1f)
                         )
                         StatTile(
-                            value = "${competitionsList.size}",
+                            value = "${filteredCompetitions.size}",
                             label = "Стартов",
                             icon = Icons.Default.EmojiEvents,
                             tint = MaterialTheme.colorScheme.tertiary,
@@ -127,266 +189,217 @@ fun AnalyticsScreen(
                     }
                 }
 
-                item { JumpDynamicsCard(series = jumpSeries.map { it.result.toFloat() }, dates = jumpSeries.map { it.date }) }
-
-                item { WeeklyTrainingsCard(buckets = weekly) }
-
-            }
-        }
-    }
-}
-
-/** График динамики результатов в тройном прыжке. */
-@Composable
-private fun JumpDynamicsCard(series: List<Float>, dates: List<Long>) {
-    val cs = MaterialTheme.colorScheme
-    AppCard {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = "Динамика результатов",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = cs.onSurface
-                    )
-                    Text(
-                        text = "Тройной прыжок, соревнования",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = cs.onSurfaceVariant
-                    )
-                }
-                if (series.size >= 2) {
-                    val delta = series.last() - series.first()
-                    val positive = delta >= 0f
-                    StatusPill(
-                        text = (if (positive) "+" else "−") + String.format(Locale.getDefault(), "%.2f м", kotlin.math.abs(delta)),
-                        contentColor = if (positive) cs.onPrimaryContainer else cs.onErrorContainer,
-                        containerColor = if (positive) cs.primaryContainer else cs.errorContainer,
-                        icon = if (positive) Icons.AutoMirrored.Filled.TrendingUp else null
-                    )
-                }
-            }
-
-            if (series.size >= 2) {
-                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = String.format(Locale.getDefault(), "%.2f", series.last()),
-                        style = NumberLarge,
-                        color = cs.onSurface
-                    )
-                    Text(
-                        text = "м · последний результат",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = cs.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 3.dp)
-                    )
-                }
-
-                LineChart(
-                    values = series,
-                    lineColor = cs.primary,
-                    fillColor = cs.primary.copy(alpha = 0.22f),
-                    gridColor = cs.outlineVariant,
-                    dotCoreColor = cs.surface,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(160.dp)
-                )
-
-                val fmt = remember { SimpleDateFormat("d MMM yyyy", Locale.forLanguageTag("ru")) }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(text = fmt.format(Date(dates.first())), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                    Text(text = fmt.format(Date(dates.last())), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                }
-            } else {
-                Text(
-                    text = "Для графика нужно минимум два результата с соревнований. Добавьте их на вкладке «Рекорды».",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = cs.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LineChart(
-    values: List<Float>,
-    lineColor: Color,
-    fillColor: Color,
-    gridColor: Color,
-    dotCoreColor: Color,
-    modifier: Modifier = Modifier
-) {
-    Canvas(modifier = modifier) {
-        if (values.size < 2) return@Canvas
-
-        val minV = values.min()
-        val maxV = values.max()
-        val range = if (maxV - minV > 0.0001f) maxV - minV else 1f
-
-        val padTop = 12.dp.toPx()
-        val padBottom = 12.dp.toPx()
-        val padH = 8.dp.toPx()
-        val chartW = size.width - 2 * padH
-        val chartH = size.height - padTop - padBottom
-
-        fun px(i: Int): Float = padH + chartW * i / (values.size - 1)
-        fun py(v: Float): Float = padTop + chartH * (1f - (v - minV) / range)
-
-        // Сетка
-        for (i in 0..2) {
-            val y = padTop + chartH * i / 2f
-            drawLine(
-                color = gridColor,
-                start = Offset(0f, y),
-                end = Offset(size.width, y),
-                strokeWidth = 1.dp.toPx()
-            )
-        }
-
-        val linePath = Path()
-        values.forEachIndexed { i, v ->
-            if (i == 0) linePath.moveTo(px(i), py(v)) else linePath.lineTo(px(i), py(v))
-        }
-
-        val fillPath = Path().apply {
-            addPath(linePath)
-            lineTo(px(values.lastIndex), size.height - padBottom)
-            lineTo(px(0), size.height - padBottom)
-            close()
-        }
-        drawPath(
-            path = fillPath,
-            brush = Brush.verticalGradient(
-                colors = listOf(fillColor, Color.Transparent),
-                startY = padTop,
-                endY = size.height
-            )
-        )
-
-        drawPath(
-            path = linePath,
-            color = lineColor,
-            style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-        )
-
-        values.forEachIndexed { i, v ->
-            drawCircle(color = lineColor, radius = 5.dp.toPx(), center = Offset(px(i), py(v)))
-            drawCircle(color = dotCoreColor, radius = 2.5.dp.toPx(), center = Offset(px(i), py(v)))
-        }
-    }
-}
-
-private data class WeekBucket(val label: String, val count: Int)
-
-/** Количество выполненных тренировок по неделям, последние 8 недель (включая текущую). */
-private fun buildWeeklyBuckets(trainingDates: List<Long>): List<WeekBucket> {
-    fun weekStart(millis: Long): Long = Calendar.getInstance().apply {
-        firstDayOfWeek = Calendar.MONDAY
-        timeInMillis = millis
-        set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-        set(Calendar.HOUR_OF_DAY, 0)
-        set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-    }.timeInMillis
-
-    val counts = trainingDates.groupingBy { weekStart(it) }.eachCount()
-    val labelFormat = SimpleDateFormat("d.MM", Locale.forLanguageTag("ru"))
-
-    val result = mutableListOf<WeekBucket>()
-    var cursor = weekStart(System.currentTimeMillis())
-    repeat(8) {
-        result.add(0, WeekBucket(labelFormat.format(Date(cursor)), counts[cursor] ?: 0))
-        val prev = Calendar.getInstance().apply { timeInMillis = cursor; add(Calendar.WEEK_OF_YEAR, -1) }.timeInMillis
-        cursor = weekStart(prev)
-    }
-    return result
-}
-
-@Composable
-private fun WeeklyTrainingsCard(buckets: List<WeekBucket>) {
-    val cs = MaterialTheme.colorScheme
-    val maxCount = (buckets.maxOfOrNull { it.count } ?: 0).coerceAtLeast(1)
-    val total = buckets.sumOf { it.count }
-
-    AppCard {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = "Нагрузка по неделям",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = cs.onSurface
-                )
-                Text(
-                    text = "Тренировок за 8 недель: $total",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = cs.onSurfaceVariant
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                buckets.forEachIndexed { index, bucket ->
-                    val isCurrent = index == buckets.lastIndex
-                    val fraction = bucket.count.toFloat() / maxCount
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = if (bucket.count > 0) bucket.count.toString() else "",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = cs.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(100.dp),
-                            contentAlignment = Alignment.BottomCenter
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth(0.7f)
-                                    .fillMaxHeight(if (bucket.count > 0) fraction.coerceAtLeast(0.08f) else 0.04f)
-                                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 2.dp, bottomEnd = 2.dp))
-                                    .background(
-                                        when {
-                                            bucket.count == 0 -> cs.surfaceContainerHigh
-                                            isCurrent -> cs.primary
-                                            else -> cs.primary.copy(alpha = 0.45f)
-                                        }
-                                    )
-                            )
+                if (jumpSeries.size >= 2) {
+                    item {
+                        AppCard {
+                            Column(
+                                modifier = Modifier.padding(18.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                SectionHeader(
+                                    title = "Динамика тройного прыжка",
+                                    subtitle = "Результаты официальных соревнований"
+                                )
+                                JumpLineChart(series = jumpSeries)
+                            }
                         }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = bucket.label,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isCurrent) cs.primary else cs.onSurfaceVariant,
-                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                            maxLines = 1
-                        )
+                    }
+                }
+
+                item {
+                    AppCard {
+                        Column(
+                            modifier = Modifier.padding(18.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            SectionHeader(
+                                title = "Активность по неделям",
+                                subtitle = "За последние 6 недель"
+                            )
+                            WeeklyActivityChart(buckets = weekly)
+                        }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun JumpLineChart(series: List<TripleJumpResult>) {
+    val cs = MaterialTheme.colorScheme
+    val linePrimary = cs.primary
+    val values = series.map { it.result.toFloat() }
+    val minVal = (values.minOrNull() ?: 12f) - 0.2f
+    val maxVal = (values.maxOrNull() ?: 16f) + 0.2f
+
+    val range = if (maxVal - minVal < 0.1f) 1f else maxVal - minVal
+    val lastResult = series.lastOrNull()
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (lastResult != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = String.format(Locale.getDefault(), "%.2f м", lastResult.result),
+                        style = NumberLarge,
+                        color = cs.onSurface
+                    )
+                    Text(
+                        text = "Последний результат · ${formatShortDate(lastResult.date)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant
+                    )
+                }
+
+                val bestVal = series.maxOf { it.result }
+                if (lastResult.result >= bestVal) {
+                    StatusPill("Пик формы", cs.onPrimaryContainer, cs.primaryContainer, icon = Icons.AutoMirrored.Filled.TrendingUp)
+                }
+            }
+        }
+
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(140.dp)
+        ) {
+            val w = size.width
+            val h = size.height
+            val step = if (values.size > 1) w / (values.size - 1) else w
+
+            val points = values.mapIndexed { index, v ->
+                val x = index * step
+                val norm = (v - minVal) / range
+                val y = h - (norm * (h - 24.dp.toPx())) - 12.dp.toPx()
+                Offset(x, y)
+            }
+
+            val path = Path()
+            points.forEachIndexed { i, p ->
+                if (i == 0) path.moveTo(p.x, p.y)
+                else path.lineTo(p.x, p.y)
+            }
+
+            val fillPath = Path().apply {
+                addPath(path)
+                lineTo(points.last().x, h)
+                lineTo(points.first().x, h)
+                close()
+            }
+
+            drawPath(
+                path = fillPath,
+                brush = Brush.verticalGradient(
+                    colors = listOf(linePrimary.copy(alpha = 0.28f), linePrimary.copy(alpha = 0.0f))
+                )
+            )
+
+            drawPath(
+                path = path,
+                color = linePrimary,
+                style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+
+            points.forEach { p ->
+                drawCircle(color = cs.surface, radius = 5.dp.toPx(), center = p)
+                drawCircle(color = linePrimary, radius = 3.dp.toPx(), center = p)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeeklyActivityChart(buckets: List<WeeklyBucket>) {
+    val cs = MaterialTheme.colorScheme
+    val maxCount = (buckets.maxOfOrNull { it.count } ?: 1).coerceAtLeast(1)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(110.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Bottom
+    ) {
+        buckets.forEach { b ->
+            val fraction = b.count.toFloat() / maxCount
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = if (b.count > 0) "${b.count}" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = cs.primary
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.55f)
+                        .fillMaxHeight(fraction.coerceAtLeast(0.08f))
+                        .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                        .background(if (b.count > 0) cs.primary else cs.surfaceContainerHigh)
+                )
+
+                Text(
+                    text = b.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = cs.onSurfaceVariant,
+                    fontSize = 10.sp
+                )
+            }
+        }
+    }
+}
+
+private data class WeeklyBucket(val label: String, val count: Int)
+
+private fun buildWeeklyBuckets(timestamps: List<Long>): List<WeeklyBucket> {
+    val buckets = mutableListOf<WeeklyBucket>()
+    val cal = Calendar.getInstance()
+
+    for (w in 5 downTo 0) {
+        val weekCal = Calendar.getInstance().apply {
+            add(Calendar.WEEK_OF_YEAR, -w)
+            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val startMs = weekCal.timeInMillis
+        val endMs = startMs + 7 * 86_400_000L
+
+        val cnt = timestamps.count { it in startMs until endMs }
+        val label = if (w == 0) "Тек." else "${w}н назад"
+        buckets.add(WeeklyBucket(label, cnt))
+    }
+    return buckets
+}
+
+private fun formatShortDate(timestamp: Long): String {
+    val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
+    val day = cal[Calendar.DAY_OF_MONTH]
+    val month = when (cal[Calendar.MONTH]) {
+        Calendar.JANUARY -> "янв"
+        Calendar.FEBRUARY -> "фев"
+        Calendar.MARCH -> "мар"
+        Calendar.APRIL -> "апр"
+        Calendar.MAY -> "май"
+        Calendar.JUNE -> "июн"
+        Calendar.JULY -> "июл"
+        Calendar.AUGUST -> "авг"
+        Calendar.SEPTEMBER -> "сен"
+        Calendar.OCTOBER -> "окт"
+        Calendar.NOVEMBER -> "ноя"
+        Calendar.DECEMBER -> "дек"
+        else -> ""
+    }
+    return "$day $month"
 }

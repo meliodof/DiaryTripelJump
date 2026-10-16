@@ -30,6 +30,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
+import com.example.diarytripeljump.data.CompetitionPhase
+import com.example.diarytripeljump.data.phase
 import com.example.diarytripeljump.ui.components.*
 import com.example.diarytripeljump.ui.theme.NumberLarge
 import com.example.diarytripeljump.ui.theme.extraColors
@@ -49,22 +51,16 @@ fun CompetitionsScreen(
     var skippingCompetition by remember { mutableStateOf<Competition?>(null) }
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
-    // Categorize competitions
-    val nowMillis = System.currentTimeMillis()
-    val calNow = Calendar.getInstance().apply { timeInMillis = nowMillis }
-
-    val ongoingList = competitionsList.filter { comp ->
-        val calComp = Calendar.getInstance().apply { timeInMillis = comp.date }
-        comp.status == CompetitionStatus.ONGOING ||
-                (calComp.get(Calendar.YEAR) == calNow.get(Calendar.YEAR) && calComp.get(Calendar.DAY_OF_YEAR) == calNow.get(Calendar.DAY_OF_YEAR) && comp.status != CompetitionStatus.SKIPPED)
+    // Раздел определяется по дате и обновляется автоматически (в полночь)
+    val todayStart = rememberTodayStart()
+    val upcomingList = remember(competitionsList, todayStart) {
+        competitionsList.filter { it.phase(todayStart) == CompetitionPhase.UPCOMING }.sortedBy { it.date }
     }
-
-    val upcomingList = competitionsList.filter { comp ->
-        !ongoingList.contains(comp) && comp.date > nowMillis && comp.status != CompetitionStatus.SKIPPED && comp.status != CompetitionStatus.COMPLETED
+    val currentList = remember(competitionsList, todayStart) {
+        competitionsList.filter { it.phase(todayStart) == CompetitionPhase.CURRENT }.sortedBy { it.date }
     }
-
-    val completedOrSkippedList = competitionsList.filter { comp ->
-        !ongoingList.contains(comp) && !upcomingList.contains(comp)
+    val pastList = remember(competitionsList, todayStart) {
+        competitionsList.filter { it.phase(todayStart) == CompetitionPhase.PAST }.sortedByDescending { it.date }
     }
 
     val listState = rememberLazyListState()
@@ -95,66 +91,49 @@ fun CompetitionsScreen(
             item {
                 SegmentedControl(
                     options = listOf(
-                        "Предстоящие (${ongoingList.size + upcomingList.size})",
-                        "Архив (${completedOrSkippedList.size})"
+                        "Предстоящие (${upcomingList.size})",
+                        "Текущие (${currentList.size})",
+                        "Прошедшие (${pastList.size})"
                     ),
                     selectedIndex = selectedTab,
                     onSelect = { selectedTab = it }
                 )
             }
 
-            if (selectedTab == 0) {
-                if (ongoingList.isNotEmpty()) {
-                    item { SectionHeader(title = "Сегодня") }
-                    items(ongoingList, key = { it.id }) { competition ->
-                        CompetitionCardItem(
-                            competition = competition,
-                            onEditClick = { editingCompetition = competition },
-                            onDeleteClick = { itemToDelete = competition },
-                            onSkipClick = { skippingCompetition = competition }
-                        )
-                    }
-                }
+            val shown = when (selectedTab) {
+                0 -> upcomingList
+                1 -> currentList
+                else -> pastList
+            }
 
-                if (upcomingList.isNotEmpty()) {
-                    item { SectionHeader(title = "Впереди") }
-                    items(upcomingList, key = { it.id }) { competition ->
-                        CompetitionCardItem(
-                            competition = competition,
-                            onEditClick = { editingCompetition = competition },
-                            onDeleteClick = { itemToDelete = competition },
-                            onSkipClick = { skippingCompetition = competition }
-                        )
-                    }
+            if (shown.isNotEmpty()) {
+                items(shown, key = { it.id }) { competition ->
+                    CompetitionCardItem(
+                        competition = competition,
+                        onEditClick = { editingCompetition = competition },
+                        onDeleteClick = { itemToDelete = competition },
+                        onSkipClick = { skippingCompetition = competition }
+                    )
                 }
-
-                if (ongoingList.isEmpty() && upcomingList.isEmpty()) {
-                    item {
-                        EmptyState(
+            } else {
+                item {
+                    when (selectedTab) {
+                        0 -> EmptyState(
                             icon = Icons.Default.EmojiEvents,
-                            title = "Нет запланированных стартов",
+                            title = "Нет предстоящих стартов",
                             message = "Добавьте соревнование, и оно появится здесь с обратным отсчётом.",
                             actionLabel = "Добавить старт",
                             onAction = { showAddDialog = true }
                         )
-                    }
-                }
-            } else {
-                if (completedOrSkippedList.isNotEmpty()) {
-                    items(completedOrSkippedList, key = { it.id }) { competition ->
-                        CompetitionCardItem(
-                            competition = competition,
-                            onEditClick = { editingCompetition = competition },
-                            onDeleteClick = { itemToDelete = competition },
-                            onSkipClick = { skippingCompetition = competition }
+                        1 -> EmptyState(
+                            icon = Icons.Default.EventAvailable,
+                            title = "Сегодня стартов нет",
+                            message = "В день соревнования оно автоматически появится в этом разделе."
                         )
-                    }
-                } else {
-                    item {
-                        EmptyState(
+                        else -> EmptyState(
                             icon = Icons.Default.Flag,
-                            title = "Архив пуст",
-                            message = "Прошедшие и пропущенные соревнования появятся здесь."
+                            title = "Пока нет прошедших стартов",
+                            message = "На следующий день после старта соревнование переедет сюда."
                         )
                     }
                 }
@@ -282,10 +261,9 @@ fun CompetitionCardItem(
     val cs = MaterialTheme.colorScheme
     val extra = MaterialTheme.extraColors
     val isSkipped = competition.status == CompetitionStatus.SKIPPED
-    val isOngoing = competition.status == CompetitionStatus.ONGOING
     val days = compDaysUntil(competition.date)
-    val isToday = isOngoing || (days == 0 && !isSkipped)
-    val isFuture = days > 0 && !isSkipped && competition.status != CompetitionStatus.COMPLETED
+    val isToday = days == 0 && !isSkipped
+    val isFuture = days > 0 && !isSkipped
 
     val badgeContainer = when {
         isSkipped -> cs.errorContainer
@@ -376,6 +354,7 @@ fun CompetitionCardItem(
                             cs.onTertiaryContainer,
                             cs.tertiaryContainer
                         )
+                        else -> StatusPill("Завершён", cs.onSurfaceVariant, cs.surfaceContainerHigh)
                     }
                     if (!competition.placement.isNullOrBlank()) {
                         StatusPill(

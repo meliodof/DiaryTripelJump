@@ -18,7 +18,10 @@ class TripleJumpRepository(
     private val analyticsResultDao: AnalyticsResultDao,
     private val correctionHintDao: CorrectionHintDao,
     private val controlIndicatorDao: ControlIndicatorDao,
-    private val inventoryDao: InventoryDao
+    private val inventoryDao: InventoryDao,
+    private val trainingPeriodDao: TrainingPeriodDao,
+    private val recordOverrideDao: RecordOverrideDao,
+    private val exerciseComplexDao: ExerciseComplexDao
 ) {
     suspend fun clearAllDatabaseData() {
         competitionDao.deleteAllCompetitions()
@@ -27,10 +30,30 @@ class TripleJumpRepository(
         exerciseResultDao.deleteAllExerciseResults()
     }
 
+    // Exercise Complexes
+    fun getAllComplexes(): Flow<List<ExerciseComplex>> = exerciseComplexDao.getAllComplexes()
+    suspend fun insertComplex(complex: ExerciseComplex): Long = exerciseComplexDao.insert(complex)
+    suspend fun deleteComplex(complex: ExerciseComplex) = exerciseComplexDao.delete(complex)
+
     // Athlete Profile
     fun getProfile(): Flow<AthleteProfile?> = athleteProfileDao.getProfile()
     suspend fun insertProfile(profile: AthleteProfile) = athleteProfileDao.insert(profile)
     suspend fun updateProfile(profile: AthleteProfile) = athleteProfileDao.update(profile)
+
+    // Inventory
+    fun getAllInventory(): Flow<List<InventoryItem>> = inventoryDao.getAll()
+    suspend fun insertInventory(item: InventoryItem): Long = inventoryDao.insert(item)
+    suspend fun deleteInventory(item: InventoryItem) = inventoryDao.delete(item)
+
+    // Training Periods
+    fun getAllTrainingPeriods(): Flow<List<TrainingPeriod>> = trainingPeriodDao.getAll()
+    suspend fun insertTrainingPeriod(period: TrainingPeriod): Long = trainingPeriodDao.insert(period)
+    suspend fun deleteTrainingPeriod(period: TrainingPeriod) = trainingPeriodDao.delete(period)
+
+    // Record Overrides
+    fun getAllRecordOverrides(): Flow<List<RecordOverride>> = recordOverrideDao.getAll()
+    suspend fun upsertRecordOverride(override: RecordOverride) = recordOverrideDao.upsert(override)
+    suspend fun deleteRecordOverride(recordKey: String) = recordOverrideDao.deleteByKey(recordKey)
 
     // Competitions
     fun getUpcomingCompetitions(): Flow<List<Competition>> = competitionDao.getUpcomingCompetitions()
@@ -76,8 +99,8 @@ class TripleJumpRepository(
     suspend fun deleteExercise(exercise: Exercise) = exerciseDao.delete(exercise)
 
     // Exercise Results
-    fun getFavoriteExerciseResults(): Flow<List<ExerciseResultWithExercise>> = exerciseResultDao.getFavoriteExerciseResults()
     fun getAllExerciseResults(): Flow<List<ExerciseResult>> = exerciseResultDao.getAllExerciseResults()
+    fun getFavoriteExerciseResults(): Flow<List<ExerciseResultWithExercise>> = exerciseResultDao.getFavoriteExerciseResults()
     fun getResultsForExercise(exerciseId: Long): Flow<List<ExerciseResult>> = exerciseResultDao.getResultsForExercise(exerciseId)
     fun getResultsForTraining(sessionId: Long): Flow<List<ExerciseResult>> = exerciseResultDao.getResultsForTraining(sessionId)
     fun getPersonalBestForExercise(exerciseId: Long): Flow<ExerciseResult?> = exerciseResultDao.getPersonalBestForExercise(exerciseId)
@@ -92,6 +115,7 @@ class TripleJumpRepository(
     suspend fun deleteTrainingJumpResult(result: TrainingJumpResult) = trainingJumpResultDao.delete(result)
 
     // Preparation Periods
+    fun getAllPreparationPeriods(): Flow<List<PreparationPeriod>> = preparationPeriodDao.getAllPreparationPeriods()
     fun getPeriodsForCompetition(competitionId: Long): Flow<List<PreparationPeriod>> = preparationPeriodDao.getPeriodsForCompetition(competitionId)
     suspend fun insertPreparationPeriod(period: PreparationPeriod): Long = preparationPeriodDao.insert(period)
     suspend fun updatePreparationPeriod(period: PreparationPeriod) = preparationPeriodDao.update(period)
@@ -128,9 +152,4 @@ class TripleJumpRepository(
     suspend fun insertControlIndicator(control: ControlIndicator): Long = controlIndicatorDao.insert(control)
     suspend fun updateControlIndicator(control: ControlIndicator) = controlIndicatorDao.update(control)
     suspend fun deleteControlIndicator(control: ControlIndicator) = controlIndicatorDao.delete(control)
-
-    // Inventory
-    fun getAllInventory(): Flow<List<InventoryItem>> = inventoryDao.getAll()
-    suspend fun insertInventory(item: InventoryItem): Long = inventoryDao.insert(item)
-    suspend fun deleteInventory(item: InventoryItem) = inventoryDao.delete(item)
 }

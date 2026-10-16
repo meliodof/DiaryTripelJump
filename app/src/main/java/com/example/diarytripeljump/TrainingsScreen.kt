@@ -38,6 +38,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.text.style.TextOverflow
 import com.example.diarytripeljump.data.InventoryItem
+import com.example.diarytripeljump.data.TrainingPeriod
+import com.example.diarytripeljump.data.startOfDay
 import com.example.diarytripeljump.data.RecordsEngine
 import com.example.diarytripeljump.data.formatNumber
 import com.example.diarytripeljump.ui.components.*
@@ -53,6 +55,9 @@ fun TrainingsScreen(
     val competitionsList by viewModel.allCompetitions.collectAsState()
     val athleteProfile by viewModel.athleteProfile.collectAsState()
     val inventoryItems by viewModel.inventoryItems.collectAsState()
+    val trainingPeriods by viewModel.trainingPeriods.collectAsState()
+    var editingPeriod by remember { mutableStateOf<TrainingPeriod?>(null) }
+    var showPeriodDialog by remember { mutableStateOf(false) }
 
     // Deduplicate exercises by name
     val exercisesList = remember(rawExercisesList) {
@@ -118,8 +123,40 @@ fun TrainingsScreen(
                     selectedDateMillis = selectedDateMillis,
                     onDateSelected = { selectedDateMillis = it },
                     trainingsList = trainingsList,
-                    competitionsList = competitionsList
+                    competitionsList = competitionsList,
+                    periods = trainingPeriods
                 )
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SectionHeader(
+                        title = "Подготовительные периоды",
+                        subtitle = "Выделяются цветом на календаре",
+                        actionLabel = "Добавить",
+                        onAction = {
+                            editingPeriod = null
+                            showPeriodDialog = true
+                        }
+                    )
+                    if (trainingPeriods.isNotEmpty()) {
+                        AppCard {
+                            trainingPeriods.forEachIndexed { index, period ->
+                                PeriodRow(
+                                    period = period,
+                                    onEdit = {
+                                        editingPeriod = period
+                                        showPeriodDialog = true
+                                    },
+                                    onDelete = { viewModel.deleteTrainingPeriod(period) }
+                                )
+                                if (index < trainingPeriods.lastIndex) {
+                                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             item {
@@ -186,6 +223,17 @@ fun TrainingsScreen(
         }
     }
 
+    if (showPeriodDialog) {
+        PeriodEditorDialog(
+            initial = editingPeriod,
+            onDismiss = { showPeriodDialog = false },
+            onSave = { name, start, end, color ->
+                viewModel.saveTrainingPeriod(editingPeriod?.id, name, start, end, color)
+                showPeriodDialog = false
+            }
+        )
+    }
+
     if (trainingToDelete != null) {
         val target = trainingToDelete!!
         AlertDialog(
@@ -239,9 +287,30 @@ fun TrainingsScreen(
                 )
                 showAddTrainingDialog = false
             },
-            onSaveNewExerciseToDb = { name, category ->
-                val inferredUnit = getInferredUnitForExercise(name)
-                viewModel.saveExerciseToDatabase(name = name, categoryName = category, defaultUnit = inferredUnit)
+            onSaveExercise = { cfg ->
+                viewModel.saveExerciseToDatabase(
+                    name = cfg.name,
+                    categoryName = cfg.category,
+                    defaultUnit = getInferredUnitForExercise(cfg.name),
+                    isSingleLeg = cfg.isSingleLeg,
+                    legSide = cfg.legSide,
+                    inventoryName = cfg.inventoryName,
+                    inventoryUnit = cfg.inventoryUnit,
+                    inventoryValue = cfg.inventoryValue
+                )
+            },
+            onUpdateExercise = { exercise, cfg ->
+                viewModel.updateExerciseMaster(
+                    exercise.copy(
+                        name = cfg.name,
+                        categoryName = cfg.category,
+                        isSingleLeg = cfg.isSingleLeg,
+                        legSide = cfg.legSide,
+                        inventoryName = cfg.inventoryName,
+                        inventoryUnit = cfg.inventoryUnit,
+                        inventoryValue = cfg.inventoryValue
+                    )
+                )
             },
             inventoryItems = inventoryItems,
             onAddInventory = { name, unit -> viewModel.addInventory(name, unit) }
@@ -292,9 +361,30 @@ fun TrainingsScreen(
                 )
                 editingTrainingItem = null
             },
-            onSaveNewExerciseToDb = { name, category ->
-                val inferredUnit = getInferredUnitForExercise(name)
-                viewModel.saveExerciseToDatabase(name = name, categoryName = category, defaultUnit = inferredUnit)
+            onSaveExercise = { cfg ->
+                viewModel.saveExerciseToDatabase(
+                    name = cfg.name,
+                    categoryName = cfg.category,
+                    defaultUnit = getInferredUnitForExercise(cfg.name),
+                    isSingleLeg = cfg.isSingleLeg,
+                    legSide = cfg.legSide,
+                    inventoryName = cfg.inventoryName,
+                    inventoryUnit = cfg.inventoryUnit,
+                    inventoryValue = cfg.inventoryValue
+                )
+            },
+            onUpdateExercise = { exercise, cfg ->
+                viewModel.updateExerciseMaster(
+                    exercise.copy(
+                        name = cfg.name,
+                        categoryName = cfg.category,
+                        isSingleLeg = cfg.isSingleLeg,
+                        legSide = cfg.legSide,
+                        inventoryName = cfg.inventoryName,
+                        inventoryUnit = cfg.inventoryUnit,
+                        inventoryValue = cfg.inventoryValue
+                    )
+                )
             },
             inventoryItems = inventoryItems,
             onAddInventory = { name, unit -> viewModel.addInventory(name, unit) }
@@ -323,6 +413,161 @@ fun TrainingsScreen(
                 viewModel.deleteTrainingSession(session)
                 viewModel.addSkippedDaySession(date, reason)
                 editingSkippedTrainingItem = null
+            }
+        )
+    }
+}
+
+private val PeriodColorOptions = listOf(
+    "#2E7D6B", "#2B5CA8", "#B8471F", "#8E44AD", "#C79100", "#D81B60", "#00838F", "#6D4C41"
+)
+
+@Composable
+private fun PeriodRow(
+    period: TrainingPeriod,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    val fmt = remember { SimpleDateFormat("d MMM yyyy", Locale.forLanguageTag("ru")) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(parseHexColor(period.colorHex))
+        )
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(text = period.name, style = MaterialTheme.typography.titleSmall, color = cs.onSurface)
+            Text(
+                text = "${fmt.format(Date(period.startDate))} — ${fmt.format(Date(period.endDate))}",
+                style = MaterialTheme.typography.bodySmall,
+                color = cs.onSurfaceVariant
+            )
+        }
+        OverflowMenu(
+            actions = listOf(
+                MenuAction("Редактировать", Icons.Default.Edit, onClick = onEdit),
+                MenuAction("Удалить", Icons.Default.DeleteOutline, destructive = true, onClick = onDelete)
+            )
+        )
+    }
+}
+
+/** Окно «Подготовительный период»: название, даты начала и окончания, цвет на календаре. */
+@Composable
+fun PeriodEditorDialog(
+    initial: TrainingPeriod?,
+    onDismiss: () -> Unit,
+    onSave: (name: String, start: Long, end: Long, colorHex: String) -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    val today = remember { startOfDay(System.currentTimeMillis()) }
+    var name by remember { mutableStateOf(initial?.name ?: "") }
+    var start by remember { mutableStateOf(initial?.startDate ?: today) }
+    var end by remember { mutableStateOf(initial?.endDate ?: (today + 28L * 24 * 60 * 60 * 1000)) }
+    var colorHex by remember { mutableStateOf(initial?.colorHex ?: PeriodColorOptions.first()) }
+    var showNameError by remember { mutableStateOf(false) }
+    var pickingStart by remember { mutableStateOf(false) }
+    var pickingEnd by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = if (initial == null) "Подготовительный период" else "Редактировать период",
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = {
+                        name = it
+                        if (it.isNotBlank()) showNameError = false
+                    },
+                    label = { Text("Название периода") },
+                    isError = showNameError,
+                    supportingText = if (showNameError) {
+                        { Text("Введите название") }
+                    } else null,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                DateField(label = "Начало", millis = start, onClick = { pickingStart = true }, modifier = Modifier.fillMaxWidth())
+                DateField(label = "Окончание", millis = end, onClick = { pickingEnd = true }, modifier = Modifier.fillMaxWidth())
+                if (end < start) {
+                    Text(
+                        text = "Дата окончания раньше начала — даты будут поменяны местами.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant
+                    )
+                }
+
+                Text(text = "Цвет на календаре", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    PeriodColorOptions.forEach { hex ->
+                        val selected = hex.equals(colorHex, ignoreCase = true)
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(parseHexColor(hex))
+                                .clickable { colorHex = hex },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (selected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Выбрано",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                if (name.isBlank()) showNameError = true
+                else onSave(name.trim(), minOf(start, end), maxOf(start, end), colorHex)
+            }) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
+
+    if (pickingStart) {
+        AppDatePickerDialog(
+            initialMillis = start,
+            onDismiss = { pickingStart = false },
+            onConfirm = {
+                start = it
+                pickingStart = false
+            }
+        )
+    }
+    if (pickingEnd) {
+        AppDatePickerDialog(
+            initialMillis = end,
+            onDismiss = { pickingEnd = false },
+            onConfirm = {
+                end = it
+                pickingEnd = false
             }
         )
     }
@@ -367,7 +612,8 @@ fun CompactTrainingCalendarWidget(
     selectedDateMillis: Long?,
     onDateSelected: (Long) -> Unit,
     trainingsList: List<TrainingWithExercises>,
-    competitionsList: List<Competition> = emptyList()
+    competitionsList: List<Competition> = emptyList(),
+    periods: List<TrainingPeriod> = emptyList()
 ) {
     val cs = MaterialTheme.colorScheme
     val monthFormat = SimpleDateFormat("LLLL yyyy", Locale.forLanguageTag("ru"))
@@ -383,6 +629,20 @@ fun CompactTrainingCalendarWidget(
     }
     val competitionKeys = remember(competitionsList) {
         competitionsList.map { calDayKey(it.date) }.toSet()
+    }
+
+    // Границы периодов — по началу дня, чтобы сравнение было по датам, а не по времени
+    val periodRanges = remember(periods) {
+        periods.map { Triple(it, startOfDay(it.startDate), startOfDay(it.endDate)) }
+    }
+    val monthPeriods = remember(periods, currentMonth.timeInMillis) {
+        val first = (currentMonth.clone() as Calendar).apply {
+            set(Calendar.DAY_OF_MONTH, 1)
+        }.timeInMillis.let { startOfDay(it) }
+        val last = (currentMonth.clone() as Calendar).apply {
+            set(Calendar.DAY_OF_MONTH, getActualMaximum(Calendar.DAY_OF_MONTH))
+        }.timeInMillis.let { startOfDay(it) }
+        periodRanges.filter { (_, st, en) -> st <= last && en >= first }.map { it.first }
     }
 
     val selectedKey = selectedDateMillis?.let { calDayKey(it) }
@@ -466,58 +726,86 @@ fun CompactTrainingCalendarWidget(
 
             weeks.forEach { week ->
                 Row(modifier = Modifier.fillMaxWidth()) {
-                    week.forEach { dayCal ->
+                    week.forEachIndexed { column, dayCal ->
                         if (dayCal == null) {
                             Spacer(modifier = Modifier.weight(1f))
                         } else {
                             val key = calDayKey(dayCal.timeInMillis)
+                            val dayStart = startOfDay(dayCal.timeInMillis)
                             val isSelected = key == selectedKey
                             val isToday = key == todayKey
                             val hasCompetition = key in competitionKeys
                             val hasTraining = key in trainedKeys
                             val hasSkipped = key in skippedKeys
 
+                            val period = periodRanges.firstOrNull { (_, st, en) -> dayStart in st..en }
+                            val periodColor = period?.let { parseHexColor(it.first.colorHex) }
+                            val isPeriodStart = period != null && dayStart == period.second
+                            val isPeriodEnd = period != null && dayStart == period.third
+                            val bandRadius = 24.dp
+                            val bandShape = RoundedCornerShape(
+                                topStart = if (isPeriodStart || column == 0) bandRadius else 0.dp,
+                                bottomStart = if (isPeriodStart || column == 0) bandRadius else 0.dp,
+                                topEnd = if (isPeriodEnd || column == 6) bandRadius else 0.dp,
+                                bottomEnd = if (isPeriodEnd || column == 6) bandRadius else 0.dp
+                            )
+
                             val dotOnSelected = cs.onPrimary
-                            var cellModifier = Modifier
-                                .weight(1f)
-                                .aspectRatio(1f)
+                            var circleModifier = Modifier
+                                .fillMaxSize()
                                 .padding(2.dp)
                                 .clip(CircleShape)
                                 .background(if (isSelected) cs.primary else Color.Transparent)
                             if (isToday && !isSelected) {
-                                cellModifier = cellModifier.border(BorderStroke(1.5.dp, cs.primary), CircleShape)
+                                circleModifier = circleModifier.border(BorderStroke(1.5.dp, cs.primary), CircleShape)
                             }
 
                             Box(
-                                modifier = cellModifier.clickable { onDateSelected(dayCal.timeInMillis) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(1f),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    Text(
-                                        text = dayCal.get(Calendar.DAY_OF_MONTH).toString(),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = if (isSelected || isToday || hasTraining || hasCompetition) FontWeight.Bold else FontWeight.Normal,
-                                        color = when {
-                                            isSelected -> cs.onPrimary
-                                            isToday -> cs.primary
-                                            else -> cs.onSurface
-                                        }
+                                if (periodColor != null) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .fillMaxHeight(0.84f)
+                                            .clip(bandShape)
+                                            .background(periodColor.copy(alpha = 0.22f))
                                     )
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp),
-                                        modifier = Modifier.height(5.dp)
+                                }
+                                Box(
+                                    modifier = circleModifier.clickable { onDateSelected(dayCal.timeInMillis) },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
                                     ) {
-                                        if (hasCompetition) {
-                                            Box(Modifier.size(5.dp).clip(CircleShape).background(if (isSelected) dotOnSelected else cs.tertiary))
-                                        }
-                                        if (hasTraining) {
-                                            Box(Modifier.size(5.dp).clip(CircleShape).background(if (isSelected) dotOnSelected else cs.primary))
-                                        }
-                                        if (hasSkipped) {
-                                            Box(Modifier.size(5.dp).clip(CircleShape).background(if (isSelected) dotOnSelected else cs.error))
+                                        Text(
+                                            text = dayCal.get(Calendar.DAY_OF_MONTH).toString(),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = if (isSelected || isToday || hasTraining || hasCompetition) FontWeight.Bold else FontWeight.Normal,
+                                            color = when {
+                                                isSelected -> cs.onPrimary
+                                                isToday -> cs.primary
+                                                else -> cs.onSurface
+                                            }
+                                        )
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                            modifier = Modifier.height(5.dp)
+                                        ) {
+                                            if (hasCompetition) {
+                                                Box(Modifier.size(5.dp).clip(CircleShape).background(if (isSelected) dotOnSelected else cs.tertiary))
+                                            }
+                                            if (hasTraining) {
+                                                Box(Modifier.size(5.dp).clip(CircleShape).background(if (isSelected) dotOnSelected else cs.primary))
+                                            }
+                                            if (hasSkipped) {
+                                                Box(Modifier.size(5.dp).clip(CircleShape).background(if (isSelected) dotOnSelected else cs.error))
+                                            }
                                         }
                                     }
                                 }
@@ -541,6 +829,20 @@ fun CompactTrainingCalendarWidget(
                 LegendItem(color = cs.primary, label = "Тренировки")
                 LegendItem(color = cs.error, label = "Пропуски")
                 LegendItem(color = cs.tertiary, label = "Старты")
+            }
+            if (monthPeriods.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    monthPeriods.forEach { period ->
+                        LegendItem(color = parseHexColor(period.colorHex), label = period.name)
+                    }
+                }
             }
         }
     }
@@ -684,7 +986,8 @@ fun AddTrainingDialog(
         date: Long,
         exerciseInputs: List<ExerciseResultInput>
     ) -> Unit,
-    onSaveNewExerciseToDb: (name: String, category: String) -> Unit,
+    onSaveExercise: (ExerciseConfig) -> Unit,
+    onUpdateExercise: (Exercise, ExerciseConfig) -> Unit = { _, _ -> },
     inventoryItems: List<InventoryItem> = emptyList(),
     onAddInventory: (name: String, unit: ResultUnit) -> Unit = { _, _ -> }
 ) {
@@ -694,6 +997,7 @@ fun AddTrainingDialog(
     var showAllExercisesInList by remember { mutableStateOf(false) }
 
     var showCreateExerciseModal by remember { mutableStateOf(false) }
+    var editingExercise by remember { mutableStateOf<Exercise?>(null) }
 
     var addedExerciseInputs by remember { mutableStateOf(existingInputs) }
 
@@ -798,7 +1102,12 @@ fun AddTrainingDialog(
                                                 result = 0.0,
                                                 unit = inferredUnit,
                                                 sets = null,
-                                                reps = 10
+                                                reps = 10,
+                                                isSingleLeg = ex.isSingleLeg,
+                                                legSide = ex.legSide,
+                                                inventoryName = ex.inventoryName,
+                                                inventoryUnit = ex.inventoryUnit,
+                                                inventoryValue = ex.inventoryValue
                                             )
                                             addedExerciseInputs = addedExerciseInputs + input
                                         }
@@ -811,23 +1120,43 @@ fun AddTrainingDialog(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        .padding(start = 12.dp, top = 2.dp, bottom = 2.dp, end = 2.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = ex.name,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = if (isAdded) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isAdded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                        fontSize = 11.sp
-                                    )
+                                    Column(modifier = Modifier.weight(1f).padding(vertical = 6.dp)) {
+                                        Text(
+                                            text = ex.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = if (isAdded) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isAdded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        val tags = buildList {
+                                            if (ex.isSingleLeg) add(RecordsEngine.legSuffix(true, ex.legSide).removePrefix(" · ").replaceFirstChar { it.uppercase() })
+                                            RecordsEngine.inventoryLabel(ex.inventoryName, ex.inventoryUnit, ex.inventoryValue)?.let { add(it) }
+                                        }
+                                        if (tags.isNotEmpty()) {
+                                            Text(
+                                                text = tags.joinToString(" · "),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
                                     if (isAdded) {
                                         Icon(
                                             imageVector = Icons.Default.Check,
                                             contentDescription = "Добавлено",
                                             tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(16.dp)
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    IconButton(onClick = { editingExercise = ex }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "Редактировать упражнение",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(20.dp)
                                         )
                                     }
                                 }
@@ -881,9 +1210,7 @@ fun AddTrainingDialog(
                             },
                             onRemove = {
                                 itemToDeleteIndex = index
-                            },
-                            inventoryItems = inventoryItems,
-                            onCreateInventory = { showCreateInventoryModal = true }
+                            }
                         )
                     }
                 }
@@ -974,77 +1301,92 @@ fun AddTrainingDialog(
         )
     }
 
-    // Sub-Dialog: Create New Exercise
+    // Sub-Dialog: Новое упражнение
     if (showCreateExerciseModal) {
-        CreateNewExerciseDialog(
+        ExerciseEditorDialog(
+            initial = null,
+            inventoryItems = inventoryItems,
+            onCreateInventory = { showCreateInventoryModal = true },
             onDismiss = { showCreateExerciseModal = false },
-            onConfirm = { name, category, equipmentWeight ->
-                onSaveNewExerciseToDb(name, category)
-
-                val inferredUnit = getInferredUnitForExercise(name)
+            onConfirm = { cfg ->
+                onSaveExercise(cfg)
                 val input = ExerciseResultInput(
                     exerciseId = System.currentTimeMillis(),
-                    exerciseName = name,
-                    result = equipmentWeight ?: 0.0,
-                    unit = inferredUnit,
-                    primaryValue = equipmentWeight?.toInt(),
+                    exerciseName = cfg.name,
+                    result = 0.0,
+                    unit = getInferredUnitForExercise(cfg.name),
                     sets = null,
-                    reps = 10
+                    reps = 10,
+                    isSingleLeg = cfg.isSingleLeg,
+                    legSide = cfg.legSide,
+                    inventoryName = cfg.inventoryName,
+                    inventoryUnit = cfg.inventoryUnit,
+                    inventoryValue = cfg.inventoryValue
                 )
                 addedExerciseInputs = addedExerciseInputs + input
                 showCreateExerciseModal = false
             }
         )
     }
+
+    // Sub-Dialog: Редактировать упражнение
+    if (editingExercise != null) {
+        val target = editingExercise!!
+        ExerciseEditorDialog(
+            initial = target,
+            inventoryItems = inventoryItems,
+            onCreateInventory = { showCreateInventoryModal = true },
+            onDismiss = { editingExercise = null },
+            onConfirm = { cfg ->
+                onUpdateExercise(target, cfg)
+                // Уже добавленные в эту тренировку упражнения получают новые параметры
+                addedExerciseInputs = addedExerciseInputs.map { item ->
+                    if (item.exerciseName.equals(target.name, ignoreCase = true)) {
+                        item.copy(
+                            exerciseName = cfg.name,
+                            isSingleLeg = cfg.isSingleLeg,
+                            legSide = cfg.legSide,
+                            inventoryName = cfg.inventoryName,
+                            inventoryUnit = cfg.inventoryUnit,
+                            inventoryValue = cfg.inventoryValue
+                        )
+                    } else item
+                }
+                editingExercise = null
+            }
+        )
+    }
 }
 
-// Карточка упражнения в форме тренировки: нога, инвентарь, вес, подходы и результаты
+// Карточка упражнения в форме тренировки: параметры (нога, инвентарь) берутся из справочника
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ExerciseResultEditorCard(
     input: ExerciseResultInput,
     onUpdate: (ExerciseResultInput) -> Unit,
-    onRemove: () -> Unit,
-    inventoryItems: List<InventoryItem> = emptyList(),
-    onCreateInventory: () -> Unit = {}
+    onRemove: () -> Unit
 ) {
     var showPerSetDialog by remember { mutableStateOf(false) }
 
     var setsStr by remember(input.exerciseName) { mutableStateOf(input.sets?.toString() ?: "") }
     var repsStr by remember(input.exerciseName) { mutableStateOf(input.reps?.toString() ?: "") }
-    var weightStr by remember(input.exerciseName) { mutableStateOf(if (input.unit == ResultUnit.KG && input.result > 0) formatNumber(input.result) else "") }
-    var inventoryValueStr by remember(input.exerciseName) { mutableStateOf(input.inventoryValue?.let { formatNumber(it) } ?: "") }
 
     val cs = MaterialTheme.colorScheme
 
-    // Итоговое значение упражнения (для рекордов): лучший результат подходов; для силовых — ещё и вес
-    fun calculateAndEmit(
-        newSetResults: List<Double> = input.setResults,
-        base: ExerciseResultInput = input
-    ) {
+    // Итоговое значение упражнения (для рекордов) — лучший результат среди подходов
+    fun calculateAndEmit(newSetResults: List<Double> = input.setResults) {
         val setsVal = setsStr.filter { it.isDigit() }.toIntOrNull()
         val repsVal = repsStr.filter { it.isDigit() }.toIntOrNull()
-        val parsedWeight = weightStr.filter { it.isDigit() || it == '.' }.toDoubleOrNull() ?: 0.0
-        val parsedInventoryValue = inventoryValueStr.filter { it.isDigit() || it == '.' }.toDoubleOrNull()
 
-        val lowerBetter = RecordsEngine.isLowerBetter(base.exerciseName, base.unit)
+        val lowerBetter = RecordsEngine.isLowerBetter(input.exerciseName, input.unit)
         val positives = newSetResults.filter { it > 0 }
-        val setBest = when {
+        val best = when {
             positives.isEmpty() -> 0.0
             lowerBetter -> positives.min()
             else -> positives.max()
         }
-        val performance = if (base.unit == ResultUnit.KG) maxOf(parsedWeight, setBest) else setBest
 
-        onUpdate(
-            base.copy(
-                result = performance,
-                sets = setsVal,
-                reps = repsVal,
-                setResults = newSetResults,
-                inventoryValue = if (base.inventoryName.isNullOrBlank()) null else parsedInventoryValue
-            )
-        )
+        onUpdate(input.copy(result = best, sets = setsVal, reps = repsVal, setResults = newSetResults))
     }
 
     AppCard(containerColor = cs.surfaceContainerLow) {
@@ -1057,12 +1399,37 @@ fun ExerciseResultEditorCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = input.exerciseName,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = cs.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = input.exerciseName,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = cs.onSurface
+                    )
+                    val inventoryText = RecordsEngine.inventoryLabel(input.inventoryName, input.inventoryUnit, input.inventoryValue)
+                    if (input.isSingleLeg || inventoryText != null) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            if (input.isSingleLeg) {
+                                StatusPill(
+                                    text = RecordsEngine.legSuffix(true, input.legSide).removePrefix(" · ").replaceFirstChar { it.uppercase() },
+                                    contentColor = cs.onSecondaryContainer,
+                                    containerColor = cs.secondaryContainer
+                                )
+                            }
+                            if (inventoryText != null) {
+                                StatusPill(
+                                    text = inventoryText,
+                                    contentColor = cs.onSurfaceVariant,
+                                    containerColor = cs.surfaceContainerHigh,
+                                    icon = Icons.Default.FitnessCenter
+                                )
+                            }
+                        }
+                    }
+                }
                 IconButton(onClick = onRemove) {
                     Icon(
                         imageVector = Icons.Default.Close,
@@ -1070,103 +1437,6 @@ fun ExerciseResultEditorCard(
                         tint = cs.onSurfaceVariant
                     )
                 }
-            }
-
-            // На одной ноге
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "На одной ноге", style = MaterialTheme.typography.bodyLarge, color = cs.onSurface)
-                    Text(
-                        text = "Рекорды ведутся отдельно от упражнения на двух ногах",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = cs.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = input.isSingleLeg,
-                    onCheckedChange = { checked ->
-                        calculateAndEmit(base = input.copy(isSingleLeg = checked, legSide = if (checked) input.legSide else null))
-                    }
-                )
-            }
-            if (input.isSingleLeg) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ToggleChip(
-                        label = "Левая",
-                        selected = input.legSide == "LEFT",
-                        onClick = { calculateAndEmit(base = input.copy(legSide = if (input.legSide == "LEFT") null else "LEFT")) }
-                    )
-                    ToggleChip(
-                        label = "Правая",
-                        selected = input.legSide == "RIGHT",
-                        onClick = { calculateAndEmit(base = input.copy(legSide = if (input.legSide == "RIGHT") null else "RIGHT")) }
-                    )
-                }
-            }
-
-            HorizontalDivider(color = cs.outlineVariant)
-
-            // Инвентарь
-            Text(text = "Инвентарь", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                FilterChip(
-                    selected = input.inventoryName.isNullOrBlank(),
-                    onClick = {
-                        inventoryValueStr = ""
-                        calculateAndEmit(base = input.copy(inventoryName = null, inventoryUnit = null, inventoryValue = null))
-                    },
-                    label = { Text("Без инвентаря") }
-                )
-                inventoryItems.forEach { item ->
-                    val selected = input.inventoryName.equals(item.name, ignoreCase = true) && input.inventoryUnit == item.unit
-                    FilterChip(
-                        selected = selected,
-                        onClick = {
-                            calculateAndEmit(base = input.copy(inventoryName = item.name, inventoryUnit = item.unit))
-                        },
-                        label = { Text("${item.name}, ${getUnitTitle(item.unit)}") }
-                    )
-                }
-                AssistChip(
-                    onClick = onCreateInventory,
-                    label = { Text("Новый") },
-                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) }
-                )
-            }
-            if (!input.inventoryName.isNullOrBlank()) {
-                OutlinedTextField(
-                    value = inventoryValueStr,
-                    onValueChange = { v ->
-                        inventoryValueStr = v.filter { it.isDigit() || it == '.' }
-                        calculateAndEmit()
-                    },
-                    label = { Text("${input.inventoryName}, ${getUnitTitle(input.inventoryUnit ?: ResultUnit.CM)}") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-            }
-
-            HorizontalDivider(color = cs.outlineVariant)
-
-            // Вес — только для силовых (в кг): это и есть результат упражнения
-            if (input.unit == ResultUnit.KG) {
-                OutlinedTextField(
-                    value = weightStr,
-                    onValueChange = { v ->
-                        weightStr = v.filter { it.isDigit() || it == '.' }
-                        calculateAndEmit()
-                    },
-                    label = { Text("Рабочий вес, кг") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
             }
 
             Row(
@@ -1358,18 +1628,29 @@ fun PerSetResultsModalDialog(
     )
 }
 
-// Sub-Dialog: Create New Exercise (Category Singular Form with Red Validation Error Text)
-@Composable
-fun CreateNewExerciseDialog(
-    onDismiss: () -> Unit,
-    onConfirm: (name: String, category: String, equipmentWeight: Double?) -> Unit
-) {
-    var nameText by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf("Силовое упражнение") }
-    var weightText by remember { mutableStateOf("") }
-    var showNameError by remember { mutableStateOf(false) }
+/** Параметры упражнения, задаваемые в справочнике. */
+data class ExerciseConfig(
+    val name: String,
+    val category: String,
+    val isSingleLeg: Boolean,
+    val legSide: String?,
+    val inventoryName: String?,
+    val inventoryUnit: ResultUnit?,
+    val inventoryValue: Double?
+)
 
-    val availableCategoriesSingular = listOf(
+/** Окно «Новое / Редактировать упражнение»: название, вид, одна нога, инвентарь. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun ExerciseEditorDialog(
+    initial: Exercise?,
+    inventoryItems: List<InventoryItem>,
+    onCreateInventory: () -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: (ExerciseConfig) -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    val availableCategories = listOf(
         "Беговое упражнение",
         "Упражнение на технику тройного прыжка",
         "Силовое упражнение",
@@ -1377,11 +1658,28 @@ fun CreateNewExerciseDialog(
         "Упражнение ОФП"
     )
 
+    var nameText by remember { mutableStateOf(initial?.name ?: "") }
+    var selectedCategory by remember { mutableStateOf(initial?.categoryName ?: "Силовое упражнение") }
+    var isSingleLeg by remember { mutableStateOf(initial?.isSingleLeg ?: false) }
+    var legSide by remember { mutableStateOf(initial?.legSide) }
+    var inventoryName by remember { mutableStateOf(initial?.inventoryName) }
+    var inventoryUnit by remember { mutableStateOf(initial?.inventoryUnit) }
+    var inventoryValueText by remember { mutableStateOf(initial?.inventoryValue?.let { formatNumber(it) } ?: "") }
+    var showNameError by remember { mutableStateOf(false) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = "Новое Упражнение", fontWeight = FontWeight.Bold) },
+        title = {
+            Text(
+                text = if (initial == null) "Новое упражнение" else "Редактировать упражнение",
+                fontWeight = FontWeight.Bold
+            )
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 OutlinedTextField(
                     value = nameText,
                     onValueChange = {
@@ -1391,62 +1689,132 @@ fun CreateNewExerciseDialog(
                     label = { Text("Название упражнения") },
                     isError = showNameError && nameText.isBlank(),
                     supportingText = if (showNameError && nameText.isBlank()) {
-                        { Text("Это поле обязательно для заполнения", color = MaterialTheme.colorScheme.error) }
+                        { Text("Это поле обязательно для заполнения") }
                     } else null,
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Text(
-                    text = "Вид упражнения:",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
+                Text(text = "Вид упражнения", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    availableCategoriesSingular.forEach { cat ->
+                    availableCategories.forEach { cat ->
                         FilterChip(
                             selected = selectedCategory == cat,
                             onClick = { selectedCategory = cat },
-                            label = { Text(cat, fontSize = 10.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.primary
-                            ),
-                            modifier = Modifier.fillMaxWidth()
+                            label = { Text(cat) }
                         )
                     }
                 }
 
-                OutlinedTextField(
-                    value = weightText,
-                    onValueChange = { input -> weightText = input.filter { it.isDigit() || it == '.' } },
-                    label = { Text("Вес снаряда (кг) [если со снарядом]") },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                HorizontalDivider(color = cs.outlineVariant)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Исполнение на одной ноге", style = MaterialTheme.typography.bodyLarge, color = cs.onSurface)
+                        Text(
+                            text = "Рекорды ведутся отдельно от упражнения на двух ногах",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = cs.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isSingleLeg,
+                        onCheckedChange = {
+                            isSingleLeg = it
+                            if (!it) legSide = null
+                        }
+                    )
+                }
+                if (isSingleLeg) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ToggleChip(
+                            label = "Левая",
+                            selected = legSide == "LEFT",
+                            onClick = { legSide = if (legSide == "LEFT") null else "LEFT" }
+                        )
+                        ToggleChip(
+                            label = "Правая",
+                            selected = legSide == "RIGHT",
+                            onClick = { legSide = if (legSide == "RIGHT") null else "RIGHT" }
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = cs.outlineVariant)
+
+                Text(text = "Инвентарь", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    FilterChip(
+                        selected = inventoryName.isNullOrBlank(),
+                        onClick = {
+                            inventoryName = null
+                            inventoryUnit = null
+                            inventoryValueText = ""
+                        },
+                        label = { Text("Без инвентаря") }
+                    )
+                    inventoryItems.forEach { item ->
+                        FilterChip(
+                            selected = inventoryName.equals(item.name, ignoreCase = true) && inventoryUnit == item.unit,
+                            onClick = {
+                                inventoryName = item.name
+                                inventoryUnit = item.unit
+                            },
+                            label = { Text("${item.name}, ${getUnitTitle(item.unit)}") }
+                        )
+                    }
+                    AssistChip(
+                        onClick = onCreateInventory,
+                        label = { Text("Новый") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize))
+                        }
+                    )
+                }
+                if (!inventoryName.isNullOrBlank()) {
+                    OutlinedTextField(
+                        value = inventoryValueText,
+                        onValueChange = { v -> inventoryValueText = v.filter { it.isDigit() || it == '.' } },
+                        label = { Text("$inventoryName, ${getUnitTitle(inventoryUnit ?: ResultUnit.CM)}") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    if (nameText.isNotBlank()) {
-                        onConfirm(nameText, selectedCategory, weightText.toDoubleOrNull())
-                    } else {
+                    if (nameText.isBlank()) {
                         showNameError = true
+                    } else {
+                        val hasInventory = !inventoryName.isNullOrBlank()
+                        onConfirm(
+                            ExerciseConfig(
+                                name = nameText.trim(),
+                                category = selectedCategory,
+                                isSingleLeg = isSingleLeg,
+                                legSide = if (isSingleLeg) legSide else null,
+                                inventoryName = if (hasInventory) inventoryName else null,
+                                inventoryUnit = if (hasInventory) inventoryUnit else null,
+                                inventoryValue = if (hasInventory) inventoryValueText.toDoubleOrNull() else null
+                            )
+                        )
                     }
                 }
-            ) {
-                Text("Сохранить")
-            }
+            ) { Text("Сохранить") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена")
-            }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
 }
 

@@ -33,7 +33,11 @@ data class RecordSummary(
     /** id строки triple_jump_results, которую можно удалить; null — рекорд берётся из тренировки. */
     val deletableResultId: Long?,
     val attempts: Int,
-    val history: List<RecordHistoryEntry>
+    val history: List<RecordHistoryEntry>,
+    val notes: String? = null,
+    /** Значение, вычисленное автоматически (до ручной правки). */
+    val autoBest: Double = best,
+    val isManuallyEdited: Boolean = false
 )
 
 /** Событие «рекорд обновлён» для ленты на главном экране. */
@@ -67,7 +71,8 @@ object RecordsEngine {
         val inventory: String?,
         val level: String?,
         val category: String,
-        val isCompetition: Boolean
+        val isCompetition: Boolean,
+        val notes: String? = null
     )
 
     /** Для бега на время лучший результат — меньший. Для остальных единиц — больший. */
@@ -113,7 +118,11 @@ object RecordsEngine {
         return if (lowerBetter) candidates.min() else candidates.max()
     }
 
-    fun build(tj: List<TripleJumpResult>, ex: List<ExerciseResult>): List<RecordSummary> {
+    fun build(
+        tj: List<TripleJumpResult>,
+        ex: List<ExerciseResult>,
+        overrides: List<RecordOverride> = emptyList()
+    ): List<RecordSummary> {
         data class Group(
             val key: String,
             val name: String,
@@ -161,7 +170,7 @@ object RecordsEngine {
                 Sample(
                     date = r.date, value = r.result, tjId = r.id, isIndoor = r.isIndoor,
                     weather = r.weatherConditions, inventory = null, level = r.recordLevel,
-                    category = r.exerciseCategory, isCompetition = r.isCompetition
+                    category = r.exerciseCategory, isCompetition = r.isCompetition, notes = r.notes
                 )
             )
         }
@@ -184,7 +193,7 @@ object RecordsEngine {
                 }
             }
             val best = bestSample!!
-            RecordSummary(
+            val base = RecordSummary(
                 key = g.key,
                 name = g.name,
                 displayName = g.name + legSuffix(g.isSingleLeg, g.legSide),
@@ -205,8 +214,25 @@ object RecordsEngine {
                 attempts = g.samples.size,
                 history = chain.map { (s, prev) ->
                     RecordHistoryEntry(s.date, s.value, prev, s.isCompetition || g.isCompetition, s.inventory)
-                }
+                },
+                notes = best.notes
             )
+
+            // Ручная правка рекорда из тренировок действует, пока рекорд не обновился новым результатом
+            val override = overrides.find { it.recordKey == base.key }
+            if (override != null && base.deletableResultId == null && Math.abs(override.baseBest - base.best) < 1e-9) {
+                val fixedHistory = if (base.history.isEmpty()) base.history else
+                    base.history.dropLast(1) + base.history.last().copy(value = override.value, date = override.date)
+                base.copy(
+                    best = override.value,
+                    bestDate = override.date,
+                    isIndoor = override.isIndoor,
+                    weather = override.weather,
+                    notes = override.notes,
+                    history = fixedHistory,
+                    isManuallyEdited = true
+                )
+            } else base
         }.sortedByDescending { it.bestDate }
     }
 
