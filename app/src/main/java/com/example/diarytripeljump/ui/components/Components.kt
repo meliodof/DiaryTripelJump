@@ -57,6 +57,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Базовая карточка приложения: плоская, тональная, с тонкой обводкой вместо тяжёлых теней.
@@ -560,7 +563,7 @@ fun DateField(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val text = java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale.forLanguageTag("ru")).format(java.util.Date(millis))
+    val text = SimpleDateFormat("d MMMM yyyy", Locale("ru")).format(Date(millis))
     Surface(
         onClick = onClick,
         modifier = modifier,

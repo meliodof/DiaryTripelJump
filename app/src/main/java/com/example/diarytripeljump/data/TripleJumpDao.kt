@@ -50,6 +50,9 @@ interface CompetitionDao {
 
 @Dao
 interface TripleJumpResultDao {
+    @Query("SELECT * FROM triple_jump_results ORDER BY date DESC")
+    fun getAllResults(): Flow<List<TripleJumpResult>>
+
     @Query("SELECT * FROM triple_jump_results ORDER BY date DESC LIMIT :limit")
     fun getRecentResults(limit: Int = 10): Flow<List<TripleJumpResult>>
 
@@ -65,9 +68,6 @@ interface TripleJumpResultDao {
     @Transaction
     @Query("SELECT * FROM triple_jump_results WHERE id = :resultId")
     fun getResultWithAttempts(resultId: Long): Flow<TripleJumpResultWithAttempts?>
-
-    @Query("SELECT * FROM triple_jump_results ORDER BY date DESC")
-    fun getAllResults(): Flow<List<TripleJumpResult>>
 
     @Insert
     suspend fun insert(result: TripleJumpResult): Long
@@ -148,13 +148,13 @@ interface ExerciseDao {
 
     @Delete
     suspend fun delete(exercise: Exercise)
+
+    @Query("DELETE FROM exercises WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name))")
+    suspend fun deleteByName(name: String)
 }
 
 @Dao
 interface ExerciseResultDao {
-    @Query("SELECT * FROM exercise_results ORDER BY date DESC")
-    fun getAllExerciseResults(): Flow<List<ExerciseResult>>
-
     @Query("""
         SELECT exercise_results.*, exercises.name, exercises.categoryName 
         FROM exercise_results 
@@ -162,6 +162,9 @@ interface ExerciseResultDao {
         ORDER BY date DESC
     """)
     fun getFavoriteExerciseResults(): Flow<List<ExerciseResultWithExercise>>
+
+    @Query("SELECT * FROM exercise_results ORDER BY date DESC")
+    fun getAllExerciseResults(): Flow<List<ExerciseResult>>
 
     @Query("SELECT * FROM exercise_results WHERE exerciseId = :exerciseId ORDER BY date DESC")
     fun getResultsForExercise(exerciseId: Long): Flow<List<ExerciseResult>>
@@ -206,13 +209,10 @@ interface TrainingJumpResultDao {
 
 @Dao
 interface PreparationPeriodDao {
-    @Query("SELECT * FROM preparation_periods ORDER BY startDate ASC")
-    fun getAllPreparationPeriods(): Flow<List<PreparationPeriod>>
-
     @Query("SELECT * FROM preparation_periods WHERE competitionId = :competitionId")
     fun getPeriodsForCompetition(competitionId: Long): Flow<List<PreparationPeriod>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert
     suspend fun insert(period: PreparationPeriod): Long
 
     @Update
@@ -318,18 +318,6 @@ interface InventoryDao {
 }
 
 @Dao
-interface ExerciseComplexDao {
-    @Query("SELECT * FROM exercise_complexes ORDER BY name")
-    fun getAllComplexes(): Flow<List<ExerciseComplex>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(complex: ExerciseComplex): Long
-
-    @Delete
-    suspend fun delete(complex: ExerciseComplex)
-}
-
-@Dao
 interface TrainingPeriodDao {
     @Query("SELECT * FROM training_periods ORDER BY startDate")
     fun getAll(): Flow<List<TrainingPeriod>>
@@ -354,4 +342,26 @@ interface RecordOverrideDao {
 
     @Query("DELETE FROM record_overrides WHERE recordKey = :key")
     suspend fun deleteByKey(key: String)
+}
+
+@Dao
+interface ExerciseComplexDao {
+    @Transaction
+    @Query("SELECT * FROM exercise_complexes ORDER BY name COLLATE NOCASE")
+    fun getAllWithItems(): Flow<List<ComplexWithItems>>
+
+    @Insert
+    suspend fun insert(complex: ExerciseComplex): Long
+
+    @Update
+    suspend fun update(complex: ExerciseComplex)
+
+    @Delete
+    suspend fun delete(complex: ExerciseComplex)
+
+    @Insert
+    suspend fun insertItems(items: List<ComplexExercise>)
+
+    @Query("DELETE FROM complex_exercises WHERE complexId = :complexId")
+    suspend fun deleteItems(complexId: Long)
 }

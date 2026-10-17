@@ -16,6 +16,8 @@ class TripleJumpApplication : Application() {
         private set
     lateinit var repository: TripleJumpRepository
         private set
+    lateinit var seedDatabase: SeedDatabase
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -42,8 +44,9 @@ class TripleJumpApplication : Application() {
             exerciseComplexDao = database.exerciseComplexDao()
         )
 
+        seedDatabase = SeedDatabase(repository, database, this)
+
         applicationScope.launch {
-            val seedDatabase = SeedDatabase(repository)
             seedDatabase.seedInitialData()
         }
     }

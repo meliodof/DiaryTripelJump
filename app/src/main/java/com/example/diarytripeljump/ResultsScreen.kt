@@ -717,7 +717,7 @@ private fun RecordHistorySheet(record: RecordSummary, onDismiss: () -> Unit) {
 }
 
 private fun formatFullDate(timestamp: Long): String =
-    SimpleDateFormat("d MMM yyyy", Locale.forLanguageTag("ru")).format(Date(timestamp))
+    SimpleDateFormat("d MMM yyyy", Locale("ru")).format(Date(timestamp))
 
 @Composable
 fun AddRecordDialog(

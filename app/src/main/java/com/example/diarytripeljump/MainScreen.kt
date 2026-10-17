@@ -56,6 +56,7 @@ object Routes {
     const val TRAININGS = "trainings"
     const val COMPETITIONS = "competitions"
     const val RECORDS = "records"
+    const val CATALOG = "catalog"
     const val ANALYTICS = "analytics"
     const val PROFILE = "profile"
 }
@@ -71,6 +72,7 @@ enum class TopLevelDestination(
     TRAININGS(Routes.TRAININGS, "Тренировки", Icons.Outlined.FitnessCenter, Icons.Filled.FitnessCenter),
     COMPETITIONS(Routes.COMPETITIONS, "Старты", Icons.Outlined.EmojiEvents, Icons.Filled.EmojiEvents),
     RECORDS(Routes.RECORDS, "Рекорды", Icons.Outlined.MilitaryTech, Icons.Filled.MilitaryTech),
+    CATALOG(Routes.CATALOG, "Каталог", Icons.Outlined.Category, Icons.Filled.Category),
     ANALYTICS(Routes.ANALYTICS, "Аналитика", Icons.Outlined.BarChart, Icons.Filled.BarChart)
 }
 
@@ -164,13 +166,20 @@ fun MainScreen(
                         )
                     }
                     composable(Routes.TRAININGS) {
-                        TrainingsScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
+                        TrainingsScreen(
+                            viewModel = viewModel,
+                            onOpenProfile = onOpenProfile,
+                            onOpenAnalytics = { onNavigate(Routes.ANALYTICS) }
+                        )
                     }
                     composable(Routes.COMPETITIONS) {
                         CompetitionsScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
                     }
                     composable(Routes.RECORDS) {
                         ResultsScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
+                    }
+                    composable(Routes.CATALOG) {
+                        CatalogScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
                     }
                     composable(Routes.ANALYTICS) {
                         AnalyticsScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)

@@ -95,7 +95,7 @@ fun DiaryScreen(
     val todayStart = com.example.diarytripeljump.ui.components.rememberTodayStart()
 
     val dateText = remember {
-        SimpleDateFormat("EEEE, d MMMM", Locale.forLanguageTag("ru"))
+        SimpleDateFormat("EEEE, d MMMM", Locale("ru"))
             .format(Date())
             .replaceFirstChar { it.uppercase() }
     }
@@ -567,7 +567,7 @@ private fun RecentResultRow(
     val tint = if (event.isCompetition) cs.tertiary else cs.primary
     val icon = if (event.isCompetition) Icons.AutoMirrored.Filled.DirectionsRun else Icons.Default.FitnessCenter
     val dateText = remember(event.date) {
-        SimpleDateFormat("d MMM", Locale.forLanguageTag("ru")).format(Date(event.date))
+        SimpleDateFormat("d MMM", Locale("ru")).format(Date(event.date))
     }
 
     Surface(onClick = onClick, color = Color.Transparent) {
@@ -663,5 +663,5 @@ private fun daysUntil(timestamp: Long): Int {
 }
 
 private fun formatDateShort(timestamp: Long): String {
-    return SimpleDateFormat("d MMM", Locale.forLanguageTag("ru")).format(Date(timestamp))
+    return SimpleDateFormat("d MMM", Locale("ru")).format(Date(timestamp))
 }

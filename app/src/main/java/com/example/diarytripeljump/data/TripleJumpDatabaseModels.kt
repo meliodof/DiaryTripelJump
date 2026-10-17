@@ -21,16 +21,6 @@ data class AthleteProfile(
     val notes: String? = null
 )
 
-data class SeasonStats(
-    val year: Int,
-    val totalCompetitions: Int,
-    val totalTrainings: Int,
-    val personalRecords: Int,
-    val seasonalRecords: Int,
-    val bestTripleJump: Double,
-    val averageTripleJump: Double
-)
-
 @Entity(tableName = "competitions")
 data class Competition(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -61,17 +51,17 @@ enum class CompetitionStatus { ONGOING, UPCOMING, COMPLETED, SKIPPED, CANCELLED 
         entity = Competition::class,
         parentColumns = ["id"],
         childColumns = ["competitionId"],
-        onDelete = ForeignKey.SET_NULL
+        onDelete = ForeignKey.CASCADE
     )],
-    indices = [Index("competitionId"), Index("date")]
+    indices = [Index("competitionId")]
 )
 data class TripleJumpResult(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val competitionId: Long? = null,
     val eventName: String = "Тройной прыжок",
+    val date: Long = System.currentTimeMillis(),
     val result: Double,
     val resultUnit: ResultUnit = ResultUnit.M,
-    val date: Long = System.currentTimeMillis(),
     val isIndoor: Boolean = false,
     val isAntiRecord: Boolean = false,
     val recordLevel: String = "PB",
@@ -95,10 +85,13 @@ data class JumpAttempt(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val tripleJumpResultId: Long,
     val attemptNumber: Int,
-    val distanceMeters: Double? = null,
+    val attemptType: AttemptType,
+    val distance: Double?,
     val isFoul: Boolean = false,
-    val isPassed: Boolean = false
+    val notes: String? = null
 )
+
+enum class AttemptType { QUALIFICATION, FINAL, TRAINING }
 
 @Entity(tableName = "training_sessions")
 data class TrainingSession(
@@ -140,12 +133,12 @@ data class Exercise(
     val categoryName: String? = null,
     val categoryColorHex: String = "#1E4D3B",
     val defaultUnit: ResultUnit = ResultUnit.KG,
+    // Параметры упражнения (редактируются в справочнике упражнений)
     val isSingleLeg: Boolean = false,
     val legSide: String? = null,
     val inventoryName: String? = null,
     val inventoryUnit: ResultUnit? = null,
-    val inventoryValue: Double? = null,
-    val equipmentName: String? = null
+    val inventoryValue: Double? = null
 )
 
 @Entity(
@@ -170,20 +163,55 @@ data class ExerciseResult(
     val resultUnit: ResultUnit,
     val sets: Int? = null,
     val reps: Int? = null,
-    val isSingleLeg: Boolean = false,
-    val legSide: String? = null,
-    val hasWeight: Boolean = true,
-    val hasHurdles: Boolean = false,
-    val hurdleHeightCm: Double? = null,
-    val hurdleCount: Int? = null,
-    val inventoryName: String? = null,
-    val inventoryUnit: ResultUnit? = null,
-    val inventoryValue: Double? = null,
     val setResultsJson: String? = null,
     val stage: ExerciseStage = ExerciseStage.MAIN,
-    val notes: String? = null
+    val hurdleHeightCm: Double? = null,
+    val notes: String? = null,
+    // Упражнение выполнялось на одной ноге; legSide: "LEFT" / "RIGHT" / null (не указана)
+    val isSingleLeg: Boolean = false,
+    val legSide: String? = null,
+    // Инвентарь, использованный в упражнении (название, единица измерения CM/KG, значение)
+    val inventoryName: String? = null,
+    val inventoryUnit: ResultUnit? = null,
+    val inventoryValue: Double? = null
 )
 
+/** Комплекс — именованный набор упражнений, который можно добавить в тренировку одним нажатием. */
+@Entity(tableName = "exercise_complexes")
+data class ExerciseComplex(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val description: String? = null,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+/** Упражнение внутри комплекса; [position] задаёт порядок выполнения. */
+@Entity(
+    tableName = "complex_exercises",
+    foreignKeys = [
+        ForeignKey(
+            entity = ExerciseComplex::class,
+            parentColumns = ["id"],
+            childColumns = ["complexId"],
+            onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = Exercise::class,
+            parentColumns = ["id"],
+            childColumns = ["exerciseId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index("complexId"), Index("exerciseId")]
+)
+data class ComplexExercise(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val complexId: Long,
+    val exerciseId: Long,
+    val position: Int
+)
+
+/** Подготовительный период, который отображается цветом на календаре тренировок. */
 @Entity(tableName = "training_periods")
 data class TrainingPeriod(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -193,6 +221,7 @@ data class TrainingPeriod(
     val colorHex: String
 )
 
+/** Ручная правка рекорда, который вычисляется из тренировок. Действует, пока рекорд не обновился. */
 @Entity(tableName = "record_overrides")
 data class RecordOverride(
     @PrimaryKey val recordKey: String,
@@ -204,14 +233,7 @@ data class RecordOverride(
     val notes: String?
 )
 
-@Entity(tableName = "exercise_complexes")
-data class ExerciseComplex(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val name: String,
-    val exercisesJson: String,
-    val notes: String? = null
-)
-
+/** Инвентарь пользователя: название и единица, в которой он измеряется (см или кг). */
 @Entity(tableName = "inventory_items")
 data class InventoryItem(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -245,14 +267,22 @@ data class TrainingJumpResult(
     val notes: String? = null
 )
 
-@Entity(tableName = "preparation_periods")
+@Entity(
+    tableName = "preparation_periods",
+    foreignKeys = [ForeignKey(
+        entity = Competition::class,
+        parentColumns = ["id"],
+        childColumns = ["competitionId"],
+        onDelete = ForeignKey.CASCADE
+    )],
+    indices = [Index("competitionId"), Index("startDate"), Index("endDate")]
+)
 data class PreparationPeriod(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val competitionId: Long? = null,
+    val competitionId: Long,
     val startDate: Long,
     val endDate: Long,
     val name: String? = null,
-    val colorHex: String = "#1E4D3B",
     val notes: String? = null
 )
 
@@ -264,42 +294,22 @@ data class PreparationPeriod(
             parentColumns = ["id"],
             childColumns = ["competitionId"],
             onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = PreparationPeriod::class,
+            parentColumns = ["id"],
+            childColumns = ["preparationPeriodId"],
+            onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index("competitionId")]
+    indices = [Index("competitionId"), Index("preparationPeriodId")]
 )
 data class Analytics(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val competitionId: Long,
-    val analysisDate: Long = System.currentTimeMillis(),
-    val totalAttempts: Int = 0,
-    val successfulAttempts: Int = 0,
-    val bestResult: Double = 0.0,
-    val averageResult: Double = 0.0,
-    val consistencyIndex: Double = 0.0,
+    val preparationPeriodId: Long,
+    val createdAt: Long,
     val notes: String? = null
-)
-
-@Entity(
-    tableName = "correction_hints",
-    foreignKeys = [
-        ForeignKey(
-            entity = Analytics::class,
-            parentColumns = ["id"],
-            childColumns = ["analyticsId"],
-            onDelete = ForeignKey.CASCADE
-        )
-    ],
-    indices = [Index("analyticsId")]
-)
-data class CorrectionHint(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val analyticsId: Long,
-    val category: String,
-    val title: String,
-    val description: String,
-    val priority: Int = 0,
-    val isApplied: Boolean = false
 )
 
 @Entity(
@@ -310,56 +320,90 @@ data class CorrectionHint(
             parentColumns = ["id"],
             childColumns = ["analyticsId"],
             onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = Exercise::class,
+            parentColumns = ["id"],
+            childColumns = ["exerciseId"],
+            onDelete = ForeignKey.SET_NULL
         )
     ],
-    indices = [Index("analyticsId")]
+    indices = [Index("analyticsId"), Index("exerciseId")]
 )
 data class AnalyticsIndicator(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val analyticsId: Long,
-    val name: String,
-    val value: Double,
-    val unit: String? = null,
-    val category: String? = null
+    val exerciseId: Long? = null,
+    val indicatorName: String,
+    val unit: ResultUnit? = null
 )
 
 @Entity(
     tableName = "analytics_results",
-    foreignKeys = [
-        ForeignKey(
-            entity = Analytics::class,
-            parentColumns = ["id"],
-            childColumns = ["analyticsId"],
-            onDelete = ForeignKey.CASCADE
-        )
-    ],
+    foreignKeys = [ForeignKey(
+        entity = Analytics::class,
+        parentColumns = ["id"],
+        childColumns = ["analyticsId"],
+        onDelete = ForeignKey.CASCADE
+    )],
     indices = [Index("analyticsId")]
 )
 data class AnalyticsResult(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val analyticsId: Long,
-    val attemptNumber: Int,
-    val result: Double,
-    val isFoul: Boolean = false
+    val indicatorName: String,
+    val currentValue: Double? = null,
+    val previousValue: Double? = null,
+    val changePercent: Double? = null,
+    val competitionResult: Double? = null,
+    val previousCompetitionResult: Double? = null,
+    val relationDescription: String,
+    val confidence: Double? = null
+)
+
+@Entity(
+    tableName = "correction_hints",
+    foreignKeys = [ForeignKey(
+        entity = Analytics::class,
+        parentColumns = ["id"],
+        childColumns = ["analyticsId"],
+        onDelete = ForeignKey.CASCADE
+    )],
+    indices = [Index("analyticsId")]
+)
+data class CorrectionHint(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val analyticsId: Long,
+    val indicatorName: String,
+    val hintText: String,
+    val priority: Int = 0
 )
 
 @Entity(
     tableName = "control_indicators",
-    foreignKeys = [
-        ForeignKey(
-            entity = CorrectionHint::class,
-            parentColumns = ["id"],
-            childColumns = ["hintId"],
-            onDelete = ForeignKey.CASCADE
-        )
-    ],
+    foreignKeys = [ForeignKey(
+        entity = CorrectionHint::class,
+        parentColumns = ["id"],
+        childColumns = ["hintId"],
+        onDelete = ForeignKey.CASCADE
+    )],
     indices = [Index("hintId")]
 )
 data class ControlIndicator(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val hintId: Long,
-    val name: String,
-    val targetValue: Double,
-    val currentValue: Double = 0.0,
-    val unit: String? = null
+    val indicatorName: String,
+    val isSelected: Boolean = false,
+    val comment: String? = null
+)
+
+data class SeasonStats(
+    val year: Int,
+    val totalCompetitions: Int,
+    val totalTrainings: Int,
+    val personalRecords: Int,
+    val seasonalRecords: Int,
+    val bestTripleJump: Double?,
+    val averageTripleJump: Double?,
+    val favoriteExercisesStats: String? = null
 )

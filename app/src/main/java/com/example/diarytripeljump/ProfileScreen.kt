@@ -45,6 +45,7 @@ fun ProfileScreen(
     val rawResultsList by viewModel.rawTripleJumpResults.collectAsState()
 
     var showEditDialog by remember { mutableStateOf(false) }
+    var showDemoDialog by remember { mutableStateOf(false) }
     var showCreateInventory by remember { mutableStateOf(false) }
     val inventoryItems by viewModel.inventoryItems.collectAsState()
 
@@ -311,9 +312,36 @@ fun ProfileScreen(
                         subtitle = if (athleteProfile?.greetingPreference == "NICKNAME") "По никнейму ($nicknameText)" else "По имени ($fullName)",
                         onClick = { showEditDialog = true }
                     )
+                    HorizontalDivider(modifier = Modifier.padding(start = 70.dp), color = cs.outlineVariant)
+                    ProfileOptionRow(
+                        icon = Icons.Default.Storage,
+                        title = "Демо-данные",
+                        subtitle = "Профиль, тренировки и рекорды за 3 месяца",
+                        onClick = { showDemoDialog = true }
+                    )
                 }
             }
         }
+    }
+
+    if (showDemoDialog) {
+        AlertDialog(
+            onDismissRequest = { showDemoDialog = false },
+            title = { Text("Загрузить демо-данные?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Будут добавлены тренировки, старты, рекорды, комплексы и подготовительные периоды за последние три месяца. " +
+                        "Ваши записи не изменятся и не дублируются; заполненный профиль сохранится."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.loadDemoData()
+                    showDemoDialog = false
+                }) { Text("Загрузить") }
+            },
+            dismissButton = { TextButton(onClick = { showDemoDialog = false }) { Text("Отмена") } }
+        )
     }
 
     if (showCreateInventory) {

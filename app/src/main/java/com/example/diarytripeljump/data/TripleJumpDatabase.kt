@@ -28,9 +28,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         InventoryItem::class,
         TrainingPeriod::class,
         RecordOverride::class,
-        ExerciseComplex::class
+        ExerciseComplex::class,
+        ComplexExercise::class
     ],
-    version = 19,
+    version = 14,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -103,6 +104,30 @@ abstract class TripleJumpDatabase : RoomDatabase() {
             }
         }
 
+        /** 13 → 14: комплексы упражнений. Данные сохраняются. */
+        private val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS exercise_complexes (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "name TEXT NOT NULL, " +
+                        "description TEXT, " +
+                        "createdAt INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS complex_exercises (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "complexId INTEGER NOT NULL, " +
+                        "exerciseId INTEGER NOT NULL, " +
+                        "position INTEGER NOT NULL, " +
+                        "FOREIGN KEY(complexId) REFERENCES exercise_complexes(id) ON UPDATE NO ACTION ON DELETE CASCADE, " +
+                        "FOREIGN KEY(exerciseId) REFERENCES exercises(id) ON UPDATE NO ACTION ON DELETE CASCADE)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_complex_exercises_complexId ON complex_exercises (complexId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_complex_exercises_exerciseId ON complex_exercises (exerciseId)")
+            }
+        }
+
         @Volatile
         private var INSTANCE: TripleJumpDatabase? = null
 
@@ -114,7 +139,7 @@ abstract class TripleJumpDatabase : RoomDatabase() {
                     "triple_jump_database"
                 )
                     .setJournalMode(JournalMode.TRUNCATE)
-                    .addMigrations(MIGRATION_11_12, MIGRATION_12_13)
+                    .addMigrations(MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

@@ -57,3 +57,12 @@ data class CorrectionHintWithControls(
     )
     val controlIndicators: List<ControlIndicator>
 )
+
+data class ComplexWithItems(
+    @Embedded val complex: ExerciseComplex,
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "complexId"
+    )
+    val items: List<ComplexExercise>
+)

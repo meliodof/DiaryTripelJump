@@ -14,7 +14,10 @@ import com.example.diarytripeljump.ui.theme.DiaryTripelJumpTheme
 
 class MainActivity : ComponentActivity() {
     private val viewModel: DiaryViewModel by viewModels {
-        DiaryViewModelFactory((application as TripleJumpApplication).repository)
+        DiaryViewModelFactory(
+            (application as TripleJumpApplication).repository,
+            (application as TripleJumpApplication).seedDatabase
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
