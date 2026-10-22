@@ -60,8 +60,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.example.diarytripeljump.data.ExerciseResult
-import com.example.diarytripeljump.data.RecordsEngine
+import com.example.diarytripeljump.data.AnalysisRange
+import com.example.diarytripeljump.data.AnalyticsEngine
 import com.example.diarytripeljump.data.CompetitionStatus
 import com.example.diarytripeljump.data.ResultUnit
 import com.example.diarytripeljump.data.TrainingPeriod
@@ -73,6 +73,7 @@ import com.example.diarytripeljump.ui.components.AppDatePickerDialog
 import com.example.diarytripeljump.ui.components.AppScreenScaffold
 import com.example.diarytripeljump.ui.components.DateField
 import com.example.diarytripeljump.ui.components.EmptyState
+import com.example.diarytripeljump.ui.components.SegmentedControl
 import com.example.diarytripeljump.ui.components.SectionHeader
 import com.example.diarytripeljump.ui.components.StatTile
 import com.example.diarytripeljump.ui.components.StatusPill
@@ -112,25 +113,6 @@ private fun previousRange(r: DateRange): DateRange {
 
 private data class Bucket(val label: String, val count: Int, val current: Boolean)
 
-private data class ExerciseStat(
-    val name: String,
-    val unit: ResultUnit,
-    val lowerIsBetter: Boolean,
-    val sessions: Int,
-    val best: Double,
-    val first: Double,
-    val last: Double
-)
-
-/** Лучшее значение внутри одного результата: среди подходов и итога (для бега — меньшее). */
-private fun resultValue(r: ExerciseResult, lowerBetter: Boolean): Double? {
-    val c = mutableListOf<Double>()
-    r.setResultsJson?.split(",")?.mapNotNullTo(c) { it.trim().toDoubleOrNull()?.takeIf { v -> v > 0 } }
-    if (r.result > 0) c.add(r.result)
-    if (c.isEmpty()) return null
-    return if (lowerBetter) c.min() else c.max()
-}
-
 @Composable
 fun AnalyticsScreen(
     modifier: Modifier = Modifier,
@@ -152,10 +134,12 @@ fun AnalyticsScreen(
     var customStart by rememberSaveable { mutableLongStateOf(0L) }
     var customEnd by rememberSaveable { mutableLongStateOf(0L) }
     var showCustomDialog by remember { mutableStateOf(false) }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
 
     // Переход из вкладки «Тренировки» → «Аналитика периода»
     LaunchedEffect(pendingPeriod) {
         pendingPeriod?.let {
+            tab = 0
             kind = KIND_PERIOD
             periodId = it
             viewModel.consumeAnalyticsPeriodRequest()
@@ -205,28 +189,14 @@ fun AnalyticsScreen(
 
     val buckets = remember(doneIn, range, today) { buildBuckets(doneIn.map { it.training.date }, range, today) }
 
-    val exerciseStats = remember(doneIn) {
-        data class Acc(val name: String, val unit: ResultUnit, val lower: Boolean, val points: MutableList<Pair<Long, Double>> = mutableListOf())
-        val map = LinkedHashMap<String, Acc>()
-        doneIn.forEach { t ->
-            t.exerciseResults.forEach { r ->
-                val name = r.exerciseName.trim()
-                if (name.isBlank()) return@forEach
-                val lower = RecordsEngine.isLowerBetter(name, r.resultUnit)
-                val v = resultValue(r, lower) ?: return@forEach
-                val key = "${name.lowercase()}|${r.isSingleLeg}|${r.legSide}|${r.resultUnit}"
-                map.getOrPut(key) { Acc(name + RecordsEngine.legSuffix(r.isSingleLeg, r.legSide), r.resultUnit, lower) }
-                    .points.add(r.date to v)
-            }
-        }
-        map.values.map { a ->
-            val sorted = a.points.sortedBy { it.first }
-            ExerciseStat(
-                name = a.name, unit = a.unit, lowerIsBetter = a.lower, sessions = sorted.size,
-                best = if (a.lower) sorted.minOf { it.second } else sorted.maxOf { it.second },
-                first = sorted.first().second, last = sorted.last().second
-            )
-        }.sortedByDescending { it.sessions }.take(6)
+    // --- Сводка: изменение основных показателей и соревновательная деятельность ---
+    val indicatorChanges = remember(trainingsList, range) { AnalyticsEngine.indicatorChanges(trainingsList, range?.let { AnalysisRange(it.start, it.end) }) }
+    val compEntries = remember(competitionsList, rawResults) { AnalyticsEngine.competitionEntries(competitionsList, rawResults) }
+    val compSummary = remember(compEntries, range) {
+        AnalyticsEngine.competitionSummary(compEntries.filter { it.result != null && inRange(it.date, range) })
+    }
+    val insights = remember(doneIn, skippedCount, indicatorChanges, compSummary) {
+        AnalyticsEngine.summaryInsights(doneIn.size, skippedCount, indicatorChanges, compSummary)
     }
 
     val hasAnyData = trainingsList.isNotEmpty() || competitionsList.isNotEmpty()
@@ -253,6 +223,30 @@ fun AnalyticsScreen(
                     )
                 }
             } else {
+                item(key = "tabs") {
+                    SegmentedControl(
+                        options = listOf("Сводка", "Динамика", "Старт", "Периоды"),
+                        selectedIndex = tab,
+                        onSelect = { tab = it }
+                    )
+                }
+                when (tab) {
+                    1 -> item(key = "tab_dynamics") {
+                        DynamicsTab(trainings = trainingsList, periods = periods, today = today, dayFmt = dayFmt)
+                    }
+                    2 -> item(key = "tab_competition") {
+                        CompetitionTab(
+                            trainings = trainingsList, competitions = competitionsList, results = rawResults,
+                            periods = periods, today = today, dayFmt = dayFmt
+                        )
+                    }
+                    3 -> item(key = "tab_periods") {
+                        PeriodsTab(
+                            trainings = trainingsList, competitions = competitionsList, results = rawResults,
+                            periods = periods, today = today, dayFmt = dayFmt
+                        )
+                    }
+                    else -> {
                 // --- Выбор периода ---
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -333,6 +327,10 @@ fun AnalyticsScreen(
                         }
                     }
 
+                    if (insights.isNotEmpty()) {
+                        item { InsightsCard(lines = insights) }
+                    }
+
                     if (prev != null && prevRange != null) {
                         item {
                             ComparisonCard(
@@ -348,14 +346,20 @@ fun AnalyticsScreen(
 
                     item { JumpDynamicsCard(series = jumpSeries.map { it.result.toFloat() }, dates = jumpSeries.map { it.date }) }
 
+                    if (compSummary.count > 0) {
+                        item { CompetitionSummaryCard(s = compSummary, dayFmt = dayFmt) }
+                    }
+
                     item { LoadCard(buckets = buckets.first, monthly = buckets.second, scopeLabel = if (range == null) "за всё время" else "за период") }
 
-                    if (exerciseStats.isNotEmpty()) {
-                        item { ExercisesCard(stats = exerciseStats) }
+                    if (indicatorChanges.isNotEmpty()) {
+                        item { IndicatorChangesCard(changes = indicatorChanges) }
                     }
 
                     if (recordsIn.isNotEmpty()) {
                         item { RecordsCard(events = recordsIn.take(6), dayFmt = dayFmt) }
+                    }
+                }
                     }
                 }
             }
@@ -378,7 +382,7 @@ fun AnalyticsScreen(
 }
 
 @Composable
-private fun CustomRangeDialog(
+internal fun CustomRangeDialog(
     initialStart: Long,
     initialEnd: Long,
     onDismiss: () -> Unit,
@@ -494,40 +498,6 @@ private fun ComparisonCard(prevLabel: String, rows: List<Triple<String, Int, Int
                             else -> cs.surfaceContainerHigh
                         }
                     )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ExercisesCard(stats: List<ExerciseStat>) {
-    val cs = MaterialTheme.colorScheme
-    AppCard {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Частые упражнения", style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
-                Text("Лучший результат и изменение от первого до последнего", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-            }
-            stats.forEachIndexed { i, st ->
-                if (i > 0) HorizontalDivider(color = cs.outlineVariant)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(st.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = cs.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            "${st.sessions} ${pluralRu(st.sessions, "раз", "раза", "раз")} · лучший ${formatRecordValue(st.best, st.unit)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = cs.onSurfaceVariant
-                        )
-                    }
-                    if (st.sessions >= 2 && st.first != st.last) {
-                        val improved = if (st.lowerIsBetter) st.last < st.first else st.last > st.first
-                        StatusPill(
-                            text = formatRecordDelta(st.last, st.first, st.unit),
-                            contentColor = if (improved) cs.onPrimaryContainer else cs.onErrorContainer,
-                            containerColor = if (improved) cs.primaryContainer else cs.errorContainer
-                        )
-                    }
                 }
             }
         }
