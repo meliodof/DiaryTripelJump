@@ -25,6 +25,15 @@ import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.CircleShape
+import com.example.diarytripeljump.data.GoalProgress
+import com.example.diarytripeljump.data.computeGoalProgress
+import com.example.diarytripeljump.ui.theme.extraColors
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -94,8 +103,18 @@ fun CatalogScreen(
 
     val exercises = remember(rawExercises) { rawExercises.distinctBy { it.name.trim().lowercase() } }
 
+    val goals by viewModel.goals.collectAsState()
+    val records by viewModel.records.collectAsState()
+
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var categoryFilter by rememberSaveable { mutableIntStateOf(0) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var sortMode by rememberSaveable { mutableIntStateOf(0) } // 0: по добавлению, 1: А→Я, 2: Я→А
+    var onlyFavorites by rememberSaveable { mutableStateOf(false) }
+
+    var goalExercise by remember { mutableStateOf<Exercise?>(null) }
+    val goalByKey = remember(goals) { goals.associateBy { it.recordKey } }
+    val bestByKey = remember(records) { records.filter { !it.isAnti }.associate { it.key to it.best } }
 
     var showExerciseEditor by remember { mutableStateOf(false) }
     var editingExercise by remember { mutableStateOf<Exercise?>(null) }
@@ -106,7 +125,29 @@ fun CatalogScreen(
     var editingComplex by remember { mutableStateOf<ComplexUi?>(null) }
     var complexToDelete by remember { mutableStateOf<ComplexUi?>(null) }
 
-    val filtered = remember(exercises, categoryFilter) { exercises.filter { matchesCategory(it, categoryFilter) } }
+    val collator = remember { java.text.Collator.getInstance(java.util.Locale("ru")) }
+    val query = searchQuery.trim()
+
+    val filtered = remember(exercises, categoryFilter, query, sortMode, onlyFavorites) {
+        val base = exercises
+            .filter { matchesCategory(it, categoryFilter) }
+            .filter { !onlyFavorites || it.isFavorite }
+            .filter { query.isBlank() || it.name.contains(query, ignoreCase = true) }
+        when (sortMode) {
+            1 -> base.sortedWith { a, b -> collator.compare(a.name.trim(), b.name.trim()) }
+            2 -> base.sortedWith { a, b -> collator.compare(b.name.trim(), a.name.trim()) }
+            else -> base.sortedBy { it.id }
+        }
+    }
+
+    val filteredComplexes = remember(complexes, query, sortMode) {
+        val base = complexes.filter { query.isBlank() || it.complex.name.contains(query, ignoreCase = true) }
+        when (sortMode) {
+            1 -> base.sortedWith { a, b -> collator.compare(a.complex.name.trim(), b.complex.name.trim()) }
+            2 -> base.sortedWith { a, b -> collator.compare(b.complex.name.trim(), a.complex.name.trim()) }
+            else -> base.sortedBy { it.complex.id }
+        }
+    }
 
     AppScreenScaffold(
         modifier = modifier,
@@ -144,55 +185,97 @@ fun CatalogScreen(
                 )
             }
 
-            if (tab == 0) {
-                item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+            item {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text(if (tab == 0) "Поиск упражнения" else "Поиск комплекса") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = if (searchQuery.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Close, contentDescription = "Очистить поиск")
+                            }
+                        }
+                    } else null,
+                    singleLine = true,
+                    shape = CircleShape,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    DropdownFilterChip(
+                        title = "Сортировка",
+                        options = listOf("Сортировка", "А → Я", "Я → А"),
+                        selectedIndex = sortMode,
+                        onSelect = { sortMode = it }
+                    )
+                    if (tab == 0) {
                         DropdownFilterChip(
                             title = "Все виды",
                             options = CategoryFilterOptions,
                             selectedIndex = categoryFilter,
                             onSelect = { categoryFilter = it }
                         )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = "${filtered.size} ${pluralRu(filtered.size, "упражнение", "упражнения", "упражнений")}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = cs.onSurfaceVariant
-                        )
+                        ToggleChip(label = "Избранное", selected = onlyFavorites, onClick = { onlyFavorites = !onlyFavorites })
                     }
                 }
+            }
+
+            if (tab == 0) {
+                item {
+                    Text(
+                        text = "${filtered.size} ${pluralRu(filtered.size, "упражнение", "упражнения", "упражнений")}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant
+                    )
+                }
                 if (filtered.isEmpty()) {
+                    val filtering = query.isNotBlank() || onlyFavorites || categoryFilter != 0
                     item {
                         EmptyState(
-                            icon = Icons.Default.FitnessCenter,
-                            title = "Упражнений нет",
-                            message = "Добавьте упражнения — их можно выбирать в тренировках и собирать в комплексы.",
-                            actionLabel = "Добавить упражнение",
+                            icon = if (onlyFavorites) Icons.Default.Star else Icons.Default.FitnessCenter,
+                            title = if (filtering) "Ничего не найдено" else "Упражнений нет",
+                            message = if (filtering) "Измените поиск или фильтры."
+                            else "Добавьте упражнения — их можно выбирать в тренировках и собирать в комплексы.",
+                            actionLabel = if (filtering) null else "Добавить упражнение",
                             onAction = { editingExercise = null; showExerciseEditor = true }
                         )
                     }
                 } else {
                     items(filtered, key = { it.id }) { ex ->
+                        val cand = goalCandidateFor(ex)
                         ExerciseCatalogRow(
                             exercise = ex,
+                            goalProgress = goalByKey[cand.key]?.let { computeGoalProgress(it, bestByKey[cand.key]) },
+                            onToggleFavorite = { viewModel.setExerciseFavorite(ex, !ex.isFavorite) },
+                            onSetGoal = { goalExercise = ex },
                             onEdit = { editingExercise = ex; showExerciseEditor = true },
                             onDelete = { exerciseToDelete = ex }
                         )
                     }
                 }
             } else {
-                if (complexes.isEmpty()) {
+                if (filteredComplexes.isEmpty()) {
                     item {
                         EmptyState(
                             icon = Icons.Default.Layers,
-                            title = "Комплексов пока нет",
-                            message = "Объедините несколько упражнений в комплекс и добавляйте его в тренировку одним нажатием.",
-                            actionLabel = "Создать комплекс",
+                            title = if (complexes.isEmpty()) "Комплексов пока нет" else "Ничего не найдено",
+                            message = if (complexes.isEmpty()) "Объедините несколько упражнений в комплекс и добавляйте его в тренировку одним нажатием."
+                            else "Измените поисковый запрос.",
+                            actionLabel = if (complexes.isEmpty()) "Создать комплекс" else null,
                             onAction = { editingComplex = null; showComplexEditor = true }
                         )
                     }
                 } else {
-                    items(complexes, key = { it.complex.id }) { c ->
+                    items(filteredComplexes, key = { it.complex.id }) { c ->
                         ComplexCard(
                             complex = c,
                             onEdit = { editingComplex = c; showComplexEditor = true },
@@ -237,6 +320,23 @@ fun CatalogScreen(
                 }
                 showExerciseEditor = false
             }
+        )
+    }
+
+    goalExercise?.let { ex ->
+        val cand = goalCandidateFor(ex)
+        val existing = goalByKey[cand.key]
+        GoalEditorDialog(
+            candidates = listOf(cand),
+            fixed = cand,
+            existing = existing,
+            currentBestFor = { key -> bestByKey[key] },
+            onDismiss = { goalExercise = null },
+            onSave = { c, target, deadline ->
+                viewModel.saveGoal(c.key, c.name, c.displayName, c.unit, target, c.lowerIsBetter, deadline)
+                goalExercise = null
+            },
+            onDelete = existing?.let { g -> { viewModel.deleteGoal(g.recordKey); goalExercise = null } }
         )
     }
 
@@ -312,7 +412,14 @@ fun DeleteExerciseDialog(name: String, onDismiss: () -> Unit, onConfirm: () -> U
 }
 
 @Composable
-private fun ExerciseCatalogRow(exercise: Exercise, onEdit: () -> Unit, onDelete: () -> Unit) {
+private fun ExerciseCatalogRow(
+    exercise: Exercise,
+    goalProgress: GoalProgress?,
+    onToggleFavorite: () -> Unit,
+    onSetGoal: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
     val cs = MaterialTheme.colorScheme
     AppCard {
         Row(
@@ -345,9 +452,20 @@ private fun ExerciseCatalogRow(exercise: Exercise, onEdit: () -> Unit, onDelete:
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                if (goalProgress != null) {
+                    GoalProgressBlock(goalProgress, modifier = Modifier.padding(top = 4.dp))
+                }
+            }
+            IconButton(onClick = onToggleFavorite) {
+                Icon(
+                    imageVector = if (exercise.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
+                    contentDescription = if (exercise.isFavorite) "Убрать из избранного" else "В избранное",
+                    tint = if (exercise.isFavorite) MaterialTheme.extraColors.gold else cs.onSurfaceVariant
+                )
             }
             OverflowMenu(
                 actions = listOf(
+                    MenuAction(if (goalProgress == null) "Поставить цель" else "Изменить цель", Icons.Default.Flag, onClick = onSetGoal),
                     MenuAction("Редактировать", Icons.Default.Edit, onClick = onEdit),
                     MenuAction("Удалить", Icons.Default.DeleteOutline, destructive = true, onClick = onDelete)
                 )

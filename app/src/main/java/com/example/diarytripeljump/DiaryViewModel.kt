@@ -24,6 +24,39 @@ data class ExerciseResultInput(
     val inventoryValue: Double? = null
 )
 
+/** Результат старта в тройном прыжке для главного экрана. */
+data class StartResultUi(
+    val competition: Competition,
+    val best: Double,
+    val placement: String?,
+    val attemptsText: String?,
+    val isPersonalBest: Boolean
+)
+
+/** Данные для записи, добавляемой на вкладке «Рекорды». */
+data class NewRecordInput(
+    val eventName: String,
+    val result: Double,
+    val unit: ResultUnit,
+    val isIndoor: Boolean,
+    val recordLevel: String,
+    val category: String,
+    val isCompetition: Boolean,
+    val weather: String?,
+    val notes: String?,
+    val isSingleLeg: Boolean = false,
+    val legSide: String? = null,
+    val inventoryName: String? = null,
+    val inventoryUnit: ResultUnit? = null,
+    val inventoryValue: Double? = null
+)
+
+private val NumberRegex = Regex("\\d+(?:[.,]\\d+)?")
+
+/** Лучшая попытка из строки вида «15.12, 15.31, X, 15.40». */
+private fun bestOfAttempts(text: String?): Double? =
+    text?.let { NumberRegex.findAll(it).mapNotNull { m -> m.value.replace(',', '.').toDoubleOrNull() }.maxOrNull() }
+
 /** Комплекс вместе с развёрнутым списком упражнений (в порядке выполнения). */
 data class ComplexUi(
     val complex: ExerciseComplex,
@@ -98,6 +131,32 @@ class DiaryViewModel(
         .map { RecordsEngine.events(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** Цели по результатам; ключ совпадает с ключом рекорда. */
+    val goals: StateFlow<List<ExerciseGoal>> = repository.getAllGoals()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Избранные упражнения каталога — именно они показываются на главном экране. */
+    val favoriteExercises: StateFlow<List<Exercise>> = allExercises
+        .map { list -> list.filter { it.isFavorite }.distinctBy { it.name.trim().lowercase() }.sortedBy { it.name.lowercase() } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Результаты стартов в тройном прыжке (новые сверху) для главного экрана. */
+    val tripleJumpStartResults: StateFlow<List<StartResultUi>> =
+        combine(allCompetitions, rawTripleJumpResults) { comps, results ->
+            val today = startOfDay(System.currentTimeMillis())
+            val rows = comps
+                .filter { it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED }
+                .filter { startOfDay(it.date) <= today }
+                .mapNotNull { c ->
+                    val linked = results.filter { it.competitionId == c.id && !it.isAntiRecord && it.result > 0 }
+                    val best = linked.maxOfOrNull { it.result } ?: bestOfAttempts(c.attemptsJson) ?: return@mapNotNull null
+                    StartResultUi(c, best, c.placement, c.attemptsJson, false)
+                }
+                .sortedByDescending { it.competition.date }
+            val overall = rows.maxOfOrNull { it.best }
+            rows.map { it.copy(isPersonalBest = overall != null && it.best >= overall) }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val favoriteExerciseResults: StateFlow<List<ExerciseResultWithExercise>> = repository.getFavoriteExerciseResults()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -121,13 +180,14 @@ class DiaryViewModel(
         customPbMeters: Double?
     ) {
         viewModelScope.launch {
+            val current = repository.getProfile().first() ?: AthleteProfile()
             repository.insertProfile(
-                AthleteProfile(
+                current.copy(
                     id = 1,
                     firstName = firstName,
                     lastName = lastName,
                     nickname = nickname,
-                    avatarUriString = avatarUriString,
+                    avatarUriString = avatarUriString ?: current.avatarUriString,
                     greetingPreference = greetingPreference,
                     birthDate = birthDate,
                     height = height,
@@ -275,6 +335,33 @@ class DiaryViewModel(
 
     fun clearRecordOverride(key: String) {
         viewModelScope.launch { repository.deleteRecordOverride(key) }
+    }
+
+    // --- Goals ---
+    fun saveGoal(
+        recordKey: String, name: String, displayName: String, unit: ResultUnit,
+        target: Double, lowerIsBetter: Boolean, deadline: Long?
+    ) {
+        if (target <= 0.0) return
+        viewModelScope.launch {
+            val old = repository.getAllGoals().first().firstOrNull { it.recordKey == recordKey }
+            repository.upsertGoal(
+                ExerciseGoal(
+                    recordKey = recordKey, name = name, displayName = displayName, unit = unit,
+                    targetValue = target, lowerIsBetter = lowerIsBetter, deadline = deadline,
+                    createdAt = old?.createdAt ?: System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    fun deleteGoal(recordKey: String) {
+        viewModelScope.launch { repository.deleteGoal(recordKey) }
+    }
+
+    // --- Favorites ---
+    fun setExerciseFavorite(exercise: Exercise, favorite: Boolean) {
+        viewModelScope.launch { repository.setExerciseFavorite(exercise.name, favorite) }
     }
 
     // --- Complexes ---
@@ -583,32 +670,30 @@ class DiaryViewModel(
 
     // --- CRUD: Triple Jump Results & Records ---
     fun addRecordResult(
-        eventName: String,
-        result: Double,
-        unit: ResultUnit = ResultUnit.M,
-        isIndoor: Boolean = false,
+        input: NewRecordInput,
         isAntiRecord: Boolean = false,
-        recordLevel: String = "PB",
-        exerciseCategory: String = "Прыжковые",
-        isCompetition: Boolean = true,
-        weatherConditions: String? = null,
-        notes: String? = null,
         date: Long = System.currentTimeMillis()
     ) {
         viewModelScope.launch {
+            val hasInventory = !input.inventoryName.isNullOrBlank()
             repository.insertTripleJumpResult(
                 TripleJumpResult(
-                    eventName = eventName,
-                    result = result,
-                    resultUnit = unit,
-                    isIndoor = isIndoor,
+                    eventName = input.eventName.trim(),
+                    result = input.result,
+                    resultUnit = input.unit,
+                    isIndoor = input.isIndoor,
                     isAntiRecord = isAntiRecord,
-                    recordLevel = recordLevel,
-                    exerciseCategory = exerciseCategory,
-                    isCompetition = isCompetition,
-                    weatherConditions = if (isIndoor) null else weatherConditions,
-                    notes = notes,
-                    date = date
+                    recordLevel = input.recordLevel,
+                    exerciseCategory = input.category,
+                    isCompetition = input.isCompetition,
+                    weatherConditions = if (input.isIndoor) null else input.weather?.takeIf { it.isNotBlank() },
+                    notes = input.notes?.takeIf { it.isNotBlank() },
+                    date = date,
+                    isSingleLeg = input.isSingleLeg,
+                    legSide = if (input.isSingleLeg) input.legSide else null,
+                    inventoryName = if (hasInventory) input.inventoryName else null,
+                    inventoryUnit = if (hasInventory) input.inventoryUnit else null,
+                    inventoryValue = if (hasInventory) input.inventoryValue else null
                 )
             )
         }

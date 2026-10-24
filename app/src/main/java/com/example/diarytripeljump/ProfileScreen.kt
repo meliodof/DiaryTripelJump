@@ -32,6 +32,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.example.diarytripeljump.data.ResultUnit
 import com.example.diarytripeljump.ui.components.*
 import com.example.diarytripeljump.ui.theme.extraColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,14 +49,18 @@ fun ProfileScreen(
 
     var showEditDialog by remember { mutableStateOf(false) }
     var showDemoDialog by remember { mutableStateOf(false) }
-    var showCreateInventory by remember { mutableStateOf(false) }
-    val inventoryItems by viewModel.inventoryItems.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
         onResult = { uri ->
             if (uri != null) {
-                viewModel.updateAthleteProfileAvatar(uri.toString())
+                // Копируем фото в память приложения — иначе доступ к нему пропадает после перезапуска
+                scope.launch {
+                    val saved = withContext(Dispatchers.IO) { AvatarStorage.saveFromUri(context, uri) }
+                    if (saved != null) viewModel.updateAthleteProfileAvatar(saved)
+                }
             }
         }
     )
@@ -244,56 +251,6 @@ fun ProfileScreen(
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SectionHeader(
-                    title = "Инвентарь",
-                    subtitle = "Выбирается в упражнениях тренировки",
-                    actionLabel = "Добавить",
-                    onAction = { showCreateInventory = true }
-                )
-                if (inventoryItems.isEmpty()) {
-                    EmptyState(
-                        icon = Icons.Default.FitnessCenter,
-                        title = "Инвентаря пока нет",
-                        message = "Добавьте барьеры, гири, штанги — и указывайте их размер или вес в тренировках.",
-                        actionLabel = "Добавить инвентарь",
-                        onAction = { showCreateInventory = true }
-                    )
-                } else {
-                    AppCard {
-                        inventoryItems.forEachIndexed { index, item ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                IconBadge(icon = Icons.Default.FitnessCenter, tint = cs.primary)
-                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text(text = item.name, style = MaterialTheme.typography.titleSmall, color = cs.onSurface)
-                                    Text(
-                                        text = if (item.unit == ResultUnit.KG) "Измеряется в килограммах" else "Измеряется в сантиметрах",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = cs.onSurfaceVariant
-                                    )
-                                }
-                                IconButton(onClick = { viewModel.deleteInventory(item) }) {
-                                    Icon(
-                                        imageVector = Icons.Default.DeleteOutline,
-                                        contentDescription = "Удалить ${item.name}",
-                                        tint = cs.onSurfaceVariant
-                                    )
-                                }
-                            }
-                            if (index < inventoryItems.lastIndex) {
-                                HorizontalDivider(modifier = Modifier.padding(start = 70.dp), color = cs.outlineVariant)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionHeader(title = "Настройки")
                 AppCard {
                     ProfileOptionRow(
@@ -341,16 +298,6 @@ fun ProfileScreen(
                 }) { Text("Загрузить") }
             },
             dismissButton = { TextButton(onClick = { showDemoDialog = false }) { Text("Отмена") } }
-        )
-    }
-
-    if (showCreateInventory) {
-        CreateInventoryDialog(
-            onDismiss = { showCreateInventory = false },
-            onConfirm = { name, unit ->
-                viewModel.addInventory(name, unit)
-                showCreateInventory = false
-            }
         )
     }
 

@@ -29,9 +29,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TrainingPeriod::class,
         RecordOverride::class,
         ExerciseComplex::class,
-        ComplexExercise::class
+        ComplexExercise::class,
+        ExerciseGoal::class
     ],
-    version = 14,
+    version = 15,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -55,6 +56,7 @@ abstract class TripleJumpDatabase : RoomDatabase() {
     abstract fun trainingPeriodDao(): TrainingPeriodDao
     abstract fun recordOverrideDao(): RecordOverrideDao
     abstract fun exerciseComplexDao(): ExerciseComplexDao
+    abstract fun exerciseGoalDao(): ExerciseGoalDao
 
     companion object {
         /** 11 → 12: одна нога и инвентарь в результатах упражнений + таблица инвентаря. Данные сохраняются. */
@@ -128,6 +130,30 @@ abstract class TripleJumpDatabase : RoomDatabase() {
             }
         }
 
+        /** 14 → 15: нога и инвентарь у рекордов, избранные упражнения, цели. Данные сохраняются. */
+        private val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE triple_jump_results ADD COLUMN isSingleLeg INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE triple_jump_results ADD COLUMN legSide TEXT")
+                db.execSQL("ALTER TABLE triple_jump_results ADD COLUMN inventoryName TEXT")
+                db.execSQL("ALTER TABLE triple_jump_results ADD COLUMN inventoryUnit TEXT")
+                db.execSQL("ALTER TABLE triple_jump_results ADD COLUMN inventoryValue REAL")
+                db.execSQL("ALTER TABLE exercises ADD COLUMN isFavorite INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS exercise_goals (" +
+                        "recordKey TEXT NOT NULL, " +
+                        "name TEXT NOT NULL, " +
+                        "displayName TEXT NOT NULL, " +
+                        "unit TEXT NOT NULL, " +
+                        "targetValue REAL NOT NULL, " +
+                        "lowerIsBetter INTEGER NOT NULL, " +
+                        "deadline INTEGER, " +
+                        "createdAt INTEGER NOT NULL, " +
+                        "PRIMARY KEY(recordKey))"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: TripleJumpDatabase? = null
 
@@ -139,7 +165,7 @@ abstract class TripleJumpDatabase : RoomDatabase() {
                     "triple_jump_database"
                 )
                     .setJournalMode(JournalMode.TRUNCATE)
-                    .addMigrations(MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+                    .addMigrations(MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

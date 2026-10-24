@@ -21,7 +21,8 @@ class TripleJumpRepository(
     private val inventoryDao: InventoryDao,
     private val trainingPeriodDao: TrainingPeriodDao,
     private val recordOverrideDao: RecordOverrideDao,
-    private val exerciseComplexDao: ExerciseComplexDao
+    private val exerciseComplexDao: ExerciseComplexDao,
+    private val exerciseGoalDao: ExerciseGoalDao
 ) {
     suspend fun clearAllDatabaseData() {
         competitionDao.deleteAllCompetitions()
@@ -78,6 +79,12 @@ class TripleJumpRepository(
     suspend fun updateExercise(exercise: Exercise) = exerciseDao.update(exercise)
     suspend fun deleteExercise(exercise: Exercise) = exerciseDao.delete(exercise)
     suspend fun deleteExercisesByName(name: String) = exerciseDao.deleteByName(name)
+    suspend fun setExerciseFavorite(name: String, favorite: Boolean) = exerciseDao.setFavoriteByName(name, favorite)
+
+    // Goals
+    fun getAllGoals(): Flow<List<ExerciseGoal>> = exerciseGoalDao.getAll()
+    suspend fun upsertGoal(goal: ExerciseGoal) = exerciseGoalDao.upsert(goal)
+    suspend fun deleteGoal(key: String) = exerciseGoalDao.deleteByKey(key)
 
     // Exercise Results
     fun getFavoriteExerciseResults(): Flow<List<ExerciseResultWithExercise>> = exerciseResultDao.getFavoriteExerciseResults()

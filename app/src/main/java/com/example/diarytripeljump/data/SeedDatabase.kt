@@ -75,6 +75,13 @@ class SeedDatabase(
             ExDef("Бросок ядра назад", C_GPP, ResultUnit.M, 14.50, 1.70, 4, 4, invName = "Ядро", invUnit = ResultUnit.KG, invValue = 7.26)
         )
 
+        val FAVORITES = setOf("Приседания со штангой", "Бег 30 м", "Прыжки через барьеры")
+
+        val GOALS = listOf(
+            "Приседания со штангой" to 160.0,
+            "Бег 30 м" to 3.75
+        )
+
         val COMPLEXES = listOf(
             Triple("Силовой блок ног", "База для силовых дней", listOf("Приседания со штангой", "Тяга становая", "Рывок штанги")),
             Triple("Прыжковая техника", "Прыжки и разбег для технических дней", listOf("Тройной прыжок с 6 шагов", "Многоскоки (5 прыжков)", "Прыжки через барьеры")),
@@ -147,7 +154,27 @@ class SeedDatabase(
                         Exercise(
                             name = d.name, categoryName = d.category, defaultUnit = d.unit,
                             isSingleLeg = d.legSide != null, legSide = d.legSide,
-                            inventoryName = d.invName, inventoryUnit = d.invUnit, inventoryValue = d.invValue
+                            inventoryName = d.invName, inventoryUnit = d.invUnit, inventoryValue = d.invValue,
+                            isFavorite = d.name in FAVORITES
+                        )
+                    )
+                }
+            }
+
+            // --- Цели (по одной на упражнение; существующие не трогаем) ---
+            val haveGoals = repository.getAllGoals().first().map { it.recordKey }.toSet()
+            GOALS.forEach { (exName, target) ->
+                val d = EXERCISES.first { it.name == exName }
+                val key = RecordsEngine.exerciseRecordKey(d.name, d.legSide != null, d.legSide, d.unit)
+                if (key !in haveGoals) {
+                    repository.upsertGoal(
+                        ExerciseGoal(
+                            recordKey = key,
+                            name = d.name,
+                            displayName = d.name + RecordsEngine.legSuffix(d.legSide != null, d.legSide),
+                            unit = d.unit,
+                            targetValue = target,
+                            lowerIsBetter = RecordsEngine.isLowerBetter(d.name, d.unit)
                         )
                     )
                 }

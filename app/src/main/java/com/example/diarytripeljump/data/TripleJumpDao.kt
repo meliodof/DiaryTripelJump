@@ -151,6 +151,9 @@ interface ExerciseDao {
 
     @Query("DELETE FROM exercises WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name))")
     suspend fun deleteByName(name: String)
+
+    @Query("UPDATE exercises SET isFavorite = :favorite WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name))")
+    suspend fun setFavoriteByName(name: String, favorite: Boolean)
 }
 
 @Dao
@@ -364,4 +367,16 @@ interface ExerciseComplexDao {
 
     @Query("DELETE FROM complex_exercises WHERE complexId = :complexId")
     suspend fun deleteItems(complexId: Long)
+}
+
+@Dao
+interface ExerciseGoalDao {
+    @Query("SELECT * FROM exercise_goals ORDER BY createdAt DESC")
+    fun getAll(): Flow<List<ExerciseGoal>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(goal: ExerciseGoal)
+
+    @Query("DELETE FROM exercise_goals WHERE recordKey = :key")
+    suspend fun deleteByKey(key: String)
 }

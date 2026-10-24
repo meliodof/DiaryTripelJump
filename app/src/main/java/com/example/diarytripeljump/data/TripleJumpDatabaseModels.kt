@@ -68,7 +68,14 @@ data class TripleJumpResult(
     val exerciseCategory: String = "Прыжковые",
     val isCompetition: Boolean = true,
     val weatherConditions: String? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    // Рекорд установлен на одной ноге; legSide: "LEFT" / "RIGHT" / null
+    val isSingleLeg: Boolean = false,
+    val legSide: String? = null,
+    // Инвентарь, с которым установлен рекорд / антирекорд
+    val inventoryName: String? = null,
+    val inventoryUnit: ResultUnit? = null,
+    val inventoryValue: Double? = null
 )
 
 @Entity(
@@ -138,7 +145,9 @@ data class Exercise(
     val legSide: String? = null,
     val inventoryName: String? = null,
     val inventoryUnit: ResultUnit? = null,
-    val inventoryValue: Double? = null
+    val inventoryValue: Double? = null,
+    // Избранное: отображается на главном экране
+    val isFavorite: Boolean = false
 )
 
 @Entity(
@@ -174,6 +183,19 @@ data class ExerciseResult(
     val inventoryName: String? = null,
     val inventoryUnit: ResultUnit? = null,
     val inventoryValue: Double? = null
+)
+
+/** Цель по результату. Ключ совпадает с ключом рекорда ([RecordSummary.key]), поэтому прогресс считается автоматически. */
+@Entity(tableName = "exercise_goals")
+data class ExerciseGoal(
+    @PrimaryKey val recordKey: String,
+    val name: String,
+    val displayName: String,
+    val unit: ResultUnit,
+    val targetValue: Double,
+    val lowerIsBetter: Boolean = false,
+    val deadline: Long? = null,
+    val createdAt: Long = System.currentTimeMillis()
 )
 
 /** Комплекс — именованный набор упражнений, который можно добавить в тренировку одним нажатием. */

@@ -367,6 +367,7 @@ fun TrainingsScreen(
             inventoryItems = inventoryItems,
             onAddInventory = { name, unit -> viewModel.addInventory(name, unit) },
             complexes = complexes,
+            onSaveComplex = { name, description, ids -> viewModel.saveComplex(null, name, description, ids) },
             onDeleteExercise = { viewModel.deleteExerciseFromCatalog(it) }
         )
     }
@@ -442,6 +443,7 @@ fun TrainingsScreen(
             inventoryItems = inventoryItems,
             onAddInventory = { name, unit -> viewModel.addInventory(name, unit) },
             complexes = complexes,
+            onSaveComplex = { name, description, ids -> viewModel.saveComplex(null, name, description, ids) },
             onDeleteExercise = { viewModel.deleteExerciseFromCatalog(it) }
         )
     }
@@ -1178,8 +1180,10 @@ fun AddTrainingDialog(
     inventoryItems: List<InventoryItem> = emptyList(),
     onAddInventory: (name: String, unit: ResultUnit) -> Unit = { _, _ -> },
     complexes: List<ComplexUi> = emptyList(),
+    onSaveComplex: (name: String, description: String?, exerciseIds: List<Long>) -> Unit = { _, _, _ -> },
     onDeleteExercise: (Exercise) -> Unit = {}
 ) {
+    var showCreateComplexModal by remember { mutableStateOf(false) }
     var exerciseToDeleteFromCatalog by remember { mutableStateOf<Exercise?>(null) }
     var showCreateInventoryModal by remember { mutableStateOf(false) }
     // Categories Filter (Plural): Беговые упражнения, Упражнения на технику тройного прыжка, Силовые упражнения, Прыжковые упражнения, ОФП
@@ -1377,19 +1381,30 @@ fun AddTrainingDialog(
                 }
 
                 // Комплексы: нажатие добавляет в тренировку все упражнения комплекса
-                if (complexes.isNotEmpty()) {
-                    Text(
-                        text = "Комплексы:",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                Text(
+                    text = "Комплексы:",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                run {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        AssistChip(
+                            onClick = { showCreateComplexModal = true },
+                            label = { Text("Новый комплекс", fontSize = 11.sp) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(AssistChipDefaults.IconSize)
+                                )
+                            }
+                        )
                         complexes.filter { it.exercises.isNotEmpty() }.forEach { c ->
                             val allAdded = c.exercises.all { ex -> addedExerciseInputs.any { it.exerciseName.equals(ex.name, true) } }
                             AssistChip(
@@ -1545,6 +1560,19 @@ fun AddTrainingDialog(
                 TextButton(onClick = { showSaveConfirmDialog = false }) {
                     Text("Отмена")
                 }
+            }
+        )
+    }
+
+    // Создание комплекса прямо из окна тренировки; после сохранения он появляется в списке «Комплексы»
+    if (showCreateComplexModal) {
+        ComplexEditorDialog(
+            initial = null,
+            allExercises = exercisesList.distinctBy { it.name.trim().lowercase() },
+            onDismiss = { showCreateComplexModal = false },
+            onSave = { name, description, ids ->
+                onSaveComplex(name, description, ids)
+                showCreateComplexModal = false
             }
         )
     }

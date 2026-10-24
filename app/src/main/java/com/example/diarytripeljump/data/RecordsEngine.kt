@@ -92,6 +92,21 @@ object RecordsEngine {
         }
     }
 
+    /** Код ноги для ключа рекорда. */
+    fun sideCode(isSingleLeg: Boolean, legSide: String?): String =
+        if (isSingleLeg) (legSide ?: "ANY") else "BOTH"
+
+    /** Ключ рекорда упражнения из тренировок; по нему же хранятся цели. */
+    fun exerciseRecordKey(name: String, isSingleLeg: Boolean, legSide: String?, unit: ResultUnit): String =
+        "ex|${name.trim().lowercase()}|${sideCode(isSingleLeg, legSide)}|${unit.name}"
+
+    /** Ключ записи, добавленной вручную (старт, антирекорд или запись с инвентарём). */
+    fun manualRecordKey(
+        name: String, isAnti: Boolean, isCompetition: Boolean, unit: ResultUnit,
+        isSingleLeg: Boolean, legSide: String?, inventory: String?
+    ): String =
+        "tj|${name.trim().lowercase()}|$isAnti|$isCompetition|${unit.name}|${sideCode(isSingleLeg, legSide)}|${inventory?.lowercase() ?: ""}"
+
     fun legSuffix(isSingleLeg: Boolean, legSide: String?): String = when {
         !isSingleLeg -> ""
         legSide == "LEFT" -> " · левая нога"
@@ -142,8 +157,7 @@ object RecordsEngine {
             if (name.isBlank()) return@forEach
             val lower = isLowerBetter(name, res.resultUnit)
             val value = bestOfExercise(res, lower) ?: return@forEach
-            val side = if (res.isSingleLeg) (res.legSide ?: "ANY") else "BOTH"
-            val key = "ex|${name.lowercase()}|$side|${res.resultUnit.name}"
+            val key = exerciseRecordKey(name, res.isSingleLeg, res.legSide, res.resultUnit)
             val g = groups.getOrPut(key) {
                 Group(key, name, res.resultUnit, res.isSingleLeg, res.legSide, false, false)
             }
@@ -160,16 +174,18 @@ object RecordsEngine {
         tj.forEach { r ->
             if (r.result <= 0) return@forEach
             val name = r.eventName.trim()
-            val merged = !r.isCompetition && !r.isAntiRecord // «тренировочные» записи сливаются с упражнениями
-            val key = if (merged) "ex|${name.lowercase()}|BOTH|${r.resultUnit.name}"
-            else "tj|${name.lowercase()}|${r.isAntiRecord}|${r.isCompetition}|${r.resultUnit.name}"
+            val inv = inventoryLabel(r.inventoryName, r.inventoryUnit, r.inventoryValue)
+            // «тренировочные» записи без инвентаря сливаются с упражнениями; с инвентарём — отдельный рекорд
+            val merged = !r.isCompetition && !r.isAntiRecord && inv == null
+            val key = if (merged) exerciseRecordKey(name, r.isSingleLeg, r.legSide, r.resultUnit)
+            else manualRecordKey(name, r.isAntiRecord, r.isCompetition, r.resultUnit, r.isSingleLeg, r.legSide, inv)
             val g = groups.getOrPut(key) {
-                Group(key, name, r.resultUnit, false, null, r.isAntiRecord, r.isCompetition)
+                Group(key, name, r.resultUnit, r.isSingleLeg, r.legSide, r.isAntiRecord, r.isCompetition)
             }
             g.samples.add(
                 Sample(
                     date = r.date, value = r.result, tjId = r.id, isIndoor = r.isIndoor,
-                    weather = r.weatherConditions, inventory = null, level = r.recordLevel,
+                    weather = r.weatherConditions, inventory = inv, level = r.recordLevel,
                     category = r.exerciseCategory, isCompetition = r.isCompetition, notes = r.notes
                 )
             )
@@ -275,3 +291,29 @@ fun formatRecordDelta(value: Double, previous: Double, unit: ResultUnit): String
     }
     return sign + body
 }
+
+/** Прогресс по цели относительно текущего рекорда. */
+data class GoalProgress(
+    val goal: ExerciseGoal,
+    val current: Double?,
+    /** 0..1 */
+    val fraction: Float,
+    val achieved: Boolean,
+    /** Сколько осталось до цели (в единицах упражнения), null если цель достигнута или нет результатов. */
+    val remaining: Double?
+)
+
+fun computeGoalProgress(goal: ExerciseGoal, current: Double?): GoalProgress {
+    if (current == null || current <= 0.0) return GoalProgress(goal, null, 0f, false, null)
+    val achieved = if (goal.lowerIsBetter) current <= goal.targetValue else current >= goal.targetValue
+    val fraction = when {
+        achieved -> 1f
+        goal.lowerIsBetter -> (goal.targetValue / current).toFloat()
+        else -> (current / goal.targetValue).toFloat()
+    }.coerceIn(0f, 1f)
+    val remaining = if (achieved) null else Math.abs(goal.targetValue - current)
+    return GoalProgress(goal, current, fraction, achieved, remaining)
+}
+
+/** Значение без знака для остатка до цели: «0.26 м», «5 кг». */
+fun formatGoalRemaining(value: Double, unit: ResultUnit): String = formatRecordValue(value, unit)

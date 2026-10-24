@@ -41,7 +41,8 @@ class TripleJumpApplication : Application() {
             inventoryDao = database.inventoryDao(),
             trainingPeriodDao = database.trainingPeriodDao(),
             recordOverrideDao = database.recordOverrideDao(),
-            exerciseComplexDao = database.exerciseComplexDao()
+            exerciseComplexDao = database.exerciseComplexDao(),
+            exerciseGoalDao = database.exerciseGoalDao()
         )
 
         seedDatabase = SeedDatabase(repository, database, this)

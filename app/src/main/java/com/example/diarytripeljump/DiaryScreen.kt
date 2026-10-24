@@ -75,6 +75,18 @@ import com.example.diarytripeljump.ui.components.pluralRu
 import com.example.diarytripeljump.ui.components.screenContentPadding
 import com.example.diarytripeljump.ui.theme.NumberMedium
 import com.example.diarytripeljump.ui.theme.extraColors
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.TextButton
+import com.example.diarytripeljump.data.Exercise
+import com.example.diarytripeljump.data.ExerciseGoal
+import com.example.diarytripeljump.data.RecordSummary
+import com.example.diarytripeljump.data.RecordsEngine
+import com.example.diarytripeljump.data.computeGoalProgress
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -91,7 +103,12 @@ fun DiaryScreen(
     val athleteProfile by viewModel.athleteProfile.collectAsState()
     val trainings by viewModel.allTrainingsWithExercises.collectAsState()
     val competitions by viewModel.allCompetitions.collectAsState()
-    val recordEvents by viewModel.recordEvents.collectAsState()
+    val startResults by viewModel.tripleJumpStartResults.collectAsState()
+    val favorites by viewModel.favoriteExercises.collectAsState()
+    val allExercises by viewModel.allExercises.collectAsState()
+    val records by viewModel.records.collectAsState()
+    val goals by viewModel.goals.collectAsState()
+    var showFavoritesPicker by remember { mutableStateOf(false) }
     val todayStart = com.example.diarytripeljump.ui.components.rememberTodayStart()
 
     val dateText = remember {
@@ -117,7 +134,6 @@ fun DiaryScreen(
     }
 
     val isBirthday = isTodayBirthday(athleteProfile?.birthDate)
-    var selectedResultFilter by remember { mutableIntStateOf(0) }
 
     Scaffold(
         modifier = modifier,
@@ -194,57 +210,80 @@ fun DiaryScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SectionHeader(
-                        title = "Обновления рекордов",
-                        subtitle = "Новые результаты из тренировок и стартов",
-                        actionLabel = "Все",
-                        onAction = { onNavigate(Routes.RECORDS) }
+                        title = "Результаты в тройном прыжке",
+                        subtitle = "Прошедшие старты",
+                        actionLabel = "Старты",
+                        onAction = { onNavigate(Routes.COMPETITIONS) }
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ToggleChip(label = "Все", selected = selectedResultFilter == 0, onClick = { selectedResultFilter = 0 })
-                        ToggleChip(label = "Старты", selected = selectedResultFilter == 1, onClick = { selectedResultFilter = 1 })
-                        ToggleChip(label = "Тренировки", selected = selectedResultFilter == 2, onClick = { selectedResultFilter = 2 })
+                    if (startResults.isEmpty()) {
+                        EmptyState(
+                            icon = Icons.Default.EmojiEvents,
+                            title = "Пока нет результатов стартов",
+                            message = "Добавьте попытки в завершённый старт — результат появится здесь."
+                        )
+                    } else {
+                        AppCard {
+                            val rows = startResults.take(5)
+                            rows.forEachIndexed { index, row ->
+                                StartResultRow(row = row, onClick = { onNavigate(Routes.COMPETITIONS) })
+                                if (index < rows.lastIndex) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 68.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
 
             item {
-                val showCompetitions = selectedResultFilter == 0 || selectedResultFilter == 1
-                val showTrainings = selectedResultFilter == 0 || selectedResultFilter == 2
-
-                val rows = recordEvents
-                    .filter { event ->
-                        !event.isAnti && when (selectedResultFilter) {
-                            1 -> event.isCompetition
-                            2 -> !event.isCompetition
-                            else -> true
-                        }
-                    }
-                    .take(6)
-
-                if (rows.isEmpty()) {
-                    EmptyState(
-                        icon = Icons.Default.MilitaryTech,
-                        title = "Пока нет результатов",
-                        message = "Внесите результаты в тренировке — рекорды появятся здесь автоматически."
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SectionHeader(
+                        title = "Мои упражнения",
+                        subtitle = "Избранные упражнения из каталога",
+                        actionLabel = "Выбрать",
+                        onAction = { showFavoritesPicker = true }
                     )
-                } else {
-                    AppCard {
-                        rows.forEachIndexed { index, row ->
-                            RecentResultRow(
-                                event = row,
-                                onClick = { onNavigate(Routes.RECORDS) }
-                            )
-                            if (index < rows.lastIndex) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(start = 68.dp),
-                                    color = MaterialTheme.colorScheme.outlineVariant
+                    if (favorites.isEmpty()) {
+                        EmptyState(
+                            icon = Icons.Default.FitnessCenter,
+                            title = "Упражнения не выбраны",
+                            message = "Выберите упражнения, за результатами которых хотите следить, — они появятся здесь.",
+                            actionLabel = "Выбрать упражнения",
+                            onAction = { showFavoritesPicker = true }
+                        )
+                    } else {
+                        AppCard {
+                            favorites.forEachIndexed { index, ex ->
+                                FavoriteExerciseRow(
+                                    exercise = ex,
+                                    records = records,
+                                    goals = goals,
+                                    trainings = trainings,
+                                    onClick = { onNavigate(Routes.RECORDS) }
                                 )
+                                if (index < favorites.lastIndex) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 68.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showFavoritesPicker) {
+        FavoritesPickerDialog(
+            exercises = remember(allExercises) { allExercises.distinctBy { it.name.trim().lowercase() }.sortedBy { it.name.lowercase() } },
+            onToggle = { ex, fav -> viewModel.setExerciseFavorite(ex, fav) },
+            onDismiss = { showFavoritesPicker = false }
+        )
     }
 }
 
@@ -559,17 +598,12 @@ private fun SeasonStatsRow(
 }
 
 @Composable
-private fun RecentResultRow(
-    event: RecordEvent,
-    onClick: () -> Unit
-) {
+private fun StartResultRow(row: StartResultUi, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val tint = if (event.isCompetition) cs.tertiary else cs.primary
-    val icon = if (event.isCompetition) Icons.AutoMirrored.Filled.DirectionsRun else Icons.Default.FitnessCenter
-    val dateText = remember(event.date) {
-        SimpleDateFormat("d MMM", Locale("ru")).format(Date(event.date))
+    val extra = MaterialTheme.extraColors
+    val dateText = remember(row.competition.date) {
+        SimpleDateFormat("d MMM yyyy", Locale("ru")).format(Date(row.competition.date))
     }
-
     Surface(onClick = onClick, color = Color.Transparent) {
         Row(
             modifier = Modifier
@@ -578,39 +612,158 @@ private fun RecentResultRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconBadge(icon = icon, tint = tint)
-
+            IconBadge(icon = Icons.Default.EmojiEvents, tint = cs.tertiary)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = event.displayName,
+                    text = row.competition.name,
                     style = MaterialTheme.typography.titleSmall,
                     color = cs.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = (if (event.previousValue == null) "Первый результат" else "Новый рекорд") +
-                        " · " + (if (event.isCompetition) "старт" else "тренировка") + " · " + dateText,
+                    text = listOfNotNull(dateText, row.placement?.takeIf { it.isNotBlank() }).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     color = cs.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(text = formatRecordValue(event.value, event.unit), style = NumberMedium, color = cs.onSurface)
-                if (event.previousValue != null) {
-                    StatusPill(
-                        text = formatRecordDelta(event.value, event.previousValue, event.unit),
-                        contentColor = cs.onPrimaryContainer,
-                        containerColor = cs.primaryContainer,
-                        icon = Icons.AutoMirrored.Filled.TrendingUp
-                    )
+                Text(text = String.format(Locale.getDefault(), "%.2f м", row.best), style = NumberMedium, color = cs.onSurface)
+                if (row.isPersonalBest) {
+                    StatusPill(text = "Лучший", contentColor = extra.onGoldContainer, containerColor = extra.goldContainer, icon = Icons.Default.Star)
                 }
             }
         }
     }
+}
+
+@Composable
+private fun FavoriteExerciseRow(
+    exercise: Exercise,
+    records: List<RecordSummary>,
+    goals: List<ExerciseGoal>,
+    trainings: List<TrainingWithExercises>,
+    onClick: () -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    val unit = getInferredUnitForExercise(exercise.name, exercise.defaultUnit)
+    val key = RecordsEngine.exerciseRecordKey(exercise.name, exercise.isSingleLeg, exercise.legSide, unit)
+
+    val record = remember(records, key) {
+        records.firstOrNull { !it.isAnti && it.key == key }
+            ?: records.firstOrNull {
+                !it.isAnti && !it.isCompetition && it.name.equals(exercise.name.trim(), true) && it.isSingleLeg == exercise.isSingleLeg
+            }
+    }
+    // последний внесённый результат этого упражнения
+    val last = remember(trainings, key) {
+        trainings.asSequence()
+            .filter { !it.training.isSkipped }
+            .flatMap { it.exerciseResults.asSequence() }
+            .filter { RecordsEngine.exerciseRecordKey(it.exerciseName, it.isSingleLeg, it.legSide, it.resultUnit) == key && it.result > 0 }
+            .maxByOrNull { it.date }
+    }
+    val goalProgress = goals.firstOrNull { it.recordKey == (record?.key ?: key) }
+        ?.let { computeGoalProgress(it, record?.best) }
+
+    Surface(onClick = onClick, color = Color.Transparent) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconBadge(icon = Icons.Default.FitnessCenter, tint = cs.primary)
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = exercise.name + RecordsEngine.legSuffix(exercise.isSingleLeg, exercise.legSide),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = cs.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val sub = when {
+                        last != null -> "Последний: " + formatRecordValue(last.result, last.resultUnit) + " · " +
+                            SimpleDateFormat("d MMM", Locale("ru")).format(Date(last.date))
+                        else -> "Результатов пока нет"
+                    }
+                    Text(text = sub, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = record?.let { formatRecordValue(it.best, it.unit) } ?: "—",
+                        style = NumberMedium,
+                        color = cs.onSurface
+                    )
+                    Text(text = "рекорд", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                }
+            }
+            if (goalProgress != null) {
+                GoalProgressBlock(goalProgress, modifier = Modifier.padding(start = 52.dp))
+            }
+        }
+    }
+}
+
+/** Выбор упражнений, которые показываются на главном экране (то же, что «Избранное» в каталоге). */
+@Composable
+private fun FavoritesPickerDialog(
+    exercises: List<Exercise>,
+    onToggle: (Exercise, Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    var query by remember { mutableStateOf("") }
+    val shown = remember(exercises, query) {
+        exercises.filter { query.isBlank() || it.name.contains(query.trim(), ignoreCase = true) }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Упражнения на главной", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Поиск") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    if (shown.isEmpty()) {
+                        Text("Ничего не найдено", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                    }
+                    shown.forEach { ex ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onToggle(ex, !ex.isFavorite) }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(checked = ex.isFavorite, onCheckedChange = { onToggle(ex, it) })
+                            Text(
+                                text = ex.name + RecordsEngine.legSuffix(ex.isSingleLeg, ex.legSide),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = cs.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Готово") } }
+    )
 }
 
 private fun buildWeek(

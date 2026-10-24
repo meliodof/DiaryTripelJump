@@ -44,6 +44,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import com.example.diarytripeljump.data.RecordSummary
+import com.example.diarytripeljump.data.InventoryItem
+import com.example.diarytripeljump.data.GoalProgress
+import com.example.diarytripeljump.data.computeGoalProgress
 import com.example.diarytripeljump.data.formatRecordDelta
 import com.example.diarytripeljump.data.formatRecordValue
 
@@ -56,6 +59,17 @@ fun ResultsScreen(
     // Рекорды вычисляются автоматически из тренировок и ручных записей
     val records by viewModel.records.collectAsState()
     val athleteProfile by viewModel.athleteProfile.collectAsState()
+    val goals by viewModel.goals.collectAsState()
+    val inventoryItems by viewModel.inventoryItems.collectAsState()
+    val catalogExercises by viewModel.allExercises.collectAsState()
+
+    // Цели: ключ цели = ключ рекорда
+    var goalEditorOpen by remember { mutableStateOf(false) }
+    var goalFixed by remember { mutableStateOf<GoalCandidate?>(null) }
+    var goalExistingKey by remember { mutableStateOf<String?>(null) }
+    val goalByKey = remember(goals) { goals.associateBy { it.recordKey } }
+    val recordByKey = remember(records) { records.filter { !it.isAnti }.associateBy { it.key } }
+    val goalCandidates = remember(catalogExercises, records) { buildGoalCandidates(catalogExercises, records) }
 
     // Dialog States
     var showAddRecordDialog by remember { mutableStateOf(false) }
@@ -104,6 +118,7 @@ fun ResultsScreen(
 
     val hasActiveFilters = selectedSourceFilter != 0 || selectedLocationFilter != 0 || selectedCategoryFilter != 0
     val isAntiMode = selectedRecordTypeFilter == 1
+    val isGoalsMode = selectedRecordTypeFilter == 2
 
     val listState = rememberLazyListState()
     val fabExpanded by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
@@ -116,12 +131,18 @@ fun ResultsScreen(
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = {
-                    isAddingAntiRecord = isAntiMode
-                    showAddRecordDialog = true
+                    if (isGoalsMode) {
+                        goalFixed = null
+                        goalExistingKey = null
+                        goalEditorOpen = true
+                    } else {
+                        isAddingAntiRecord = isAntiMode
+                        showAddRecordDialog = true
+                    }
                 },
                 expanded = fabExpanded,
                 icon = { Icon(imageVector = Icons.Default.Add, contentDescription = null) },
-                text = { Text(text = if (isAntiMode) "Анти-рекорд" else "Рекорд") },
+                text = { Text(text = if (isGoalsMode) "Цель" else if (isAntiMode) "Анти-рекорд" else "Рекорд") },
                 containerColor = if (isAntiMode) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primary,
                 contentColor = if (isAntiMode) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimary
             )
@@ -135,10 +156,33 @@ fun ResultsScreen(
         ) {
             item {
                 SegmentedControl(
-                    options = listOf("Рекорды", "Анти-рекорды"),
+                    options = listOf("Рекорды", "Анти-рекорды", "Цели"),
                     selectedIndex = selectedRecordTypeFilter,
                     onSelect = { selectedRecordTypeFilter = it }
                 )
+            }
+
+            if (isGoalsMode) {
+                if (goals.isEmpty()) {
+                    item {
+                        EmptyState(
+                            icon = Icons.Default.Flag,
+                            title = "Целей пока нет",
+                            message = "Поставьте цель по результату в любом упражнении или в тройном прыжке — прогресс считается автоматически.",
+                            actionLabel = "Поставить цель",
+                            onAction = { goalFixed = null; goalExistingKey = null; goalEditorOpen = true }
+                        )
+                    }
+                } else {
+                    items(goals, key = { "goal|" + it.recordKey }) { g ->
+                        GoalCard(
+                            progress = computeGoalProgress(g, recordByKey[g.recordKey]?.best),
+                            onEdit = { goalFixed = null; goalExistingKey = g.recordKey; goalEditorOpen = true },
+                            onDelete = { viewModel.deleteGoal(g.recordKey) }
+                        )
+                    }
+                }
+                return@LazyColumn
             }
 
             if (!isAntiMode && bestJump != null) {
@@ -192,6 +236,13 @@ fun ResultsScreen(
                 items(filteredResults, key = { it.key }) { record ->
                     RecordCard(
                         record = record,
+                        goalProgress = goalByKey[record.key]?.takeIf { !record.isAnti }
+                            ?.let { computeGoalProgress(it, record.best) },
+                        onSetGoal = if (record.isAnti) null else ({
+                            goalFixed = goalCandidateFor(record)
+                            goalExistingKey = record.key
+                            goalEditorOpen = true
+                        }),
                         onClick = { historyKey = record.key },
                         onEdit = { editingKey = record.key },
                         onDelete = { recordToDelete = record }
@@ -256,22 +307,29 @@ fun ResultsScreen(
     if (showAddRecordDialog) {
         AddRecordDialog(
             isAntiRecord = isAddingAntiRecord,
+            inventoryItems = inventoryItems,
+            onAddInventory = { name, unit -> viewModel.addInventory(name, unit) },
             onDismiss = { showAddRecordDialog = false },
-            onConfirm = { eventName, resVal, unit, isIndoor, recordLevel, category, isCompetition, weather, notes ->
-                viewModel.addRecordResult(
-                    eventName = eventName,
-                    result = resVal,
-                    unit = unit,
-                    isIndoor = isIndoor,
-                    isAntiRecord = isAddingAntiRecord,
-                    recordLevel = recordLevel,
-                    exerciseCategory = category,
-                    isCompetition = isCompetition,
-                    weatherConditions = weather,
-                    notes = notes
-                )
+            onConfirm = { input ->
+                viewModel.addRecordResult(input = input, isAntiRecord = isAddingAntiRecord)
                 showAddRecordDialog = false
             }
+        )
+    }
+
+    if (goalEditorOpen) {
+        val existing = goalExistingKey?.let { goalByKey[it] }
+        GoalEditorDialog(
+            candidates = goalCandidates,
+            fixed = goalFixed,
+            existing = existing,
+            currentBestFor = { key -> recordByKey[key]?.best },
+            onDismiss = { goalEditorOpen = false },
+            onSave = { cand, target, deadline ->
+                viewModel.saveGoal(cand.key, cand.name, cand.displayName, cand.unit, target, cand.lowerIsBetter, deadline)
+                goalEditorOpen = false
+            },
+            onDelete = existing?.let { g -> { viewModel.deleteGoal(g.recordKey); goalEditorOpen = false } }
         )
     }
 }
@@ -328,6 +386,8 @@ private fun BestResultCard(record: RecordSummary, onClick: () -> Unit) {
 @Composable
 fun RecordCard(
     record: RecordSummary,
+    goalProgress: GoalProgress? = null,
+    onSetGoal: (() -> Unit)? = null,
     onClick: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
@@ -431,6 +491,9 @@ fun RecordCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                if (goalProgress != null) {
+                    GoalProgressBlock(goalProgress, modifier = Modifier.padding(top = 2.dp, end = 8.dp))
+                }
             }
 
             Column(horizontalAlignment = Alignment.End) {
@@ -454,6 +517,9 @@ fun RecordCard(
                         actions = buildList {
                             add(MenuAction("История обновлений", Icons.Default.History, onClick = onClick))
                             add(MenuAction("Редактировать", Icons.Default.Edit, onClick = onEdit))
+                            if (onSetGoal != null) {
+                                add(MenuAction(if (goalProgress == null) "Поставить цель" else "Изменить цель", Icons.Default.Flag, onClick = onSetGoal))
+                            }
                             if (record.deletableResultId != null) {
                                 add(MenuAction("Удалить", Icons.Default.DeleteOutline, destructive = true, onClick = onDelete))
                             }
@@ -719,43 +785,48 @@ private fun RecordHistorySheet(record: RecordSummary, onDismiss: () -> Unit) {
 private fun formatFullDate(timestamp: Long): String =
     SimpleDateFormat("d MMM yyyy", Locale("ru")).format(Date(timestamp))
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AddRecordDialog(
     isAntiRecord: Boolean,
+    inventoryItems: List<InventoryItem>,
+    onAddInventory: (name: String, unit: ResultUnit) -> Unit,
     onDismiss: () -> Unit,
-    onConfirm: (
-        eventName: String,
-        result: Double,
-        unit: ResultUnit,
-        isIndoor: Boolean,
-        recordLevel: String,
-        category: String,
-        isCompetition: Boolean,
-        weather: String,
-        notes: String
-    ) -> Unit
+    onConfirm: (NewRecordInput) -> Unit
 ) {
+    val cs = MaterialTheme.colorScheme
     var eventNameText by remember { mutableStateOf("Тройной прыжок") }
-    var resultValueText by remember { mutableStateOf("14.80") }
+    var resultValueText by remember { mutableStateOf("") }
 
+    // Единицы результата: метры, секунды, килограммы
+    val units = listOf(ResultUnit.M, ResultUnit.SECONDS, ResultUnit.KG)
     var selectedUnit by remember { mutableStateOf(ResultUnit.M) }
     var isIndoor by remember { mutableStateOf(false) }
-    var recordLevel by remember { mutableStateOf("PB") } // PB vs SB
-    var selectedCategory by remember { mutableStateOf("Прыжковые") } // Прыжковые, Беговые, Силовые
+    var recordLevel by remember { mutableStateOf("PB") }
+    var selectedCategory by remember { mutableStateOf("Прыжковые") }
     var isCompetition by remember { mutableStateOf(true) }
 
-    var weatherText by remember { mutableStateOf("Ясно, +22°C") }
+    var isSingleLeg by remember { mutableStateOf(false) }
+    var legSide by remember { mutableStateOf<String?>(null) }
+
+    var inventoryName by remember { mutableStateOf<String?>(null) }
+    var inventoryUnit by remember { mutableStateOf<ResultUnit?>(null) }
+    var inventoryValueText by remember { mutableStateOf("") }
+    var showCreateInventory by remember { mutableStateOf(false) }
+
+    var weatherText by remember { mutableStateOf("") }
     var notesText by remember { mutableStateOf("") }
 
     var showNameError by remember { mutableStateOf(false) }
+    var showValueError by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = if (isAntiRecord) "Новый Анти-Рекорд" else "Новый Рекорд",
+                text = if (isAntiRecord) "Новый анти-рекорд" else "Новый рекорд",
                 fontWeight = FontWeight.Bold,
-                color = if (isAntiRecord) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                color = if (isAntiRecord) cs.error else cs.primary
             )
         },
         text = {
@@ -763,7 +834,6 @@ fun AddRecordDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Name Field
                 OutlinedTextField(
                     value = eventNameText,
                     onValueChange = {
@@ -773,95 +843,172 @@ fun AddRecordDialog(
                     label = { Text("Название упражнения / вида") },
                     isError = showNameError && eventNameText.isBlank(),
                     supportingText = if (showNameError && eventNameText.isBlank()) {
-                        { Text("Это поле обязательно для заполнения", color = MaterialTheme.colorScheme.error) }
+                        { Text("Это поле обязательно для заполнения") }
                     } else null,
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Category Selection
-                Text(text = "Вид упражнения:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Text(text = "Вид упражнения", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    listOf("🦘 Прыжковые", "🏃 Беговые", "💪 Силовые").forEach { cat ->
-                        FilterChip(
-                            selected = selectedCategory.contains(cat.takeLast(5), ignoreCase = true),
+                    listOf("Прыжковые" to ResultUnit.M, "Беговые" to ResultUnit.SECONDS, "Силовые" to ResultUnit.KG).forEach { (cat, defaultUnit) ->
+                        ToggleChip(
+                            label = cat,
+                            selected = selectedCategory == cat,
                             onClick = {
                                 selectedCategory = cat
-                                selectedUnit = when {
-                                    cat.contains("бег", ignoreCase = true) -> ResultUnit.SECONDS
-                                    cat.contains("силов", ignoreCase = true) -> ResultUnit.KG
-                                    else -> ResultUnit.M
-                                }
+                                selectedUnit = defaultUnit // единицу можно сменить ниже вручную
+                            }
+                        )
+                    }
+                }
+
+                Text(text = "Единица результата", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                SegmentedControl(
+                    options = listOf("Метры", "Секунды", "Килограммы"),
+                    selectedIndex = units.indexOf(selectedUnit),
+                    onSelect = { selectedUnit = units[it] }
+                )
+
+                OutlinedTextField(
+                    value = resultValueText,
+                    onValueChange = { input ->
+                        resultValueText = input.replace(',', '.').filter { it.isDigit() || it == '.' }
+                        showValueError = false
+                    },
+                    label = { Text("Результат (${getUnitTitle(selectedUnit)})") },
+                    isError = showValueError,
+                    supportingText = if (showValueError) {
+                        { Text("Введите число больше нуля") }
+                    } else null,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                HorizontalDivider(color = cs.outlineVariant)
+
+                // Левая / правая нога — как при создании упражнения
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Исполнение на одной ноге", style = MaterialTheme.typography.bodyLarge, color = cs.onSurface)
+                        Text(
+                            "Рекорд ведётся отдельно от результата на двух ногах",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = cs.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isSingleLeg,
+                        onCheckedChange = {
+                            isSingleLeg = it
+                            if (!it) legSide = null
+                        }
+                    )
+                }
+                if (isSingleLeg) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ToggleChip(
+                            label = "Левая",
+                            selected = legSide == "LEFT",
+                            onClick = { legSide = if (legSide == "LEFT") null else "LEFT" }
+                        )
+                        ToggleChip(
+                            label = "Правая",
+                            selected = legSide == "RIGHT",
+                            onClick = { legSide = if (legSide == "RIGHT") null else "RIGHT" }
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = cs.outlineVariant)
+
+                // Инвентарь, с которым установлен рекорд (или антирекорд); можно создать новый
+                Text(text = "Инвентарь", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    FilterChip(
+                        selected = inventoryName.isNullOrBlank(),
+                        onClick = {
+                            inventoryName = null
+                            inventoryUnit = null
+                            inventoryValueText = ""
+                        },
+                        label = { Text("Без инвентаря") }
+                    )
+                    inventoryItems.forEach { item ->
+                        FilterChip(
+                            selected = inventoryName.equals(item.name, ignoreCase = true) && inventoryUnit == item.unit,
+                            onClick = {
+                                inventoryName = item.name
+                                inventoryUnit = item.unit
                             },
-                            label = { Text(cat, fontSize = 10.sp) }
+                            label = { Text("${item.name}, ${getUnitTitle(item.unit)}") }
                         )
                     }
+                    AssistChip(
+                        onClick = { showCreateInventory = true },
+                        label = { Text("Новый") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize))
+                        }
+                    )
                 }
-
-                // PB vs SB Selection
-                if (!isAntiRecord) {
-                    Text(text = "Уровень рекорда:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilterChip(
-                            selected = recordLevel == "PB",
-                            onClick = { recordLevel = "PB" },
-                            label = { Text("🏆 PB (Личный рекорд)", fontSize = 10.sp) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = recordLevel == "SB",
-                            onClick = { recordLevel = "SB" },
-                            label = { Text("⭐ SB (Сезонный рекорд)", fontSize = 10.sp) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-
-                // Source Selection: Competition vs Training
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = "Соревновательный результат:", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                    Switch(checked = isCompetition, onCheckedChange = { isCompetition = it })
-                }
-
-                // Indoor vs Outdoor Switch
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = "В помещении (Indoor):", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                    Switch(checked = isIndoor, onCheckedChange = { isIndoor = it })
-                }
-
-                // Weather input field HIDDEN for indoor!
-                if (!isIndoor) {
+                if (!inventoryName.isNullOrBlank()) {
                     OutlinedTextField(
-                        value = weatherText,
-                        onValueChange = { weatherText = it },
-                        label = { Text("Погода / Условия (на улице)") },
+                        value = inventoryValueText,
+                        onValueChange = { v -> inventoryValueText = v.replace(',', '.').filter { it.isDigit() || it == '.' } },
+                        label = { Text("$inventoryName, ${getUnitTitle(inventoryUnit ?: ResultUnit.CM)}") },
+                        singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
 
-                // Result Input Value
-                OutlinedTextField(
-                    value = resultValueText,
-                    onValueChange = { input -> resultValueText = input.filter { it.isDigit() || it == '.' } },
-                    label = { Text("Результат (${getUnitTitle(selectedUnit)})") },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                HorizontalDivider(color = cs.outlineVariant)
 
+                if (!isAntiRecord) {
+                    Text(text = "Уровень рекорда", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ToggleChip(label = "PB · личный", selected = recordLevel == "PB", onClick = { recordLevel = "PB" })
+                        ToggleChip(label = "SB · сезонный", selected = recordLevel == "SB", onClick = { recordLevel = "SB" })
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Соревновательный результат", style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = isCompetition, onCheckedChange = { isCompetition = it })
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("В помещении", style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = isIndoor, onCheckedChange = { isIndoor = it })
+                }
+                if (!isIndoor) {
+                    OutlinedTextField(
+                        value = weatherText,
+                        onValueChange = { weatherText = it },
+                        label = { Text("Погода / условия (на улице)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 OutlinedTextField(
                     value = notesText,
                     onValueChange = { notesText = it },
@@ -873,33 +1020,50 @@ fun AddRecordDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (eventNameText.isNotBlank()) {
-                        val resDouble = resultValueText.toDoubleOrNull() ?: 0.0
-                        onConfirm(
-                            eventNameText,
-                            resDouble,
-                            selectedUnit,
-                            isIndoor,
-                            recordLevel,
-                            selectedCategory,
-                            isCompetition,
-                            weatherText,
-                            notesText
-                        )
-                    } else {
-                        showNameError = true
+                    val value = resultValueText.toDoubleOrNull()
+                    when {
+                        eventNameText.isBlank() -> showNameError = true
+                        value == null || value <= 0.0 -> showValueError = true
+                        else -> {
+                            val hasInv = !inventoryName.isNullOrBlank()
+                            onConfirm(
+                                NewRecordInput(
+                                    eventName = eventNameText.trim(),
+                                    result = value,
+                                    unit = selectedUnit,
+                                    isIndoor = isIndoor,
+                                    recordLevel = recordLevel,
+                                    category = selectedCategory,
+                                    isCompetition = isCompetition,
+                                    weather = weatherText.trim().ifBlank { null },
+                                    notes = notesText.trim().ifBlank { null },
+                                    isSingleLeg = isSingleLeg,
+                                    legSide = if (isSingleLeg) legSide else null,
+                                    inventoryName = if (hasInv) inventoryName else null,
+                                    inventoryUnit = if (hasInv) inventoryUnit else null,
+                                    inventoryValue = if (hasInv) inventoryValueText.toDoubleOrNull() else null
+                                )
+                            )
+                        }
                     }
                 }
-            ) {
-                Text("Сохранить")
-            }
+            ) { Text("Сохранить") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена")
-            }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
+
+    if (showCreateInventory) {
+        CreateInventoryDialog(
+            onDismiss = { showCreateInventory = false },
+            onConfirm = { name, unit ->
+                onAddInventory(name, unit)
+                // сразу выбираем только что созданный инвентарь
+                inventoryName = name
+                inventoryUnit = unit
+                showCreateInventory = false
+            }
+        )
+    }
 }
 
 fun formatResultValue(value: Double, unit: ResultUnit): String {
