@@ -5,11 +5,15 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -57,7 +61,6 @@ object Routes {
     const val COMPETITIONS = "competitions"
     const val RECORDS = "records"
     const val CATALOG = "catalog"
-    const val ANALYTICS = "analytics"
     const val PROFILE = "profile"
 }
 
@@ -72,8 +75,7 @@ enum class TopLevelDestination(
     TRAININGS(Routes.TRAININGS, "Тренировки", Icons.Outlined.FitnessCenter, Icons.Filled.FitnessCenter),
     COMPETITIONS(Routes.COMPETITIONS, "Старты", Icons.Outlined.EmojiEvents, Icons.Filled.EmojiEvents),
     RECORDS(Routes.RECORDS, "Рекорды", Icons.Outlined.MilitaryTech, Icons.Filled.MilitaryTech),
-    CATALOG(Routes.CATALOG, "Каталог", Icons.Outlined.Category, Icons.Filled.Category),
-    ANALYTICS(Routes.ANALYTICS, "Аналитика", Icons.Outlined.BarChart, Icons.Filled.BarChart)
+    CATALOG(Routes.CATALOG, "Каталог", Icons.Outlined.Category, Icons.Filled.Category)
 }
 
 /** Переход между вкладками: одна запись в стеке, состояние вкладок сохраняется. */
@@ -85,12 +87,16 @@ fun NavHostController.navigateTopLevel(route: String) {
     }
 }
 
-private const val TAB_ENTER_MS = 240
-private const val TAB_EXIT_MS = 90
+// Короткий перекрёстный fade без задержки и масштабирования: раньше переход занимал 330 мс
+// (90 мс исчезновения + 240 мс появления после паузы), а scaleIn заставлял перерисовывать весь экран слоем.
+private const val TAB_ENTER_MS = 150
+private const val TAB_EXIT_MS = 100
 
 @Composable
 fun MainScreen(
     viewModel: DiaryViewModel,
+    isDemo: Boolean,
+    onSwitchDiary: (demo: Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val navController = rememberNavController()
@@ -114,12 +120,16 @@ fun MainScreen(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            AnimatedVisibility(
-                visible = showNavigation && !isWide,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-            ) {
-                AppNavigationBar(current = currentTop, onSelect = onSelectTab)
+            Column {
+                // Полоса демо-режима всегда на виду, чтобы демо-записи не путали с настоящими
+                if (isDemo) DemoModeBar(onExit = { onSwitchDiary(false) })
+                AnimatedVisibility(
+                    visible = showNavigation && !isWide,
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                ) {
+                    AppNavigationBar(current = currentTop, onSelect = onSelectTab)
+                }
             }
         }
     ) { innerPadding ->
@@ -146,16 +156,9 @@ fun MainScreen(
                     modifier = Modifier
                         .widthIn(max = 720.dp)
                         .fillMaxSize(),
-                    // «Fade through» для переключения вкладок
-                    enterTransition = {
-                        fadeIn(tween(TAB_ENTER_MS, delayMillis = TAB_EXIT_MS)) +
-                            scaleIn(tween(TAB_ENTER_MS, delayMillis = TAB_EXIT_MS), initialScale = 0.96f)
-                    },
+                    enterTransition = { fadeIn(tween(TAB_ENTER_MS)) },
                     exitTransition = { fadeOut(tween(TAB_EXIT_MS)) },
-                    popEnterTransition = {
-                        fadeIn(tween(TAB_ENTER_MS, delayMillis = TAB_EXIT_MS)) +
-                            scaleIn(tween(TAB_ENTER_MS, delayMillis = TAB_EXIT_MS), initialScale = 0.96f)
-                    },
+                    popEnterTransition = { fadeIn(tween(TAB_ENTER_MS)) },
                     popExitTransition = { fadeOut(tween(TAB_EXIT_MS)) }
                 ) {
                     composable(Routes.HOME) {
@@ -166,11 +169,7 @@ fun MainScreen(
                         )
                     }
                     composable(Routes.TRAININGS) {
-                        TrainingsScreen(
-                            viewModel = viewModel,
-                            onOpenProfile = onOpenProfile,
-                            onOpenAnalytics = { onNavigate(Routes.ANALYTICS) }
-                        )
+                        TrainingsScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
                     }
                     composable(Routes.COMPETITIONS) {
                         CompetitionsScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
@@ -181,36 +180,57 @@ fun MainScreen(
                     composable(Routes.CATALOG) {
                         CatalogScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
                     }
-                    composable(Routes.ANALYTICS) {
-                        AnalyticsScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
-                    }
                     composable(
                         route = Routes.PROFILE,
                         // Профиль — «push»-экран: въезжает справа, назад — уезжает вправо
                         enterTransition = {
                             slideIntoContainer(
                                 AnimatedContentTransitionScope.SlideDirection.Start,
-                                animationSpec = tween(300)
-                            ) + fadeIn(tween(300))
+                                animationSpec = tween(250)
+                            ) + fadeIn(tween(250))
                         },
                         exitTransition = { fadeOut(tween(TAB_EXIT_MS)) },
-                        popEnterTransition = {
-                            fadeIn(tween(TAB_ENTER_MS)) + scaleIn(tween(TAB_ENTER_MS), initialScale = 0.96f)
-                        },
+                        popEnterTransition = { fadeIn(tween(TAB_ENTER_MS)) },
                         popExitTransition = {
                             slideOutOfContainer(
                                 AnimatedContentTransitionScope.SlideDirection.End,
-                                animationSpec = tween(300)
-                            ) + fadeOut(tween(300))
+                                animationSpec = tween(250)
+                            ) + fadeOut(tween(250))
                         }
                     ) {
                         ProfileScreen(
                             viewModel = viewModel,
+                            isDemo = isDemo,
+                            onSwitchDiary = onSwitchDiary,
                             onBack = { navController.popBackStack() }
                         )
                     }
                 }
             }
+        }
+    }
+}
+
+/** Тонкая полоса над навигацией: открыт демо-дневник, одно нажатие — вернуться к своим данным. */
+@Composable
+private fun DemoModeBar(onExit: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Surface(color = cs.tertiaryContainer, contentColor = cs.onTertiaryContainer) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Outlined.Science, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text(
+                text = "Демо-режим: данные для примера",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 10.dp)
+            )
+            TextButton(onClick = onExit) { Text("Мои данные") }
         }
     }
 }
@@ -235,7 +255,7 @@ private fun AppNavigationBar(
                 label = {
                     Text(
                         text = item.label,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         maxLines = 1,
                         softWrap = false,
                         overflow = TextOverflow.Clip
@@ -272,7 +292,7 @@ private fun AppNavigationRail(
                         contentDescription = item.label
                     )
                 },
-                label = { Text(text = item.label, fontSize = 11.sp, maxLines = 1) },
+                label = { Text(text = item.label, fontSize = 12.sp, maxLines = 1) },
                 alwaysShowLabel = true,
                 colors = NavigationRailItemDefaults.colors(
                     indicatorColor = MaterialTheme.colorScheme.primaryContainer,

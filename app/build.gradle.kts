@@ -22,8 +22,9 @@ android {
 
     buildTypes {
         release {
+            // R8: сжатие и оптимизация кода — заметно ускоряет Compose-экраны в релизной сборке
             optimization {
-                enable = false
+                enable = true
             }
         }
     }
@@ -34,6 +35,15 @@ android {
     buildFeatures {
         compose = true
     }
+    sourceSets {
+        // Экспортированные схемы Room нужны тестам миграций
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
+}
+
+ksp {
+    // Схема каждой версии БД сохраняется в app/schemas и хранится в git
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -57,6 +67,7 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.room.testing)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

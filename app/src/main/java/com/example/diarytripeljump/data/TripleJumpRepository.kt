@@ -1,8 +1,10 @@
 package com.example.diarytripeljump.data
 
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 
 class TripleJumpRepository(
+    private val database: TripleJumpDatabase,
     private val athleteProfileDao: AthleteProfileDao,
     private val competitionDao: CompetitionDao,
     private val tripleJumpResultDao: TripleJumpResultDao,
@@ -24,6 +26,9 @@ class TripleJumpRepository(
     private val exerciseComplexDao: ExerciseComplexDao,
     private val exerciseGoalDao: ExerciseGoalDao
 ) {
+    /** Несколько изменений как одно целое: при сбое посередине база остаётся в прежнем состоянии. */
+    suspend fun <R> inTransaction(block: suspend () -> R): R = database.withTransaction(block)
+
     suspend fun clearAllDatabaseData() {
         competitionDao.deleteAllCompetitions()
         tripleJumpResultDao.deleteAllResults()

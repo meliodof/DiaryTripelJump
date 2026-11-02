@@ -1,36 +1,119 @@
 package com.example.diarytripeljump.data
 
-import android.content.Context
-import androidx.room.withTransaction
 import kotlinx.coroutines.flow.first
 import java.util.Calendar
 import java.util.Random
+
+/** Что из демо-набора найдено в дневнике пользователя (остатки старой автозагрузки). */
+data class DemoLeftovers(
+    val trainings: Int,
+    val competitions: Int,
+    val periods: Int,
+    val complexes: Int,
+    val exercises: Int,
+    val goals: Int,
+    val profile: Boolean
+) {
+    val isEmpty: Boolean get() = trainings + competitions + periods + complexes + exercises + goals == 0 && !profile
+
+    fun describe(): String = buildList {
+        if (trainings > 0) add("тренировок: $trainings")
+        if (competitions > 0) add("стартов: $competitions")
+        if (periods > 0) add("периодов: $periods")
+        if (complexes > 0) add("комплексов: $complexes")
+        if (exercises > 0) add("упражнений в каталоге: $exercises")
+        if (goals > 0) add("целей: $goals")
+        if (profile) add("профиль «Алексей Морозов»")
+    }.joinToString(", ")
+}
 
 /**
  * Демо-данные: профиль спортсмена, справочник упражнений, комплексы, тренировки,
  * старты, рекорды и подготовительные периоды за последние три месяца (считая от сегодняшнего дня).
  *
- * При первом запуске на пустой базе данные добавляются автоматически (один раз).
- * Позже их можно догрузить вручную из профиля — уже существующие записи не дублируются.
+ * Заполняют только отдельную демо-базу ([TripleJumpDatabase.DEMO_DATABASE_NAME]). Старые версии приложения
+ * заливали этот набор прямо в дневник пользователя — [scanLeftovers] и [removeLeftovers] находят и убирают его.
  */
-class SeedDatabase(
-    private val repository: TripleJumpRepository,
-    private val database: TripleJumpDatabase,
-    context: Context
-) {
-    private val prefs = context.applicationContext.getSharedPreferences("diary_prefs", Context.MODE_PRIVATE)
+class SeedDatabase(private val repository: TripleJumpRepository) {
 
-    /** Автозагрузка: только для совсем пустой базы и только один раз. */
-    suspend fun seedInitialData() {
-        if (prefs.getBoolean(KEY_SEEDED, false)) return
-        val empty = repository.getProfile().first() == null &&
-            repository.getAllTrainingsWithExercises().first().isEmpty() &&
-            repository.getAllCompetitions().first().isEmpty() &&
-            repository.getAllExercises().first().isEmpty()
+    /** Заполняет демо-базу при первом открытии (и после очистки). */
+    suspend fun seedIfEmpty() {
+        val empty = repository.getAllTrainingsWithExercises().first().isEmpty() &&
+            repository.getAllCompetitions().first().isEmpty()
         if (empty) {
             seedDemoData()
-            prefs.edit().putBoolean(KEY_SEEDED, true).apply()
+        } else {
+            // демо-база, созданная прежней версией: профиль переименовываем, чтобы его не путали с настоящим
+            val p = repository.getProfile().first()
+            if (p != null && isOldDemoProfile(p)) repository.insertProfile(p.copy(firstName = DEMO_FIRST, lastName = DEMO_LAST, nickname = DEMO_NICK))
         }
+    }
+
+    // --- Поиск и удаление демо-записей в дневнике пользователя ---
+
+    private fun isSeedTime(millis: Long, hour: Int): Boolean {
+        val c = Calendar.getInstance().apply { timeInMillis = millis }
+        return c[Calendar.HOUR_OF_DAY] == hour && c[Calendar.MINUTE] == 0 && c[Calendar.SECOND] == 0 && c[Calendar.MILLISECOND] == 0
+    }
+
+    private fun isOldDemoProfile(p: AthleteProfile) = p.lastName == "Морозов" && p.nickname == "Лёха"
+
+    /**
+     * Запись считается демо, только если совпадают все признаки автозагрузки: точное время (10:00:00.000 для тренировок,
+     * 12:00:00.000 для стартов), названия из демо-набора. Тренировку, в которую пользователь добавил своё упражнение, не трогаем.
+     */
+    private suspend fun findLeftovers(): Triple<List<TrainingWithExercises>, List<Competition>, DemoLeftovers> {
+        val seedExercises = EXERCISES.map { it.name }.toSet()
+        val seedSkips = SKIPS.values.toSet()
+        val trainings = repository.getAllTrainingsWithExercises().first()
+        val demoTrainings = trainings.filter { t ->
+            isSeedTime(t.training.date, 10) && (t.training.notes ?: "").let { n -> n.isEmpty() || n.startsWith("Пропуск: ") } &&
+                if (t.training.isSkipped) t.training.skipReason in seedSkips
+                else t.exerciseResults.isNotEmpty() && t.exerciseResults.all { it.exerciseName in seedExercises }
+        }
+        val demoCompetitions = repository.getAllCompetitions().first().filter {
+            it.name in SEED_MEETS && isSeedTime(it.date, 12) && it.eventTime == "11:00"
+        }
+        val periods = repository.getAllTrainingPeriods().first().filter { p -> SEED_PERIODS.any { it.first == p.name && it.second == p.colorHex } }
+        val complexes = repository.getAllComplexes().first().filter { c -> COMPLEXES.any { it.first == c.complex.name } }
+
+        // упражнения каталога убираем, только если после очистки на них не останется ни одного результата
+        val demoIds = demoTrainings.map { it.training.id }.toSet()
+        val stillUsed = trainings.filter { it.training.id !in demoIds }.flatMap { t -> t.exerciseResults.map { it.exerciseName } }.toSet()
+        val exercises = repository.getAllExercises().first().filter { it.name in seedExercises && it.name !in stillUsed }
+        val removedNames = exercises.map { it.name }.toSet()
+        val goals = repository.getAllGoals().first().filter { g -> GOALS.any { it.first == g.name } && g.name in removedNames }
+        val profile = repository.getProfile().first()?.let { isOldDemoProfile(it) } == true
+
+        return Triple(
+            demoTrainings, demoCompetitions,
+            DemoLeftovers(demoTrainings.size, demoCompetitions.size, periods.size, complexes.size, exercises.size, goals.size, profile)
+        )
+    }
+
+    suspend fun scanLeftovers(): DemoLeftovers = findLeftovers().third
+
+    /** Удаляет найденные демо-записи одной транзакцией; аватар профиля сохраняется. */
+    suspend fun removeLeftovers(): DemoLeftovers = repository.inTransaction {
+        val (trainings, competitions, summary) = findLeftovers()
+        trainings.forEach { repository.deleteTrainingSession(it.training) }
+        competitions.forEach { repository.deleteCompetition(it) } // результаты стартов удаляются каскадом
+        repository.getAllTrainingPeriods().first()
+            .filter { p -> SEED_PERIODS.any { it.first == p.name && it.second == p.colorHex } }
+            .forEach { repository.deleteTrainingPeriod(it) }
+        repository.getAllComplexes().first()
+            .filter { c -> COMPLEXES.any { it.first == c.complex.name } }
+            .forEach { repository.deleteComplex(it.complex) }
+        val stillUsed = repository.getAllTrainingsWithExercises().first().flatMap { t -> t.exerciseResults.map { it.exerciseName } }.toSet()
+        val seedExercises = EXERCISES.map { it.name }.toSet()
+        val removed = repository.getAllExercises().first().filter { it.name in seedExercises && it.name !in stillUsed }.map { it.name }.toSet()
+        removed.forEach { repository.deleteExercisesByName(it) }
+        repository.getAllGoals().first().filter { g -> GOALS.any { it.first == g.name } && g.name in removed }
+            .forEach { repository.deleteGoal(it.recordKey) }
+        repository.getProfile().first()?.takeIf { isOldDemoProfile(it) }?.let {
+            repository.insertProfile(AthleteProfile(id = 1, avatarUriString = it.avatarUriString))
+        }
+        summary
     }
 
     private class ExDef(
@@ -48,7 +131,6 @@ class SeedDatabase(
     )
 
     private companion object {
-        const val KEY_SEEDED = "demo_seeded_v1"
         const val DAY = 86_400_000L
 
         const val C_RUN = "Беговое упражнение"
@@ -99,6 +181,20 @@ class SeedDatabase(
 
         /** Номера тренировочных дней, которые «пропущены», и причины. */
         val SKIPS = mapOf(3 to "Болезнь", 4 to "Болезнь", 17 to "Работа", 26 to "Отдых", 38 to "Погода", 49 to "Отдых")
+
+        val SEED_MEETS = setOf("Чемпионат Москвы", "Кубок России", "Первенство ЦФО", "Всероссийские соревнования")
+
+        val SEED_PERIODS = listOf(
+            "Общая подготовка" to "#2E7D6B",
+            "Специальная подготовка" to "#2B5CA8",
+            "Скоростно-силовой блок" to "#C79100",
+            "Предсоревновательный" to "#B8471F"
+        )
+
+        // Демо-профиль заметно отличается от настоящего, чтобы режимы не путали
+        const val DEMO_FIRST = "Демо"
+        const val DEMO_LAST = "Спортсмен"
+        const val DEMO_NICK = "demo"
     }
 
     private fun dayAt(offsetDays: Int, hour: Int): Long = Calendar.getInstance().apply {
@@ -114,16 +210,16 @@ class SeedDatabase(
         val rnd = Random(2026)
         val daysBack = 91
 
-        database.withTransaction {
+        repository.inTransaction {
             // --- Профиль спортсмена (чужой заполненный профиль не затираем) ---
             val profile = repository.getProfile().first()
             if (profile == null || profile.firstName.isNullOrBlank()) {
                 repository.insertProfile(
                     AthleteProfile(
                         id = 1,
-                        firstName = "Алексей",
-                        lastName = "Морозов",
-                        nickname = "Лёха",
+                        firstName = DEMO_FIRST,
+                        lastName = DEMO_LAST,
+                        nickname = DEMO_NICK,
                         greetingPreference = "NAME",
                         specialization = "Тройной прыжок",
                         birthDate = Calendar.getInstance().apply { clear(); set(2002, Calendar.MARCH, 14) }.timeInMillis,
@@ -155,7 +251,8 @@ class SeedDatabase(
                             name = d.name, categoryName = d.category, defaultUnit = d.unit,
                             isSingleLeg = d.legSide != null, legSide = d.legSide,
                             inventoryName = d.invName, inventoryUnit = d.invUnit, inventoryValue = d.invValue,
-                            isFavorite = d.name in FAVORITES
+                            isFavorite = d.name in FAVORITES,
+                            inSpikes = d.category == C_TECH
                         )
                     )
                 }
@@ -271,7 +368,9 @@ class SeedDatabase(
                             resultUnit = d.unit, sets = d.sets, reps = d.reps,
                             setResultsJson = results.joinToString(","),
                             isSingleLeg = d.legSide != null, legSide = d.legSide,
-                            inventoryName = d.invName, inventoryUnit = d.invUnit, inventoryValue = d.invValue
+                            inventoryName = d.invName, inventoryUnit = d.invUnit, inventoryValue = d.invValue,
+                            // технические прыжки с разбега выполняются в шиповках
+                            inSpikes = d.category == C_TECH
                         )
                     )
                 }

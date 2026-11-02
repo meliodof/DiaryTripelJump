@@ -17,7 +17,11 @@ import java.io.File
 object AvatarStorage {
     private const val MAX_SIDE = 768
 
-    fun saveFromUri(context: Context, source: Uri): String? = try {
+    /**
+     * [demo] — аватар демо-дневника хранится в своей папке: раньше папка была общей, и смена фото
+     * в демо-режиме удаляла аватар настоящего профиля.
+     */
+    fun saveFromUri(context: Context, source: Uri, demo: Boolean = false): String? = try {
         val resolver = context.contentResolver
 
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -45,8 +49,8 @@ object AvatarStorage {
         }
         val finalBitmap = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
 
-        val dir = File(context.filesDir, "avatars").apply { mkdirs() }
-        dir.listFiles()?.forEach { it.delete() } // старые аватары не копим
+        val dir = File(context.filesDir, if (demo) "avatars_demo" else "avatars").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() } // старые аватары этого дневника не копим
         val file = File(dir, "avatar_${System.currentTimeMillis()}.jpg")
         file.outputStream().use { finalBitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
         Uri.fromFile(file).toString()

@@ -451,12 +451,15 @@ fun ProfileAvatarButton(
                 .background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center
         ) {
-            if (!avatarUri.isNullOrBlank()) {
+            // Если файл фото пропал, показываем иконку, а не пустой круг
+            var failed by remember(avatarUri) { mutableStateOf(false) }
+            if (!avatarUri.isNullOrBlank() && !failed) {
                 AsyncImage(
                     model = avatarUri,
                     contentDescription = "Профиль",
                     modifier = Modifier.size(size),
-                    contentScale = ContentScale.Crop
+                    contentScale = ContentScale.Crop,
+                    onError = { failed = true }
                 )
             } else {
                 Icon(

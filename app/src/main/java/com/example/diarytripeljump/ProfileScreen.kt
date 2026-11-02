@@ -25,7 +25,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import android.content.Context
+import android.content.Intent
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import com.example.diarytripeljump.data.AgeGroups
 import com.example.diarytripeljump.data.AthleteProfile
+import com.example.diarytripeljump.data.DiaryBackup
 import java.util.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,14 +47,15 @@ import kotlinx.coroutines.withContext
 fun ProfileScreen(
     modifier: Modifier = Modifier,
     viewModel: DiaryViewModel,
+    isDemo: Boolean = false,
+    onSwitchDiary: (demo: Boolean) -> Unit = {},
     onBack: () -> Unit = {}
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val isDarkTheme by viewModel.isDarkTheme.collectAsState()
     val athleteProfile by viewModel.athleteProfile.collectAsState()
     val rawResultsList by viewModel.rawTripleJumpResults.collectAsState()
 
     var showEditDialog by remember { mutableStateOf(false) }
-    var showDemoDialog by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -58,19 +65,57 @@ fun ProfileScreen(
             if (uri != null) {
                 // Копируем фото в память приложения — иначе доступ к нему пропадает после перезапуска
                 scope.launch {
-                    val saved = withContext(Dispatchers.IO) { AvatarStorage.saveFromUri(context, uri) }
+                    val saved = withContext(Dispatchers.IO) { AvatarStorage.saveFromUri(context, uri, demo = isDemo) }
                     if (saved != null) viewModel.updateAthleteProfileAvatar(saved)
                 }
             }
         }
     )
 
+    var showRestoreConfirm by remember { mutableStateOf(false) }
+    var backupMessage by remember { mutableStateOf<String?>(null) }
+    var showCleanupConfirm by remember { mutableStateOf(false) }
+    val demoLeftovers by viewModel.demoLeftovers.collectAsState()
+    LaunchedEffect(isDemo) { if (!isDemo) viewModel.scanDemoLeftovers() }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val app = context.applicationContext as TripleJumpApplication
+                val ok = DiaryBackup.export(context, app.database, uri)
+                backupMessage = if (ok) "Копия сохранена. Храните файл в облаке или на компьютере." else "Не удалось сохранить копию."
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                when (val result = DiaryBackup.import(context, uri)) {
+                    DiaryBackup.ImportResult.Success -> {
+                        // после восстановления открываем свой дневник, а не демо
+                        (context.applicationContext as TripleJumpApplication).preferences.useDemoData = false
+                        restartApp(context)
+                    }
+                    is DiaryBackup.ImportResult.Error -> backupMessage = result.message
+                }
+            }
+        }
+    }
+
     val calculatedPbMeters = remember(rawResultsList, athleteProfile) {
         val customPb = athleteProfile?.customPbMeters
         if (customPb != null && customPb > 0) {
             String.format(Locale.getDefault(), "%.2f м", customPb)
         } else {
-            val best = rawResultsList.filter { !it.isAntiRecord }.maxOfOrNull { it.result }
+            // Только результаты в метрах: килограммы и секунды в рекорд прыжка не попадают
+            val best = rawResultsList
+                .filter { !it.isAntiRecord && it.resultUnit == ResultUnit.M }
+                .maxOfOrNull { it.result }
             if (best != null && best > 0) String.format(Locale.getDefault(), "%.2f м", best) else "— м"
         }
     }
@@ -79,17 +124,19 @@ fun ProfileScreen(
     val isBirthday = isTodayBirthday(birthDateMillis)
     val ageText = calculateAgeText(birthDateMillis)
     val birthDateFormattedText = formatBirthDateFull(birthDateMillis)
+    val ageGroup = remember(birthDateMillis, athleteProfile?.gender) { AgeGroups.of(birthDateMillis, athleteProfile?.gender) }
 
     val fullName = remember(athleteProfile) {
         val f = athleteProfile?.firstName ?: ""
         val l = athleteProfile?.lastName ?: ""
         val full = "$f $l".trim()
-        if (full.isNotBlank()) full else "Алексей Иванов"
+        if (full.isNotBlank()) full else "Ваше имя"
     }
 
+    // Пустой никнейм не показываем, вместо выдуманного «@jumper_alex»
     val nicknameText = remember(athleteProfile) {
-        val n = athleteProfile?.nickname ?: ""
-        if (n.isNotBlank()) if (n.startsWith("@")) n else "@$n" else "@jumper_alex"
+        val n = athleteProfile?.nickname?.trim() ?: ""
+        if (n.isNotBlank()) (if (n.startsWith("@")) n else "@$n") else ""
     }
 
     val cs = MaterialTheme.colorScheme
@@ -168,12 +215,15 @@ fun ProfileScreen(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        if (!athleteProfile?.avatarUriString.isNullOrBlank()) {
+                        val avatar = athleteProfile?.avatarUriString
+                        var avatarFailed by remember(avatar) { mutableStateOf(false) }
+                        if (!avatar.isNullOrBlank() && !avatarFailed) {
                             AsyncImage(
-                                model = athleteProfile?.avatarUriString,
+                                model = avatar,
                                 contentDescription = "Аватар",
                                 modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
+                                contentScale = ContentScale.Crop,
+                                onError = { avatarFailed = true }
                             )
                         } else {
                             Icon(
@@ -201,12 +251,24 @@ fun ProfileScreen(
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(text = fullName, style = MaterialTheme.typography.headlineSmall, color = cs.onBackground)
-                Text(text = nicknameText, style = MaterialTheme.typography.titleSmall, color = cs.primary)
-                StatusPill(
-                    text = athleteProfile?.specialization ?: "Тройной прыжок",
-                    contentColor = cs.onPrimaryContainer,
-                    containerColor = cs.primaryContainer
-                )
+                if (nicknameText.isNotBlank()) {
+                    Text(text = nicknameText, style = MaterialTheme.typography.titleSmall, color = cs.primary)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    StatusPill(
+                        text = athleteProfile?.specialization ?: "Тройной прыжок",
+                        contentColor = cs.onPrimaryContainer,
+                        containerColor = cs.primaryContainer
+                    )
+                    if (ageGroup != null) {
+                        StatusPill(
+                            text = ageGroup.code,
+                            contentColor = cs.onTertiaryContainer,
+                            containerColor = cs.tertiaryContainer,
+                            icon = Icons.Default.Groups
+                        )
+                    }
+                }
             }
 
             // Показатели
@@ -246,6 +308,13 @@ fun ProfileScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(text = ageText, style = MaterialTheme.typography.titleLarge, color = cs.onSurface)
                         Text(text = birthDateFormattedText, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                        if (ageGroup != null) {
+                            Text(
+                                text = "Возрастная группа: ${ageGroup.code} — ${ageGroup.description}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = cs.tertiary
+                            )
+                        }
                     }
                 }
             }
@@ -254,59 +323,139 @@ fun ProfileScreen(
                 SectionHeader(title = "Настройки")
                 AppCard {
                     ProfileOptionRow(
-                        icon = if (uiState.isDarkTheme) Icons.Default.DarkMode else Icons.Default.LightMode,
+                        icon = if (isDarkTheme) Icons.Default.DarkMode else Icons.Default.LightMode,
                         title = "Тёмная тема",
-                        subtitle = if (uiState.isDarkTheme) "Включена" else "Выключена",
+                        subtitle = if (isDarkTheme) "Включена" else "Выключена",
                         onClick = { viewModel.toggleTheme() },
                         trailing = {
-                            Switch(checked = uiState.isDarkTheme, onCheckedChange = { viewModel.toggleTheme() })
+                            Switch(checked = isDarkTheme, onCheckedChange = { viewModel.toggleTheme() })
                         }
                     )
                     HorizontalDivider(modifier = Modifier.padding(start = 70.dp), color = cs.outlineVariant)
                     ProfileOptionRow(
                         icon = Icons.Default.RecordVoiceOver,
                         title = "Обращение в приложении",
-                        subtitle = if (athleteProfile?.greetingPreference == "NICKNAME") "По никнейму ($nicknameText)" else "По имени ($fullName)",
+                        subtitle = if (athleteProfile?.greetingPreference == "NICKNAME") "По никнейму · ${nicknameText.ifBlank { "не задан" }}"
+                        else "По имени · $fullName",
                         onClick = { showEditDialog = true }
+                    )
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SectionHeader(title = "Дневник", subtitle = "Демо-данные хранятся отдельно и не смешиваются с вашими")
+                // В «Моих данных» могли остаться записи старой автозагрузки демо — предлагаем убрать их
+                demoLeftovers?.let { found ->
+                    Surface(shape = MaterialTheme.shapes.large, color = cs.tertiaryContainer) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("В вашем дневнике есть демо-записи", style = MaterialTheme.typography.titleSmall, color = cs.onTertiaryContainer)
+                            Text(
+                                text = "Их добавила прежняя версия приложения: ${found.describe()}. Ваши собственные записи не затрагиваются.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = cs.onTertiaryContainer
+                            )
+                            Button(onClick = { showCleanupConfirm = true }) { Text("Убрать демо-записи") }
+                        }
+                    }
+                }
+                AppCard {
+                    ProfileOptionRow(
+                        icon = Icons.Default.Science,
+                        title = "Демо-режим",
+                        subtitle = if (isDemo) "Открыт пример дневника за 3 месяца" else "Посмотреть приложение на примере",
+                        onClick = { onSwitchDiary(!isDemo) },
+                        trailing = {
+                            Switch(checked = isDemo, onCheckedChange = { onSwitchDiary(it) })
+                        }
+                    )
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SectionHeader(
+                    title = "Резервная копия",
+                    subtitle = if (isDemo) "Доступна в режиме «Мои данные»" else "Дневник также сохраняется в облачный бэкап Google"
+                )
+                if (!isDemo) AppCard {
+                    ProfileOptionRow(
+                        icon = Icons.Default.Upload,
+                        title = "Сохранить копию",
+                        subtitle = "Файл со всеми тренировками, стартами и рекордами",
+                        onClick = { exportLauncher.launch(DiaryBackup.suggestedFileName()) }
                     )
                     HorizontalDivider(modifier = Modifier.padding(start = 70.dp), color = cs.outlineVariant)
                     ProfileOptionRow(
-                        icon = Icons.Default.Storage,
-                        title = "Демо-данные",
-                        subtitle = "Профиль, тренировки и рекорды за 3 месяца",
-                        onClick = { showDemoDialog = true }
+                        icon = Icons.Default.Download,
+                        title = "Восстановить из копии",
+                        subtitle = "Текущие данные будут заменены",
+                        onClick = { showRestoreConfirm = true }
                     )
                 }
             }
         }
     }
 
-    if (showDemoDialog) {
+    if (showCleanupConfirm) {
         AlertDialog(
-            onDismissRequest = { showDemoDialog = false },
-            title = { Text("Загрузить демо-данные?", fontWeight = FontWeight.Bold) },
+            onDismissRequest = { showCleanupConfirm = false },
+            title = { Text("Убрать демо-записи?") },
             text = {
                 Text(
-                    "Будут добавлены тренировки, старты, рекорды, комплексы и подготовительные периоды за последние три месяца. " +
-                        "Ваши записи не изменятся и не дублируются; заполненный профиль сохранится."
+                    "Будут удалены только записи демо-набора: ${demoLeftovers?.describe().orEmpty()}. " +
+                        "Тренировки с вашими упражнениями и всё, что вы вводили сами, останутся. " +
+                        "Перед удалением можно сохранить резервную копию."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showCleanupConfirm = false
+                        viewModel.removeDemoLeftovers { backupMessage = "Демо-записи удалены: ${it.describe()}." }
+                    },
+                    colors = destructiveButtonColors()
+                ) { Text("Убрать") }
+            },
+            dismissButton = { TextButton(onClick = { showCleanupConfirm = false }) { Text("Отмена") } }
+        )
+    }
+
+    if (showRestoreConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRestoreConfirm = false },
+            title = { Text("Восстановить дневник?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Все текущие записи будут заменены данными из файла, после чего приложение перезапустится. " +
+                        "Перед восстановлением рекомендуем сохранить копию текущих данных."
                 )
             },
             confirmButton = {
                 Button(onClick = {
-                    viewModel.loadDemoData()
-                    showDemoDialog = false
-                }) { Text("Загрузить") }
+                    showRestoreConfirm = false
+                    importLauncher.launch(arrayOf("*/*"))
+                }) { Text("Выбрать файл") }
             },
-            dismissButton = { TextButton(onClick = { showDemoDialog = false }) { Text("Отмена") } }
+            dismissButton = { TextButton(onClick = { showRestoreConfirm = false }) { Text("Отмена") } }
         )
     }
+
+    backupMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { backupMessage = null },
+            title = { Text("Резервная копия", fontWeight = FontWeight.Bold) },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { backupMessage = null }) { Text("OK") } }
+        )
+    }
+
 
     if (showEditDialog) {
         EditProfileDialog(
             currentProfile = athleteProfile,
             onDismiss = { showEditDialog = false },
-            onConfirm = { firstName, lastName, nickname, greetingPref, birthDateMillis, height, weight, customPb ->
+            onConfirm = { firstName, lastName, nickname, greetingPref, birthDateMillis, height, weight, customPb, gender ->
                 viewModel.updateAthleteProfile(
+                    gender = gender,
                     firstName = firstName,
                     lastName = lastName,
                     nickname = nickname,
@@ -323,7 +472,15 @@ fun ProfileScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** Перезапуск процесса: восстановленная база подключается при следующем старте приложения. */
+private fun restartApp(context: Context) {
+    val intent = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+    context.startActivity(intent)
+    Runtime.getRuntime().exit(0)
+}
+
+/** Редактирование профиля: без выдуманных значений по умолчанию, дата рождения — через календарь. */
 @Composable
 fun EditProfileDialog(
     currentProfile: AthleteProfile?,
@@ -336,250 +493,161 @@ fun EditProfileDialog(
         birthDateMillis: Long?,
         height: Double?,
         weight: Double?,
-        customPbMeters: Double?
+        customPbMeters: Double?,
+        gender: String?
     ) -> Unit
 ) {
-    var firstNameText by remember { mutableStateOf(currentProfile?.firstName ?: "Алексей") }
-    var lastNameText by remember { mutableStateOf(currentProfile?.lastName ?: "Иванов") }
-    var nicknameText by remember { mutableStateOf(currentProfile?.nickname ?: "@jumper_alex") }
+    val cs = MaterialTheme.colorScheme
+    var firstNameText by remember { mutableStateOf(currentProfile?.firstName ?: "") }
+    var lastNameText by remember { mutableStateOf(currentProfile?.lastName ?: "") }
+    var nicknameText by remember { mutableStateOf(currentProfile?.nickname?.removePrefix("@") ?: "") }
     var greetingPref by remember { mutableStateOf(currentProfile?.greetingPreference ?: "NAME") }
-
-    var heightText by remember { mutableStateOf(currentProfile?.height?.toInt()?.toString() ?: "185") }
-    var weightText by remember { mutableStateOf(currentProfile?.weight?.toInt()?.toString() ?: "75") }
-    var pbText by remember { mutableStateOf(currentProfile?.customPbMeters?.toString() ?: "15.52") }
-
-    val calInitial = Calendar.getInstance().apply {
-        timeInMillis = currentProfile?.birthDate ?: Calendar.getInstance().apply { set(2000, Calendar.JANUARY, 15) }.timeInMillis
-    }
-    var selYear by remember { mutableIntStateOf(calInitial.get(Calendar.YEAR)) }
-    var selMonth by remember { mutableIntStateOf(calInitial.get(Calendar.MONTH)) }
-    var selDay by remember { mutableIntStateOf(calInitial.get(Calendar.DAY_OF_MONTH)) }
-
-    val monthsList = listOf(
-        "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-        "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
-    )
-
-    var expandedYearDrop by remember { mutableStateOf(false) }
-    var expandedMonthDrop by remember { mutableStateOf(false) }
-    var expandedDayDrop by remember { mutableStateOf(false) }
+    var gender by remember { mutableStateOf(currentProfile?.gender) }
+    var heightText by remember { mutableStateOf(currentProfile?.height?.toInt()?.toString() ?: "") }
+    var weightText by remember { mutableStateOf(currentProfile?.weight?.toInt()?.toString() ?: "") }
+    var pbText by remember { mutableStateOf(currentProfile?.customPbMeters?.toString() ?: "") }
+    var birthMillis by remember { mutableStateOf(currentProfile?.birthDate) }
+    var showDatePicker by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(text = "Редактировать Профиль", fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
-        },
+        title = { Text(text = "Профиль", style = MaterialTheme.typography.titleLarge) },
         text = {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .padding(12.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = firstNameText,
                         onValueChange = { firstNameText = it },
                         label = { Text("Имя") },
-                        modifier = Modifier.fillMaxWidth()
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
                     )
-
                     OutlinedTextField(
                         value = lastNameText,
                         onValueChange = { lastNameText = it },
                         label = { Text("Фамилия") },
-                        modifier = Modifier.fillMaxWidth()
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
                     )
+                }
+                OutlinedTextField(
+                    value = nicknameText,
+                    onValueChange = { nicknameText = it.removePrefix("@").trim() },
+                    label = { Text("Никнейм") },
+                    prefix = { Text("@") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-                    OutlinedTextField(
-                        value = nicknameText,
-                        onValueChange = { nicknameText = it },
-                        label = { Text("Никнейм (например: @jumper_alex)") },
-                        modifier = Modifier.fillMaxWidth()
+                ProfileFormLabel("Обращение")
+                SegmentedControl(
+                    options = listOf("По имени", "По никнейму"),
+                    selectedIndex = if (greetingPref == "NICKNAME") 1 else 0,
+                    onSelect = { greetingPref = if (it == 1) "NICKNAME" else "NAME" }
+                )
+
+                ProfileFormLabel("Пол — для возрастной группы")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = gender == AgeGroups.GENDER_MALE,
+                        onClick = { gender = AgeGroups.GENDER_MALE },
+                        label = { Text("Мужской") }
                     )
-
-                    Text(text = "Как к вам обращаться:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilterChip(
-                            selected = greetingPref == "NAME",
-                            onClick = { greetingPref = "NAME" },
-                            label = { Text("По имени", fontSize = 10.sp) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = greetingPref == "NICKNAME",
-                            onClick = { greetingPref = "NICKNAME" },
-                            label = { Text("По никнейму", fontSize = 10.sp) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    HorizontalDivider()
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = heightText,
-                            onValueChange = { heightText = it.filter { char -> char.isDigit() } },
-                            label = { Text("Рост (см)") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-
-                        OutlinedTextField(
-                            value = weightText,
-                            onValueChange = { weightText = it.filter { char -> char.isDigit() } },
-                            label = { Text("Вес (кг)") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                    }
-
-                    OutlinedTextField(
-                        value = pbText,
-                        onValueChange = { pbText = it.filter { char -> char.isDigit() || char == '.' } },
-                        label = { Text("Личный рекорд PB (в метрах)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                    FilterChip(
+                        selected = gender == AgeGroups.GENDER_FEMALE,
+                        onClick = { gender = AgeGroups.GENDER_FEMALE },
+                        label = { Text("Женский") }
                     )
+                }
 
-                    HorizontalDivider()
-
-                    Text(text = "Дата рождения (для возраста и поздравлений):", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        ExposedDropdownMenuBox(
-                            expanded = expandedYearDrop,
-                            onExpandedChange = { expandedYearDrop = !expandedYearDrop },
-                            modifier = Modifier.weight(1.1f)
-                        ) {
-                            OutlinedTextField(
-                                value = selYear.toString(),
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text("Год", fontSize = 9.sp) },
-                                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
-                            )
-                            ExposedDropdownMenu(
-                                expanded = expandedYearDrop,
-                                onDismissRequest = { expandedYearDrop = false }
-                            ) {
-                                (1960..2015).reversed().forEach { yr ->
-                                    DropdownMenuItem(
-                                        text = { Text(yr.toString()) },
-                                        onClick = {
-                                            selYear = yr
-                                            expandedYearDrop = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        ExposedDropdownMenuBox(
-                            expanded = expandedMonthDrop,
-                            onExpandedChange = { expandedMonthDrop = !expandedMonthDrop },
-                            modifier = Modifier.weight(1.3f)
-                        ) {
-                            OutlinedTextField(
-                                value = monthsList.getOrElse(selMonth) { "" },
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text("Месяц", fontSize = 9.sp) },
-                                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
-                            )
-                            ExposedDropdownMenu(
-                                expanded = expandedMonthDrop,
-                                onDismissRequest = { expandedMonthDrop = false }
-                            ) {
-                                monthsList.forEachIndexed { index, mName ->
-                                    DropdownMenuItem(
-                                        text = { Text(mName) },
-                                        onClick = {
-                                            selMonth = index
-                                            expandedMonthDrop = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        ExposedDropdownMenuBox(
-                            expanded = expandedDayDrop,
-                            onExpandedChange = { expandedDayDrop = !expandedDayDrop },
-                            modifier = Modifier.weight(0.9f)
-                        ) {
-                            OutlinedTextField(
-                                value = selDay.toString(),
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text("День", fontSize = 9.sp) },
-                                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
-                            )
-                            ExposedDropdownMenu(
-                                expanded = expandedDayDrop,
-                                onDismissRequest = { expandedDayDrop = false }
-                            ) {
-                                (1..31).forEach { d ->
-                                    DropdownMenuItem(
-                                        text = { Text(d.toString()) },
-                                        onClick = {
-                                            selDay = d
-                                            expandedDayDrop = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
+                ProfileFormLabel("Дата рождения")
+                val birth = birthMillis
+                if (birth != null) {
+                    DateField(label = "Дата рождения", millis = birth, onClick = { showDatePicker = true }, modifier = Modifier.fillMaxWidth())
+                } else {
+                    OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Cake, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Указать дату рождения")
                     }
                 }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = heightText,
+                        onValueChange = { heightText = it.filter { c -> c.isDigit() }.take(3) },
+                        label = { Text("Рост") },
+                        suffix = { Text("см") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = weightText,
+                        onValueChange = { weightText = it.filter { c -> c.isDigit() }.take(3) },
+                        label = { Text("Вес") },
+                        suffix = { Text("кг") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = pbText,
+                    onValueChange = { pbText = it.replace(',', '.').filter { c -> c.isDigit() || c == '.' } },
+                    label = { Text("Личный рекорд в тройном") },
+                    suffix = { Text("м") },
+                    supportingText = { Text("Если оставить пустым — берётся из рекордов", color = cs.onSurfaceVariant) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    val newCal = Calendar.getInstance().apply {
-                        set(Calendar.YEAR, selYear)
-                        set(Calendar.MONTH, selMonth)
-                        set(Calendar.DAY_OF_MONTH, selDay)
-                    }
-
-                    onConfirm(
-                        firstNameText,
-                        lastNameText,
-                        nicknameText,
-                        greetingPref,
-                        newCal.timeInMillis,
-                        heightText.toDoubleOrNull(),
-                        weightText.toDoubleOrNull(),
-                        pbText.toDoubleOrNull()
-                    )
-                }
-            ) {
-                Text("Сохранить")
-            }
+            Button(onClick = {
+                onConfirm(
+                    firstNameText.trim(),
+                    lastNameText.trim(),
+                    nicknameText.trim(),
+                    greetingPref,
+                    birthMillis,
+                    heightText.toDoubleOrNull(),
+                    weightText.toDoubleOrNull(),
+                    pbText.toDoubleOrNull(),
+                    gender
+                )
+            }) { Text("Сохранить") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена")
-            }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
+
+    if (showDatePicker) {
+        AppDatePickerDialog(
+            initialMillis = birthMillis ?: Calendar.getInstance().apply { add(Calendar.YEAR, -18) }.timeInMillis,
+            onDismiss = { showDatePicker = false },
+            onConfirm = {
+                birthMillis = it
+                showDatePicker = false
+            }
+        )
+    }
 }
 
+@Composable
+private fun ProfileFormLabel(text: String) {
+    Text(text = text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
 @Composable
 fun ProfileParamColumn(value: String, label: String) {
     Column(

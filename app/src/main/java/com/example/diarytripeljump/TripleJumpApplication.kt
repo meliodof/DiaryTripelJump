@@ -1,6 +1,8 @@
 package com.example.diarytripeljump
 
 import android.app.Application
+import com.example.diarytripeljump.data.AppPreferences
+import com.example.diarytripeljump.data.DiaryBackup
 import com.example.diarytripeljump.data.SeedDatabase
 import com.example.diarytripeljump.data.TripleJumpDatabase
 import com.example.diarytripeljump.data.TripleJumpRepository
@@ -16,13 +18,34 @@ class TripleJumpApplication : Application() {
         private set
     lateinit var repository: TripleJumpRepository
         private set
-    lateinit var seedDatabase: SeedDatabase
+    lateinit var preferences: AppPreferences
+        private set
+
+    /** Открыт демо-дневник (отдельная база) вместо дневника пользователя. */
+    var isDemo: Boolean = false
         private set
 
     override fun onCreate() {
         super.onCreate()
-        database = TripleJumpDatabase.getDatabase(this)
+        // Восстановление из резервной копии применяется до открытия базы
+        DiaryBackup.applyPendingRestore(this)
+
+        preferences = AppPreferences(this)
+        openDiary(preferences.useDemoData)
+    }
+
+    /**
+     * Подключает дневник: свой или демо. Базы разные, поэтому демо-записи никогда не попадают в данные пользователя.
+     * После вызова экран пересоздаётся с новой ViewModel (см. [MainActivity.switchDiary]).
+     */
+    fun openDiary(demo: Boolean) {
+        isDemo = demo
+        database = TripleJumpDatabase.getDatabase(
+            this,
+            if (demo) TripleJumpDatabase.DEMO_DATABASE_NAME else TripleJumpDatabase.DATABASE_NAME
+        )
         repository = TripleJumpRepository(
+            database = database,
             athleteProfileDao = database.athleteProfileDao(),
             competitionDao = database.competitionDao(),
             tripleJumpResultDao = database.tripleJumpResultDao(),
@@ -44,11 +67,9 @@ class TripleJumpApplication : Application() {
             exerciseComplexDao = database.exerciseComplexDao(),
             exerciseGoalDao = database.exerciseGoalDao()
         )
-
-        seedDatabase = SeedDatabase(repository, database, this)
-
-        applicationScope.launch {
-            seedDatabase.seedInitialData()
+        if (demo) {
+            val seed = SeedDatabase(repository)
+            applicationScope.launch { seed.seedIfEmpty() }
         }
     }
 }

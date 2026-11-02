@@ -649,7 +649,7 @@ private fun FavoriteExerciseRow(
 ) {
     val cs = MaterialTheme.colorScheme
     val unit = getInferredUnitForExercise(exercise.name, exercise.defaultUnit)
-    val key = RecordsEngine.exerciseRecordKey(exercise.name, exercise.isSingleLeg, exercise.legSide, unit)
+    val key = RecordsEngine.exerciseRecordKey(exercise.name, exercise.isSingleLeg, exercise.legSide, unit, exercise.inSpikes)
 
     val record = remember(records, key) {
         records.firstOrNull { !it.isAnti && it.key == key }
@@ -662,7 +662,7 @@ private fun FavoriteExerciseRow(
         trainings.asSequence()
             .filter { !it.training.isSkipped }
             .flatMap { it.exerciseResults.asSequence() }
-            .filter { RecordsEngine.exerciseRecordKey(it.exerciseName, it.isSingleLeg, it.legSide, it.resultUnit) == key && it.result > 0 }
+            .filter { RecordsEngine.exerciseRecordKey(it.exerciseName, it.isSingleLeg, it.legSide, it.resultUnit, it.inSpikes) == key && it.result > 0 }
             .maxByOrNull { it.date }
     }
     val goalProgress = goals.firstOrNull { it.recordKey == (record?.key ?: key) }
@@ -682,18 +682,28 @@ private fun FavoriteExerciseRow(
                 IconBadge(icon = Icons.Default.FitnessCenter, tint = cs.primary)
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        text = exercise.name + RecordsEngine.legSuffix(exercise.isSingleLeg, exercise.legSide),
+                        text = exercise.name + RecordsEngine.legSuffix(exercise.isSingleLeg, exercise.legSide) +
+                            RecordsEngine.spikesSuffix(exercise.inSpikes),
                         style = MaterialTheme.typography.titleSmall,
                         color = cs.onSurface,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                    val sub = when {
-                        last != null -> "Последний: " + formatRecordValue(last.result, last.resultUnit) + " · " +
-                            SimpleDateFormat("d MMM", Locale("ru")).format(Date(last.date))
-                        else -> "Результатов пока нет"
+                    // «Последний» — значение и дата отдельными строками, чтобы ничего не обрезалось
+                    if (last != null) {
+                        Text(
+                            text = "Последний ${formatRecordValue(last.result, last.resultUnit)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = cs.onSurfaceVariant
+                        )
+                        Text(
+                            text = SimpleDateFormat("d MMMM", Locale("ru")).format(Date(last.date)),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = cs.onSurfaceVariant
+                        )
+                    } else {
+                        Text(text = "Результатов пока нет", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     }
-                    Text(text = sub, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(

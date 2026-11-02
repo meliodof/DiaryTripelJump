@@ -83,9 +83,10 @@ fun ResultsScreen(
     var selectedLocationFilter by rememberSaveable { mutableIntStateOf(0) } // 0: Все, 1: На улице, 2: В помещении
     var selectedCategoryFilter by rememberSaveable { mutableIntStateOf(0) } // 0: Все, 1: Прыжковые, 2: Беговые, 3: Силовые
     var selectedRecordTypeFilter by rememberSaveable { mutableIntStateOf(0) } // 0: Рекорды, 1: Анти-рекорды
+    var selectedSpikesFilter by rememberSaveable { mutableIntStateOf(0) } // 0: Любая обувь, 1: В шиповках, 2: Без шиповок
 
     val filteredResults = remember(
-        records, selectedSourceFilter, selectedLocationFilter, selectedCategoryFilter, selectedRecordTypeFilter
+        records, selectedSourceFilter, selectedLocationFilter, selectedCategoryFilter, selectedRecordTypeFilter, selectedSpikesFilter
     ) {
         records.filter { item ->
             val matchesSource = when (selectedSourceFilter) {
@@ -105,7 +106,12 @@ fun ResultsScreen(
                 else -> true
             }
             val matchesType = if (selectedRecordTypeFilter == 1) item.isAnti else !item.isAnti
-            matchesSource && matchesLocation && matchesCategory && matchesType
+            val matchesSpikes = when (selectedSpikesFilter) {
+                1 -> item.inSpikes
+                2 -> !item.inSpikes
+                else -> true
+            }
+            matchesSource && matchesLocation && matchesCategory && matchesType && matchesSpikes
         }
     }
 
@@ -116,7 +122,8 @@ fun ResultsScreen(
             .maxByOrNull { it.best }
     }
 
-    val hasActiveFilters = selectedSourceFilter != 0 || selectedLocationFilter != 0 || selectedCategoryFilter != 0
+    val hasActiveFilters = selectedSourceFilter != 0 || selectedLocationFilter != 0 || selectedCategoryFilter != 0 ||
+        selectedSpikesFilter != 0
     val isAntiMode = selectedRecordTypeFilter == 1
     val isGoalsMode = selectedRecordTypeFilter == 2
 
@@ -215,11 +222,18 @@ fun ResultsScreen(
                         selectedIndex = selectedLocationFilter,
                         onSelect = { selectedLocationFilter = it }
                     )
+                    DropdownFilterChip(
+                        title = "Обувь",
+                        options = listOf("Любая обувь", "В шиповках", "Без шиповок"),
+                        selectedIndex = selectedSpikesFilter,
+                        onSelect = { selectedSpikesFilter = it }
+                    )
                     if (hasActiveFilters) {
                         TextButton(onClick = {
                             selectedSourceFilter = 0
                             selectedCategoryFilter = 0
                             selectedLocationFilter = 0
+                            selectedSpikesFilter = 0
                         }) { Text(text = "Сбросить") }
                     }
                 }
@@ -253,8 +267,11 @@ fun ResultsScreen(
                     EmptyState(
                         icon = if (isAntiMode) Icons.AutoMirrored.Filled.TrendingDown else Icons.Default.EmojiEvents,
                         title = if (hasActiveFilters) "Ничего не найдено" else if (isAntiMode) "Анти-рекордов пока нет" else "Рекордов пока нет",
-                        message = if (hasActiveFilters) "Попробуйте изменить или сбросить фильтры."
-                        else "Внесите результаты в тренировке — рекорд появится здесь сам."
+                        message = when {
+                            hasActiveFilters -> "Попробуйте изменить или сбросить фильтры."
+                            isAntiMode -> "Анти-рекорд — худший результат, от которого вы уходите. Добавьте его кнопкой ниже."
+                            else -> "Внесите результаты в тренировке — рекорд появится здесь сам."
+                        }
                     )
                 }
             }
@@ -443,6 +460,13 @@ fun RecordCard(
                         contentColor = cs.onSurfaceVariant,
                         containerColor = cs.surfaceContainerHigh
                     )
+                    if (record.inSpikes) {
+                        StatusPill(
+                            text = "Шиповки",
+                            contentColor = cs.onTertiaryContainer,
+                            containerColor = cs.tertiaryContainer
+                        )
+                    }
                     if (lastEntry?.previousValue != null && !record.isManuallyEdited) {
                         StatusPill(
                             text = formatRecordDelta(lastEntry.value, lastEntry.previousValue, record.unit),
@@ -505,18 +529,12 @@ fun RecordCard(
                     modifier = Modifier
                         .padding(top = 2.dp, end = 12.dp)
                 )
+                // Одно меню действий вместо карандаша + «⋮»: карточка чище, редактирование — первым пунктом меню
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onEdit) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Редактировать запись",
-                            tint = cs.primary
-                        )
-                    }
                     OverflowMenu(
                         actions = buildList {
-                            add(MenuAction("История обновлений", Icons.Default.History, onClick = onClick))
                             add(MenuAction("Редактировать", Icons.Default.Edit, onClick = onEdit))
+                            add(MenuAction("История обновлений", Icons.Default.History, onClick = onClick))
                             if (onSetGoal != null) {
                                 add(MenuAction(if (goalProgress == null) "Поставить цель" else "Изменить цель", Icons.Default.Flag, onClick = onSetGoal))
                             }
@@ -808,6 +826,7 @@ fun AddRecordDialog(
 
     var isSingleLeg by remember { mutableStateOf(false) }
     var legSide by remember { mutableStateOf<String?>(null) }
+    var inSpikes by remember { mutableStateOf(false) }
 
     var inventoryName by remember { mutableStateOf<String?>(null) }
     var inventoryUnit by remember { mutableStateOf<ResultUnit?>(null) }
@@ -849,7 +868,7 @@ fun AddRecordDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Text(text = "Вид упражнения", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                Text(text = "Вид рекорда", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -927,6 +946,22 @@ fun AddRecordDialog(
                             onClick = { legSide = if (legSide == "RIGHT") null else "RIGHT" }
                         )
                     }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("В шиповках", style = MaterialTheme.typography.bodyLarge, color = cs.onSurface)
+                        Text(
+                            "Рекорд в шиповках ведётся отдельно от результата в обычной обуви",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = cs.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = inSpikes, onCheckedChange = { inSpikes = it })
                 }
 
                 HorizontalDivider(color = cs.outlineVariant)
@@ -1041,7 +1076,8 @@ fun AddRecordDialog(
                                     legSide = if (isSingleLeg) legSide else null,
                                     inventoryName = if (hasInv) inventoryName else null,
                                     inventoryUnit = if (hasInv) inventoryUnit else null,
-                                    inventoryValue = if (hasInv) inventoryValueText.toDoubleOrNull() else null
+                                    inventoryValue = if (hasInv) inventoryValueText.toDoubleOrNull() else null,
+                                    inSpikes = inSpikes
                                 )
                             )
                         }

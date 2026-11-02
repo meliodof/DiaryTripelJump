@@ -1,0 +1,5 @@
+# Baseline Profile: код приложения компилируется заранее (AOT) при установке,
+# а не интерпретируется при первом запуске. Профили самих библиотек Compose подключаются автоматически.
+# Точнее профиль можно сгенерировать модулем :baselineprofile (Macrobenchmark) на реальном устройстве.
+HSPLcom/example/diarytripeljump/**;->**(**)**
+Lcom/example/diarytripeljump/**;

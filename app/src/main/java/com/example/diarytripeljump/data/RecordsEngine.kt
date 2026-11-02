@@ -37,7 +37,9 @@ data class RecordSummary(
     val notes: String? = null,
     /** Значение, вычисленное автоматически (до ручной правки). */
     val autoBest: Double = best,
-    val isManuallyEdited: Boolean = false
+    val isManuallyEdited: Boolean = false,
+    /** Рекорд в шиповках ведётся отдельно от результата в обычной обуви. */
+    val inSpikes: Boolean = false
 )
 
 /** Событие «рекорд обновлён» для ленты на главном экране. */
@@ -96,16 +98,22 @@ object RecordsEngine {
     fun sideCode(isSingleLeg: Boolean, legSide: String?): String =
         if (isSingleLeg) (legSide ?: "ANY") else "BOTH"
 
+    /** Суффикс ключа для шиповок; без шиповок ключ прежний, поэтому старые цели и правки рекордов не теряются. */
+    private fun spikesCode(inSpikes: Boolean): String = if (inSpikes) "|spikes" else ""
+
     /** Ключ рекорда упражнения из тренировок; по нему же хранятся цели. */
-    fun exerciseRecordKey(name: String, isSingleLeg: Boolean, legSide: String?, unit: ResultUnit): String =
-        "ex|${name.trim().lowercase()}|${sideCode(isSingleLeg, legSide)}|${unit.name}"
+    fun exerciseRecordKey(name: String, isSingleLeg: Boolean, legSide: String?, unit: ResultUnit, inSpikes: Boolean = false): String =
+        "ex|${name.trim().lowercase()}|${sideCode(isSingleLeg, legSide)}|${unit.name}" + spikesCode(inSpikes)
 
     /** Ключ записи, добавленной вручную (старт, антирекорд или запись с инвентарём). */
     fun manualRecordKey(
         name: String, isAnti: Boolean, isCompetition: Boolean, unit: ResultUnit,
-        isSingleLeg: Boolean, legSide: String?, inventory: String?
+        isSingleLeg: Boolean, legSide: String?, inventory: String?, inSpikes: Boolean = false
     ): String =
-        "tj|${name.trim().lowercase()}|$isAnti|$isCompetition|${unit.name}|${sideCode(isSingleLeg, legSide)}|${inventory?.lowercase() ?: ""}"
+        "tj|${name.trim().lowercase()}|$isAnti|$isCompetition|${unit.name}|${sideCode(isSingleLeg, legSide)}|${inventory?.lowercase() ?: ""}" +
+            spikesCode(inSpikes)
+
+    fun spikesSuffix(inSpikes: Boolean): String = if (inSpikes) " · в шиповках" else ""
 
     fun legSuffix(isSingleLeg: Boolean, legSide: String?): String = when {
         !isSingleLeg -> ""
@@ -146,6 +154,7 @@ object RecordsEngine {
             val legSide: String?,
             val isAnti: Boolean,
             val isCompetition: Boolean,
+            val inSpikes: Boolean,
             val samples: MutableList<Sample> = mutableListOf()
         )
 
@@ -157,9 +166,9 @@ object RecordsEngine {
             if (name.isBlank()) return@forEach
             val lower = isLowerBetter(name, res.resultUnit)
             val value = bestOfExercise(res, lower) ?: return@forEach
-            val key = exerciseRecordKey(name, res.isSingleLeg, res.legSide, res.resultUnit)
+            val key = exerciseRecordKey(name, res.isSingleLeg, res.legSide, res.resultUnit, res.inSpikes)
             val g = groups.getOrPut(key) {
-                Group(key, name, res.resultUnit, res.isSingleLeg, res.legSide, false, false)
+                Group(key, name, res.resultUnit, res.isSingleLeg, res.legSide, false, false, res.inSpikes)
             }
             g.samples.add(
                 Sample(
@@ -177,10 +186,10 @@ object RecordsEngine {
             val inv = inventoryLabel(r.inventoryName, r.inventoryUnit, r.inventoryValue)
             // «тренировочные» записи без инвентаря сливаются с упражнениями; с инвентарём — отдельный рекорд
             val merged = !r.isCompetition && !r.isAntiRecord && inv == null
-            val key = if (merged) exerciseRecordKey(name, r.isSingleLeg, r.legSide, r.resultUnit)
-            else manualRecordKey(name, r.isAntiRecord, r.isCompetition, r.resultUnit, r.isSingleLeg, r.legSide, inv)
+            val key = if (merged) exerciseRecordKey(name, r.isSingleLeg, r.legSide, r.resultUnit, r.inSpikes)
+            else manualRecordKey(name, r.isAntiRecord, r.isCompetition, r.resultUnit, r.isSingleLeg, r.legSide, inv, r.inSpikes)
             val g = groups.getOrPut(key) {
-                Group(key, name, r.resultUnit, r.isSingleLeg, r.legSide, r.isAntiRecord, r.isCompetition)
+                Group(key, name, r.resultUnit, r.isSingleLeg, r.legSide, r.isAntiRecord, r.isCompetition, r.inSpikes)
             }
             g.samples.add(
                 Sample(
@@ -212,7 +221,8 @@ object RecordsEngine {
             val base = RecordSummary(
                 key = g.key,
                 name = g.name,
-                displayName = g.name + legSuffix(g.isSingleLeg, g.legSide),
+                displayName = g.name + legSuffix(g.isSingleLeg, g.legSide) + spikesSuffix(g.inSpikes),
+                inSpikes = g.inSpikes,
                 unit = g.unit,
                 isSingleLeg = g.isSingleLeg,
                 legSide = g.legSide,

@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -485,44 +487,30 @@ fun AddOrEditCompetitionDialog(
     // Street & Number Combined Field
     var streetAndNumberText by remember { mutableStateOf(competitionToEdit?.streetAndNumber ?: "") }
 
-    // Date Selectors (3 Blocks: Year, Month, Day)
-    val calInitial = Calendar.getInstance().apply { timeInMillis = competitionToEdit?.date ?: System.currentTimeMillis() }
-    var selYear by remember { mutableIntStateOf(calInitial.get(Calendar.YEAR)) }
-    var selMonth by remember { mutableIntStateOf(calInitial.get(Calendar.MONTH)) }
-    var selDay by remember { mutableIntStateOf(calInitial.get(Calendar.DAY_OF_MONTH)) }
+    // Дата выбирается в календаре, а не тремя выпадающими списками
+    var dateMillis by remember { mutableLongStateOf(competitionToEdit?.date ?: System.currentTimeMillis()) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var timeText by remember { mutableStateOf(competitionToEdit?.eventTime ?: "") }
 
-    val monthsList = listOf(
-        "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-        "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
-    )
-
-    var expandedYearDrop by remember { mutableStateOf(false) }
-    var expandedMonthDrop by remember { mutableStateOf(false) }
-    var expandedDayDrop by remember { mutableStateOf(false) }
-
-    var timeText by remember { mutableStateOf(competitionToEdit?.eventTime ?: "14:30") }
-
-    // Qualification vs Final Split
-    var hasQual by remember { mutableStateOf(competitionToEdit?.hasQualification ?: true) }
-    var qualStandardText by remember { mutableStateOf(competitionToEdit?.qualificationStandard ?: "15.20 м") }
+    var hasQual by remember { mutableStateOf(competitionToEdit?.hasQualification ?: false) }
+    var qualStandardText by remember { mutableStateOf(competitionToEdit?.qualificationStandard ?: "") }
 
     var didNotMakeTop8 by remember { mutableStateOf(competitionToEdit?.didNotQualifyForFinal ?: false) }
     var placementText by remember { mutableStateOf(competitionToEdit?.placement ?: "") }
 
-    // Qualification Attempts (3 attempts)
-    val qualAttemptsDistList = remember(competitionToEdit) {
-        mutableStateListOf<String>().apply { repeat(3) { add("") } }
+    // Шесть попыток финала. При редактировании подставляются сохранённые — раньше они терялись при повторном сохранении
+    val savedAttempts = remember(competitionToEdit) {
+        competitionToEdit?.attemptsJson?.split(",")?.map { it.trim() } ?: emptyList()
     }
-    val qualAttemptsFoulList = remember(competitionToEdit) {
-        mutableStateListOf<Boolean>().apply { repeat(3) { add(false) } }
-    }
-
-    // Final Attempts (6 attempts)
     val finalAttemptsDistList = remember(competitionToEdit) {
-        mutableStateListOf<String>().apply { repeat(6) { add("") } }
+        mutableStateListOf<String>().apply {
+            repeat(6) { i -> add(savedAttempts.getOrNull(i)?.takeIf { it.toDoubleOrNull() != null } ?: "") }
+        }
     }
     val finalAttemptsFoulList = remember(competitionToEdit) {
-        mutableStateListOf<Boolean>().apply { repeat(6) { add(false) } }
+        mutableStateListOf<Boolean>().apply {
+            repeat(6) { i -> add(savedAttempts.getOrNull(i)?.let { it.equals("X", true) || it.equals("Х", true) } == true) }
+        }
     }
 
     var showNameError by remember { mutableStateOf(false) }
@@ -531,354 +519,168 @@ fun AddOrEditCompetitionDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = if (competitionToEdit != null) "Редактировать соревнование" else "Новое соревнование",
-                fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.primary
+                text = if (competitionToEdit != null) "Соревнование" else "Новое соревнование",
+                style = MaterialTheme.typography.titleLarge
             )
         },
         text = {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .padding(12.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Field 1: Название соревнования
-                    OutlinedTextField(
-                        value = nameText,
-                        onValueChange = {
-                            nameText = it
-                            if (it.isNotBlank()) showNameError = false
-                        },
-                        label = { Text("Название соревнования") },
-                        isError = showNameError && nameText.isBlank(),
-                        supportingText = if (showNameError && nameText.isBlank()) {
-                            { Text("Это поле обязательно для заполнения", color = MaterialTheme.colorScheme.error) }
-                        } else null,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                OutlinedTextField(
+                    value = nameText,
+                    onValueChange = {
+                        nameText = it
+                        if (it.isNotBlank()) showNameError = false
+                    },
+                    label = { Text("Название") },
+                    placeholder = { Text("Например, первенство города") },
+                    isError = showNameError && nameText.isBlank(),
+                    supportingText = if (showNameError && nameText.isBlank()) {
+                        { Text("Введите название") }
+                    } else null,
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-                    // Country Field (Fixed Russia)
+                FormSectionTitle("Где и когда")
+
+                ExposedDropdownMenuBox(
+                    expanded = expandedCityDropdown,
+                    onExpandedChange = { expandedCityDropdown = !expandedCityDropdown }
+                ) {
                     OutlinedTextField(
-                        value = "Россия 🇷🇺",
+                        value = if (isCustomCity) "Другой город" else selectedCity,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Страна") },
-                        modifier = Modifier.fillMaxWidth()
+                        label = { Text("Город") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCityDropdown) },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
+                            .fillMaxWidth()
                     )
-
-                    // City Dropdown + Custom City Input
-                    ExposedDropdownMenuBox(
+                    ExposedDropdownMenu(
                         expanded = expandedCityDropdown,
-                        onExpandedChange = { expandedCityDropdown = !expandedCityDropdown }
+                        onDismissRequest = { expandedCityDropdown = false }
                     ) {
-                        OutlinedTextField(
-                            value = if (isCustomCity) "Другой город..." else selectedCity,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Город") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCityDropdown) },
-                            modifier = Modifier
-                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
-                                .fillMaxWidth()
-                        )
-                        ExposedDropdownMenu(
-                            expanded = expandedCityDropdown,
-                            onDismissRequest = { expandedCityDropdown = false }
-                        ) {
-                            citiesList.forEach { cityItem ->
-                                DropdownMenuItem(
-                                    text = { Text(cityItem) },
-                                    onClick = {
-                                        if (cityItem == "Другой город...") {
-                                            isCustomCity = true
-                                        } else {
-                                            isCustomCity = false
-                                            selectedCity = cityItem
-                                        }
-                                        expandedCityDropdown = false
+                        citiesList.forEach { cityItem ->
+                            DropdownMenuItem(
+                                text = { Text(cityItem) },
+                                onClick = {
+                                    if (cityItem == "Другой город...") {
+                                        isCustomCity = true
+                                    } else {
+                                        isCustomCity = false
+                                        selectedCity = cityItem
                                     }
-                                )
-                            }
+                                    expandedCityDropdown = false
+                                }
+                            )
                         }
                     }
+                }
 
-                    if (isCustomCity) {
-                        OutlinedTextField(
-                            value = customCityText,
-                            onValueChange = { customCityText = it },
-                            label = { Text("Введите название города") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-
-                    // Field: Улица и номер дома
+                if (isCustomCity) {
                     OutlinedTextField(
-                        value = streetAndNumberText,
-                        onValueChange = { streetAndNumberText = it },
-                        label = { Text("Улица и номер дома (например: ул. Лужники, д. 24)") },
+                        value = customCityText,
+                        onValueChange = { customCityText = it },
+                        label = { Text("Название города") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
+                }
 
-                    // Date Selectors: 3 Blocks (Year, Month, Day)
-                    Text(
-                        text = "Дата проведения соревнования:",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
+                OutlinedTextField(
+                    value = streetAndNumberText,
+                    onValueChange = { streetAndNumberText = it },
+                    label = { Text("Место проведения") },
+                    placeholder = { Text("Стадион или адрес") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    DateField(
+                        label = "Дата",
+                        millis = dateMillis,
+                        onClick = { showDatePicker = true },
+                        modifier = Modifier.weight(1f)
                     )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        // Block 1: Year Dropdown
-                        ExposedDropdownMenuBox(
-                            expanded = expandedYearDrop,
-                            onExpandedChange = { expandedYearDrop = !expandedYearDrop },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            OutlinedTextField(
-                                value = selYear.toString(),
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text("Год", fontSize = 9.sp) },
-                                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
-                            )
-                            ExposedDropdownMenu(
-                                expanded = expandedYearDrop,
-                                onDismissRequest = { expandedYearDrop = false }
-                            ) {
-                                (2024..2028).forEach { yr ->
-                                    DropdownMenuItem(
-                                        text = { Text(yr.toString()) },
-                                        onClick = {
-                                            selYear = yr
-                                            expandedYearDrop = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        // Block 2: Month Dropdown
-                        ExposedDropdownMenuBox(
-                            expanded = expandedMonthDrop,
-                            onExpandedChange = { expandedMonthDrop = !expandedMonthDrop },
-                            modifier = Modifier.weight(1.3f)
-                        ) {
-                            OutlinedTextField(
-                                value = monthsList.getOrElse(selMonth) { "" },
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text("Месяц", fontSize = 9.sp) },
-                                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
-                            )
-                            ExposedDropdownMenu(
-                                expanded = expandedMonthDrop,
-                                onDismissRequest = { expandedMonthDrop = false }
-                            ) {
-                                monthsList.forEachIndexed { index, mName ->
-                                    DropdownMenuItem(
-                                        text = { Text(mName) },
-                                        onClick = {
-                                            selMonth = index
-                                            expandedMonthDrop = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        // Block 3: Day Dropdown
-                        ExposedDropdownMenuBox(
-                            expanded = expandedDayDrop,
-                            onExpandedChange = { expandedDayDrop = !expandedDayDrop },
-                            modifier = Modifier.weight(0.9f)
-                        ) {
-                            OutlinedTextField(
-                                value = selDay.toString(),
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text("День", fontSize = 9.sp) },
-                                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
-                            )
-                            ExposedDropdownMenu(
-                                expanded = expandedDayDrop,
-                                onDismissRequest = { expandedDayDrop = false }
-                            ) {
-                                (1..31).forEach { d ->
-                                    DropdownMenuItem(
-                                        text = { Text(d.toString()) },
-                                        onClick = {
-                                            selDay = d
-                                            expandedDayDrop = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Field: Время вида
                     OutlinedTextField(
                         value = timeText,
-                        onValueChange = { timeText = it },
-                        label = { Text("Время вида (например: 14:30)") },
-                        modifier = Modifier.fillMaxWidth()
+                        onValueChange = { v -> timeText = v.filter { it.isDigit() || it == ':' }.take(5) },
+                        label = { Text("Время") },
+                        placeholder = { Text("14:30") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.width(110.dp)
                     )
+                }
 
-                    HorizontalDivider()
+                FormSectionTitle("Результат")
 
-                    // SECTION: Квалификационные попытки
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(text = "Есть квалификация:", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                        Switch(checked = hasQual, onCheckedChange = { hasQual = it })
-                    }
+                OutlinedTextField(
+                    value = placementText,
+                    onValueChange = { placementText = it },
+                    label = { Text("Место") },
+                    placeholder = { Text("Например, 3") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-                    if (hasQual) {
-                        OutlinedTextField(
-                            value = qualStandardText,
-                            onValueChange = { qualStandardText = it },
-                            label = { Text("Норматив для попадания в финал (например: 15.20 м)") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Text(text = "📐 Квалификационные попытки (1-3):", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        for (i in 0 until 3) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                OutlinedTextField(
-                                    value = qualAttemptsDistList.getOrElse(i) { "" },
-                                    onValueChange = { newValue ->
-                                        val cleanVal = newValue.filter { it.isDigit() || it == '.' }
-                                        if (i < qualAttemptsDistList.size) qualAttemptsDistList[i] = cleanVal
-                                    },
-                                    label = { Text("Квал. Попытка #${i + 1} (м)") },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true
-                                )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(
-                                        checked = qualAttemptsFoulList.getOrElse(i) { false },
-                                        onCheckedChange = { isChecked ->
-                                            if (i < qualAttemptsFoulList.size) qualAttemptsFoulList[i] = isChecked
-                                        }
-                                    )
-                                    Text("Заступ (X)", fontSize = 10.sp)
-                                }
-                            }
-                        }
-                    }
-
-                    HorizontalDivider()
-
-                    // SECTION: Финальные основные соревнования (6 попыток)
-                    Text(text = "🏆 Финальные соревнования (6 попыток):", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-
+                FormSwitchRow(
+                    title = "Была квалификация",
+                    subtitle = "Норматив выхода в финал",
+                    checked = hasQual,
+                    onChange = { hasQual = it }
+                )
+                if (hasQual) {
                     OutlinedTextField(
-                        value = placementText,
-                        onValueChange = { placementText = it },
-                        label = { Text("Место на соревновании (например: 1-е место)") },
+                        value = qualStandardText,
+                        onValueChange = { qualStandardText = it },
+                        label = { Text("Норматив") },
+                        placeholder = { Text("15.20") },
+                        suffix = { Text("м") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
+                }
 
-                    // Attempts 1-3
-                    Text(text = "Основные финальные попытки (1-3):", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    for (i in 0 until 3) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OutlinedTextField(
-                                value = finalAttemptsDistList.getOrElse(i) { "" },
-                                onValueChange = { newValue ->
-                                    val cleanVal = newValue.filter { it.isDigit() || it == '.' }
-                                    if (i < finalAttemptsDistList.size) finalAttemptsDistList[i] = cleanVal
-                                },
-                                label = { Text("Финал Попытка #${i + 1} (м)") },
-                                modifier = Modifier.weight(1f),
-                                singleLine = true
-                            )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(
-                                    checked = finalAttemptsFoulList.getOrElse(i) { false },
-                                    onCheckedChange = { isChecked ->
-                                        if (i < finalAttemptsFoulList.size) finalAttemptsFoulList[i] = isChecked
-                                    }
-                                )
-                                Text("Заступ (X)", fontSize = 10.sp)
-                            }
-                        }
-                    }
+                Text("Попытки 1–3", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                for (i in 0 until 3) {
+                    AttemptRow(
+                        number = i + 1,
+                        distance = finalAttemptsDistList[i],
+                        foul = finalAttemptsFoulList[i],
+                        onDistance = { finalAttemptsDistList[i] = it },
+                        onFoul = { finalAttemptsFoulList[i] = it }
+                    )
+                }
 
-                    // Rule Switch: Не вошёл в ТОП-8
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(text = "Не вошёл в ТОП-8 (без попыток 4-6):", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                        Switch(checked = didNotMakeTop8, onCheckedChange = { didNotMakeTop8 = it })
-                    }
-
-                    if (didNotMakeTop8) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "Не попал в ТОП-8 (финальные попытки 4-6 недоступны)",
-                                modifier = Modifier.padding(10.dp),
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    } else {
-                        Text(text = "Дополнительные финальные попытки для ТОП-8 (4-6):", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        for (i in 3 until 6) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                OutlinedTextField(
-                                    value = finalAttemptsDistList.getOrElse(i) { "" },
-                                    onValueChange = { newValue ->
-                                        val cleanVal = newValue.filter { it.isDigit() || it == '.' }
-                                        if (i < finalAttemptsDistList.size) finalAttemptsDistList[i] = cleanVal
-                                    },
-                                    label = { Text("Финал Попытка #${i + 1} (м)") },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true
-                                )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(
-                                        checked = finalAttemptsFoulList.getOrElse(i) { false },
-                                        onCheckedChange = { isChecked ->
-                                            if (i < finalAttemptsFoulList.size) finalAttemptsFoulList[i] = isChecked
-                                        }
-                                    )
-                                    Text("Заступ (X)", fontSize = 10.sp)
-                                }
-                            }
-                        }
+                FormSwitchRow(
+                    title = "Не вошёл в ТОП-8",
+                    subtitle = "Попытки 4–6 недоступны",
+                    checked = didNotMakeTop8,
+                    onChange = { didNotMakeTop8 = it }
+                )
+                if (!didNotMakeTop8) {
+                    Text("Попытки 4–6", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    for (i in 3 until 6) {
+                        AttemptRow(
+                            number = i + 1,
+                            distance = finalAttemptsDistList[i],
+                            foul = finalAttemptsFoulList[i],
+                            onDistance = { finalAttemptsDistList[i] = it },
+                            onFoul = { finalAttemptsFoulList[i] = it }
+                        )
                     }
                 }
             }
@@ -889,22 +691,14 @@ fun AddOrEditCompetitionDialog(
                     if (nameText.isNotBlank()) {
                         val finalCityName = if (isCustomCity) customCityText.ifBlank { "Москва" } else selectedCity
 
-                        // Construct date from 3 blocks
-                        val newCal = Calendar.getInstance().apply {
-                            set(Calendar.YEAR, selYear)
-                            set(Calendar.MONTH, selMonth)
-                            set(Calendar.DAY_OF_MONTH, selDay)
-                        }
-
-                        // Construct attempts string
                         val finalAttemptsStr = (0 until 6).joinToString(", ") { i ->
                             if (i >= 3 && didNotMakeTop8) "-"
-                            else if (finalAttemptsFoulList.getOrElse(i) { false }) "X"
-                            else finalAttemptsDistList.getOrElse(i) { "" }.ifBlank { "-" }
+                            else if (finalAttemptsFoulList[i]) "X"
+                            else finalAttemptsDistList[i].ifBlank { "-" }
                         }
 
                         onConfirm(
-                            nameText,
+                            nameText.trim(),
                             selectedCountry,
                             finalCityName,
                             streetAndNumberText,
@@ -914,22 +708,97 @@ fun AddOrEditCompetitionDialog(
                             didNotMakeTop8,
                             placementText,
                             finalAttemptsStr,
-                            newCal.timeInMillis
+                            dateMillis
                         )
                     } else {
                         showNameError = true
                     }
                 }
-            ) {
-                Text("Сохранить")
-            }
+            ) { Text("Сохранить") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена")
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
+
+    if (showDatePicker) {
+        AppDatePickerDialog(
+            initialMillis = dateMillis,
+            onDismiss = { showDatePicker = false },
+            onConfirm = {
+                dateMillis = it
+                showDatePicker = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun FormSectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 4.dp)
+    )
+}
+
+@Composable
+private fun FormSwitchRow(title: String, subtitle: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.bodyLarge)
+            if (subtitle != null) {
+                Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-    )
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** Попытка: номер в кружке, дальность в метрах и отметка «Заступ» (поле дальности при этом отключается). */
+@Composable
+private fun AttemptRow(
+    number: Int,
+    distance: String,
+    foul: Boolean,
+    onDistance: (String) -> Unit,
+    onFoul: (Boolean) -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(if (foul) cs.errorContainer else cs.surfaceContainerHighest),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("$number", style = MaterialTheme.typography.labelMedium, color = if (foul) cs.onErrorContainer else cs.onSurfaceVariant)
+        }
+        OutlinedTextField(
+            value = if (foul) "" else distance,
+            onValueChange = { v -> onDistance(v.replace(',', '.').filter { it.isDigit() || it == '.' }) },
+            enabled = !foul,
+            placeholder = { Text(if (foul) "заступ" else "—") },
+            suffix = { Text("м") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.weight(1f)
+        )
+        FilterChip(
+            selected = foul,
+            onClick = { onFoul(!foul) },
+            label = { Text("Заступ") },
+            colors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = cs.errorContainer,
+                selectedLabelColor = cs.onErrorContainer
+            )
+        )
+    }
 }
 
 // Dialog: Skip Competition Reason Input

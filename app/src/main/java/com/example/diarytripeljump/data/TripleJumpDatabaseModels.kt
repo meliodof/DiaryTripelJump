@@ -18,7 +18,9 @@ data class AthleteProfile(
     val height: Double? = null,
     val weight: Double? = null,
     val customPbMeters: Double? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    /** "MALE" / "FEMALE" / null — нужен для возрастной группы взрослых (мужчины / женщины). */
+    val gender: String? = null
 )
 
 @Entity(tableName = "competitions")
@@ -75,7 +77,9 @@ data class TripleJumpResult(
     // Инвентарь, с которым установлен рекорд / антирекорд
     val inventoryName: String? = null,
     val inventoryUnit: ResultUnit? = null,
-    val inventoryValue: Double? = null
+    val inventoryValue: Double? = null,
+    // Результат показан в шиповках — такой рекорд ведётся отдельно
+    val inSpikes: Boolean = false
 )
 
 @Entity(
@@ -147,7 +151,9 @@ data class Exercise(
     val inventoryUnit: ResultUnit? = null,
     val inventoryValue: Double? = null,
     // Избранное: отображается на главном экране
-    val isFavorite: Boolean = false
+    val isFavorite: Boolean = false,
+    // Обычно выполняется в шиповках: значение по умолчанию при добавлении в тренировку
+    val inSpikes: Boolean = false
 )
 
 @Entity(
@@ -182,7 +188,9 @@ data class ExerciseResult(
     // Инвентарь, использованный в упражнении (название, единица измерения CM/KG, значение)
     val inventoryName: String? = null,
     val inventoryUnit: ResultUnit? = null,
-    val inventoryValue: Double? = null
+    val inventoryValue: Double? = null,
+    // Упражнение выполнялось в шиповках — рекорды ведутся отдельно от выполнения в обычной обуви
+    val inSpikes: Boolean = false
 )
 
 /** Цель по результату. Ключ совпадает с ключом рекорда ([RecordSummary.key]), поэтому прогресс считается автоматически. */

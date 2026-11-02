@@ -13,19 +13,18 @@ import androidx.compose.runtime.getValue
 import com.example.diarytripeljump.ui.theme.DiaryTripelJumpTheme
 
 class MainActivity : ComponentActivity() {
+    private val app: TripleJumpApplication get() = application as TripleJumpApplication
+
     private val viewModel: DiaryViewModel by viewModels {
-        DiaryViewModelFactory(
-            (application as TripleJumpApplication).repository,
-            (application as TripleJumpApplication).seedDatabase
-        )
+        DiaryViewModelFactory(app.repository, app.preferences)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val uiState by viewModel.uiState.collectAsState()
-            val darkTheme = uiState.isDarkTheme
+            // Отдельный поток только для темы: изменения статистики не перерисовывают всё дерево
+            val darkTheme by viewModel.isDarkTheme.collectAsState()
 
             // Иконки системных панелей подстраиваются под тему приложения, а не системы
             DisposableEffect(darkTheme) {
@@ -45,9 +44,25 @@ class MainActivity : ComponentActivity() {
             }
 
             DiaryTripelJumpTheme(darkTheme = darkTheme) {
-                MainScreen(viewModel = viewModel)
+                MainScreen(
+                    viewModel = viewModel,
+                    isDemo = app.isDemo,
+                    onSwitchDiary = ::switchDiary
+                )
             }
         }
+    }
+
+    /**
+     * Переключение «Демо / Мои данные» без перезапуска процесса: подключается другая база,
+     * старая ViewModel удаляется (её потоки отменяются), экран пересоздаётся с новой.
+     */
+    fun switchDiary(demo: Boolean) {
+        if (app.isDemo == demo) return
+        app.preferences.useDemoData = demo
+        app.openDiary(demo)
+        viewModelStore.clear()
+        recreate()
     }
 
     private companion object {

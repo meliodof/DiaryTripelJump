@@ -295,29 +295,8 @@ fun CatalogScreen(
             onCreateInventory = { showInventoryDialog = true },
             onDismiss = { showExerciseEditor = false },
             onConfirm = { cfg ->
-                if (target == null) {
-                    viewModel.saveExerciseToDatabase(
-                        name = cfg.name,
-                        categoryName = cfg.category,
-                        defaultUnit = getInferredUnitForExercise(cfg.name),
-                        isSingleLeg = cfg.isSingleLeg,
-                        legSide = cfg.legSide,
-                        inventoryName = cfg.inventoryName,
-                        inventoryUnit = cfg.inventoryUnit,
-                        inventoryValue = cfg.inventoryValue
-                    )
-                } else {
-                    viewModel.updateExercise(
-                        exercise = target,
-                        name = cfg.name,
-                        categoryName = cfg.category,
-                        isSingleLeg = cfg.isSingleLeg,
-                        legSide = cfg.legSide,
-                        inventoryName = cfg.inventoryName,
-                        inventoryUnit = cfg.inventoryUnit,
-                        inventoryValue = cfg.inventoryValue
-                    )
-                }
+                if (target == null) viewModel.saveExerciseToDatabase(cfg)
+                else viewModel.updateExercise(target, cfg)
                 showExerciseEditor = false
             }
         )
@@ -441,6 +420,7 @@ private fun ExerciseCatalogRow(
                 val tags = buildList {
                     exercise.categoryName?.let { add(it) }
                     if (exercise.isSingleLeg) add(RecordsEngine.legSuffix(true, exercise.legSide).removePrefix(" · "))
+                    if (exercise.inSpikes) add("в шиповках")
                     RecordsEngine.inventoryLabel(exercise.inventoryName, exercise.inventoryUnit, exercise.inventoryValue)?.let { add(it) }
                 }
                 if (tags.isNotEmpty()) {

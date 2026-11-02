@@ -35,9 +35,9 @@ data class GoalCandidate(
 fun goalCandidateFor(ex: Exercise): GoalCandidate {
     val unit = getInferredUnitForExercise(ex.name, ex.defaultUnit)
     return GoalCandidate(
-        key = RecordsEngine.exerciseRecordKey(ex.name, ex.isSingleLeg, ex.legSide, unit),
+        key = RecordsEngine.exerciseRecordKey(ex.name, ex.isSingleLeg, ex.legSide, unit, ex.inSpikes),
         name = ex.name,
-        displayName = ex.name + RecordsEngine.legSuffix(ex.isSingleLeg, ex.legSide),
+        displayName = ex.name + RecordsEngine.legSuffix(ex.isSingleLeg, ex.legSide) + RecordsEngine.spikesSuffix(ex.inSpikes),
         unit = unit,
         lowerIsBetter = RecordsEngine.isLowerBetter(ex.name, unit)
     )

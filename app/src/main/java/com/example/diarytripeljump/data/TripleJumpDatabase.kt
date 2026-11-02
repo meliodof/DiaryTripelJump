@@ -32,7 +32,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ComplexExercise::class,
         ExerciseGoal::class
     ],
-    version = 15,
+    version = TripleJumpDatabase.CURRENT_VERSION,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -154,22 +154,53 @@ abstract class TripleJumpDatabase : RoomDatabase() {
             }
         }
 
-        @Volatile
-        private var INSTANCE: TripleJumpDatabase? = null
+        /** 15 → 16: выполнение упражнений и рекорды в шиповках. Данные сохраняются. */
+        internal val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE exercise_results ADD COLUMN inSpikes INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE triple_jump_results ADD COLUMN inSpikes INTEGER NOT NULL DEFAULT 0")
+            }
+        }
 
-        fun getDatabase(context: Context): TripleJumpDatabase {
-            return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+        /** 16 → 17: шиповки по умолчанию в справочнике упражнений, пол в профиле (для возрастной группы). */
+        internal val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE exercises ADD COLUMN inSpikes INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE athlete_profile ADD COLUMN gender TEXT")
+            }
+        }
+
+        internal val ALL_MIGRATIONS = arrayOf(
+            MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17
+        )
+
+        const val DATABASE_NAME = "triple_jump_database"
+
+        // Уже выпущенную версию не меняем: любое изменение схемы — новая версия и новая миграция
+        const val CURRENT_VERSION = 17
+
+        /** Самая старая версия, которую можно перенести без потери данных. */
+        const val MIN_MIGRATABLE_VERSION = 11
+
+        /** Отдельная база с демо-данными: переключение не смешивает их с дневником пользователя. */
+        const val DEMO_DATABASE_NAME = "triple_jump_demo"
+
+        private val instances = HashMap<String, TripleJumpDatabase>()
+
+        fun getDatabase(context: Context, name: String = DATABASE_NAME): TripleJumpDatabase {
+            return synchronized(this) {
+                instances[name] ?: Room.databaseBuilder(
                     context.applicationContext,
                     TripleJumpDatabase::class.java,
-                    "triple_jump_database"
+                    name
                 )
                     .setJournalMode(JournalMode.TRUNCATE)
-                    .addMigrations(MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(*ALL_MIGRATIONS)
+                    // Пересоздаётся только база самых ранних тестовых версий (до 11), где миграций нет.
+                    // Если для новой версии забыть миграцию, приложение упадёт, а не сотрёт дневник молча.
+                    .fallbackToDestructiveMigrationFrom(true, *(1 until MIN_MIGRATABLE_VERSION).toList().toIntArray())
                     .build()
-                INSTANCE = instance
-                instance
+                    .also { instances[name] = it }
             }
         }
     }
