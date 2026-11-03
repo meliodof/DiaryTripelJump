@@ -52,7 +52,9 @@ data class NewRecordInput(
     val inventoryName: String? = null,
     val inventoryUnit: ResultUnit? = null,
     val inventoryValue: Double? = null,
-    val inSpikes: Boolean = false
+    val inSpikes: Boolean = false,
+    /** Когда установлен рекорд. */
+    val date: Long = System.currentTimeMillis()
 )
 
 private val NumberRegex = Regex("\\d+(?:[.,]\\d+)?")
@@ -140,7 +142,7 @@ class DiaryViewModel(
 
     /** Избранные упражнения каталога — именно они показываются на главном экране. */
     val favoriteExercises: StateFlow<List<Exercise>> = allExercises
-        .map { list -> list.filter { it.isFavorite }.distinctBy { it.name.trim().lowercase() }.sortedBy { it.name.lowercase() } }
+        .map { list -> list.filter { it.isFavorite }.distinctBy { it.variantKey() }.sortedBy { it.title().lowercase() } }
         .stateIn(viewModelScope, AppSharing, emptyList())
 
     /** Результаты стартов в тройном прыжке (новые сверху) для главного экрана. */
@@ -342,8 +344,13 @@ class DiaryViewModel(
     }
 
     // --- Favorites ---
+    /** Избранное — для конкретного варианта упражнения (и его возможных дубликатов в справочнике). */
     fun setExerciseFavorite(exercise: Exercise, favorite: Boolean) {
-        viewModelScope.launch { repository.setExerciseFavorite(exercise.name, favorite) }
+        viewModelScope.launch {
+            val key = exercise.variantKey()
+            repository.getAllExercises().first().filter { it.variantKey() == key }
+                .forEach { repository.updateExercise(it.copy(isFavorite = favorite)) }
+        }
     }
 
     // --- Complexes ---
@@ -369,9 +376,15 @@ class DiaryViewModel(
         viewModelScope.launch { repository.deleteComplex(complex) }
     }
 
-    /** Удаляет упражнение из справочника (все дубликаты по названию). Результаты в тренировках и рекорды остаются. */
+    /**
+     * Удаляет вариант упражнения из справочника (и его дубликаты); другие варианты с тем же названием остаются.
+     * Результаты в тренировках и рекорды сохраняются.
+     */
     fun deleteExerciseFromCatalog(exercise: Exercise) {
-        viewModelScope.launch { repository.deleteExercisesByName(exercise.name) }
+        viewModelScope.launch {
+            val key = exercise.variantKey()
+            repository.getAllExercises().first().filter { it.variantKey() == key }.forEach { repository.deleteExercise(it) }
+        }
     }
 
     /** Удаляет одно упражнение из сохранённой тренировки; рекорды пересчитываются автоматически. */
@@ -393,19 +406,17 @@ class DiaryViewModel(
         viewModelScope.launch { repository.deleteInventory(item) }
     }
 
-    /** Новое упражнение в справочнике (если такого названия ещё нет). */
+    /** Новое упражнение в справочнике, если такого варианта (название + свойства) ещё нет. */
     fun saveExerciseToDatabase(cfg: ExerciseConfig) {
         viewModelScope.launch {
-            val existing = repository.getAllExercises().first().find { it.name.equals(cfg.name, ignoreCase = true) }
-            if (existing == null) {
-                repository.insertExercise(
-                    applyConfig(Exercise(name = cfg.name, defaultUnit = getInferredUnitForExercise(cfg.name)), cfg)
-                )
+            val key = cfg.variantKey()
+            if (repository.getAllExercises().first().none { it.variantKey() == key }) {
+                repository.insertExercise(applyConfig(Exercise(name = cfg.name), cfg))
             }
         }
     }
 
-    /** Редактирование упражнения в справочнике: название, категория, одна нога, шиповки, инвентарь. */
+    /** Редактирование упражнения в справочнике: название, категория, единица, нога, шиповки, снаряд. */
     fun updateExercise(exercise: Exercise, cfg: ExerciseConfig) {
         viewModelScope.launch { repository.updateExercise(applyConfig(exercise, cfg)) }
     }
@@ -415,11 +426,13 @@ class DiaryViewModel(
         return exercise.copy(
             name = cfg.name.trim(),
             categoryName = cfg.category,
+            defaultUnit = cfg.unit,
             isSingleLeg = cfg.isSingleLeg,
             legSide = if (cfg.isSingleLeg) cfg.legSide else null,
             inventoryName = if (hasInventory) cfg.inventoryName else null,
             inventoryUnit = if (hasInventory) cfg.inventoryUnit else null,
-            inventoryValue = if (hasInventory) cfg.inventoryValue else null,
+            // вес нагружаемого снаряда (штанги) не хранится — он равен результату
+            inventoryValue = if (hasInventory && !cfg.isLoadedImplement) cfg.inventoryValue else null,
             inSpikes = cfg.inSpikes
         )
     }
@@ -535,6 +548,11 @@ class DiaryViewModel(
     ) {
         viewModelScope.launch {
             repository.inTransaction {
+                // дата тренировки тоже меняется (раньше менялись только даты упражнений); время дня сохраняется
+                repository.getAllTrainingsWithExercises().first().find { it.training.id == sessionId }?.training?.let { s ->
+                    val newDate = keepTimeOfDay(s.date, date)
+                    if (newDate != s.date) repository.updateTrainingSession(s.copy(date = newDate))
+                }
                 val oldResults = repository.getResultsForTraining(sessionId).first()
                 oldResults.forEach { repository.deleteExerciseResult(it) }
                 insertExerciseResults(sessionId, date, exerciseInputs)
@@ -542,17 +560,50 @@ class DiaryViewModel(
         }
     }
 
-    /** Сохраняет упражнения тренировки; неизвестные упражнения добавляются в справочник. */
+    /**
+     * Перенос всех записей дня (тренировок и пропусков) на другой день — например, перетаскиванием в календаре.
+     * Время дня и результаты сохраняются, рекорды пересчитываются по новым датам.
+     */
+    fun moveTrainingDay(fromDay: Long, toDay: Long) {
+        val from = startOfDay(fromDay)
+        val to = startOfDay(toDay)
+        if (from == to) return
+        viewModelScope.launch {
+            repository.inTransaction {
+                repository.getAllTrainingsWithExercises().first()
+                    .filter { startOfDay(it.training.date) == from }
+                    .forEach { t ->
+                        repository.updateTrainingSession(t.training.copy(date = keepTimeOfDay(t.training.date, to)))
+                        t.exerciseResults.forEach { r -> repository.updateExerciseResult(r.copy(date = keepTimeOfDay(r.date, to))) }
+                    }
+            }
+        }
+    }
+
+    /** Новая дата [day] с тем же временем суток, что у [original]. */
+    private fun keepTimeOfDay(original: Long, day: Long): Long = startOfDay(day) + (original - startOfDay(original))
+
+    /** Сохраняет упражнения тренировки; упражнения, которых нет в справочнике, добавляются в него. */
     private suspend fun insertExerciseResults(sessionId: Long, date: Long, inputs: List<ExerciseResultInput>) {
-        val catalog = repository.getAllExercises().first().associateByTo(HashMap()) { it.name.lowercase() }
+        val all = repository.getAllExercises().first()
+        val byId = all.associateBy { it.id }
+        val byVariant = all.associateByTo(HashMap()) { it.variantKey() }
         inputs.forEach { input ->
-            val exId = catalog[input.exerciseName.lowercase()]?.id ?: run {
-                val created = Exercise(name = input.exerciseName, categoryName = "Пользовательские", defaultUnit = input.unit)
+            val key = input.variantKey()
+            // сначала то же упражнение справочника, если его вариант не менялся; иначе — по названию и свойствам
+            val exId = byId[input.exerciseId]?.takeIf { it.variantKey() == key }?.id ?: byVariant[key]?.id ?: run {
+                val created = Exercise(
+                    name = input.exerciseName, categoryName = "Пользовательские", defaultUnit = input.unit,
+                    isSingleLeg = input.isSingleLeg, legSide = input.legSide, inventoryName = input.inventoryName,
+                    inventoryUnit = input.inventoryUnit, inventoryValue = input.inventoryValue, inSpikes = input.inSpikes
+                )
                 val id = repository.insertExercise(created)
-                catalog[input.exerciseName.lowercase()] = created.copy(id = id)
+                byVariant[key] = created.copy(id = id)
                 id
             }
             val hasInventory = !input.inventoryName.isNullOrBlank()
+            // у штанги и других нагружаемых снарядов вес снаряда = результат
+            val loaded = hasInventory && RecordsEngine.isLoadedImplement(input.inventoryUnit, input.unit)
             repository.insertExerciseResult(
                 ExerciseResult(
                     exerciseId = exId,
@@ -568,7 +619,11 @@ class DiaryViewModel(
                     legSide = if (input.isSingleLeg) input.legSide else null,
                     inventoryName = if (hasInventory) input.inventoryName else null,
                     inventoryUnit = if (hasInventory) input.inventoryUnit else null,
-                    inventoryValue = if (hasInventory) input.inventoryValue else null,
+                    inventoryValue = when {
+                        !hasInventory -> null
+                        loaded -> input.result.takeIf { it > 0 }
+                        else -> input.inventoryValue
+                    },
                     inSpikes = input.inSpikes
                 )
             )
@@ -604,10 +659,11 @@ class DiaryViewModel(
     fun addRecordResult(
         input: NewRecordInput,
         isAntiRecord: Boolean = false,
-        date: Long = System.currentTimeMillis()
+        date: Long = input.date
     ) {
         viewModelScope.launch {
             val hasInventory = !input.inventoryName.isNullOrBlank()
+            val loaded = hasInventory && RecordsEngine.isLoadedImplement(input.inventoryUnit, input.unit)
             repository.insertTripleJumpResult(
                 TripleJumpResult(
                     eventName = input.eventName.trim(),
@@ -625,7 +681,12 @@ class DiaryViewModel(
                     legSide = if (input.isSingleLeg) input.legSide else null,
                     inventoryName = if (hasInventory) input.inventoryName else null,
                     inventoryUnit = if (hasInventory) input.inventoryUnit else null,
-                    inventoryValue = if (hasInventory) input.inventoryValue else null,
+                    // вес штанги равен самому результату — рекорд и вес снаряда не могут расходиться
+                    inventoryValue = when {
+                        !hasInventory -> null
+                        loaded -> input.result
+                        else -> input.inventoryValue
+                    },
                     inSpikes = input.inSpikes
                 )
             )

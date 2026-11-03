@@ -496,7 +496,6 @@ fun RecordCard(
                     add(formatFullDate(record.bestDate))
                     add(if (record.isIndoor) "В помещении" else "На улице")
                     if (!record.weather.isNullOrBlank()) add(record.weather)
-                    if (!record.inventoryLabel.isNullOrBlank()) add(record.inventoryLabel)
                 }
                 Text(
                     text = details.joinToString(" · "),
@@ -835,6 +834,9 @@ fun AddRecordDialog(
 
     var weatherText by remember { mutableStateOf("") }
     var notesText by remember { mutableStateOf("") }
+    // дата, когда рекорд установлен (по умолчанию — сегодня)
+    var recordDate by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var pickingRecordDate by remember { mutableStateOf(false) }
 
     var showNameError by remember { mutableStateOf(false) }
     var showValueError by remember { mutableStateOf(false) }
@@ -906,6 +908,13 @@ fun AddRecordDialog(
                         { Text("Введите число больше нуля") }
                     } else null,
                     singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                DateField(
+                    label = "Дата установки рекорда",
+                    millis = recordDate,
+                    onClick = { pickingRecordDate = true },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -999,7 +1008,16 @@ fun AddRecordDialog(
                         }
                     )
                 }
-                if (!inventoryName.isNullOrBlank()) {
+                val loadedImplement = !inventoryName.isNullOrBlank() &&
+                    com.example.diarytripeljump.data.RecordsEngine.isLoadedImplement(inventoryUnit, selectedUnit)
+                if (loadedImplement) {
+                    // штанга при результате в кг: рекорд и вес снаряда — одно и то же число
+                    Text(
+                        text = "Вес снаряда = результату: ${resultValueText.ifBlank { "—" }} ${getUnitTitle(selectedUnit)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant
+                    )
+                } else if (!inventoryName.isNullOrBlank()) {
                     OutlinedTextField(
                         value = inventoryValueText,
                         onValueChange = { v -> inventoryValueText = v.replace(',', '.').filter { it.isDigit() || it == '.' } },
@@ -1056,6 +1074,7 @@ fun AddRecordDialog(
             Button(
                 onClick = {
                     val value = resultValueText.toDoubleOrNull()
+                    val loaded = com.example.diarytripeljump.data.RecordsEngine.isLoadedImplement(inventoryUnit, selectedUnit)
                     when {
                         eventNameText.isBlank() -> showNameError = true
                         value == null || value <= 0.0 -> showValueError = true
@@ -1076,8 +1095,13 @@ fun AddRecordDialog(
                                     legSide = if (isSingleLeg) legSide else null,
                                     inventoryName = if (hasInv) inventoryName else null,
                                     inventoryUnit = if (hasInv) inventoryUnit else null,
-                                    inventoryValue = if (hasInv) inventoryValueText.toDoubleOrNull() else null,
-                                    inSpikes = inSpikes
+                                    inventoryValue = when {
+                                        !hasInv -> null
+                                        loaded -> value
+                                        else -> inventoryValueText.toDoubleOrNull()
+                                    },
+                                    inSpikes = inSpikes,
+                                    date = recordDate
                                 )
                             )
                         }
@@ -1087,6 +1111,17 @@ fun AddRecordDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
+
+    if (pickingRecordDate) {
+        AppDatePickerDialog(
+            initialMillis = recordDate,
+            onDismiss = { pickingRecordDate = false },
+            onConfirm = {
+                recordDate = it
+                pickingRecordDate = false
+            }
+        )
+    }
 
     if (showCreateInventory) {
         CreateInventoryDialog(

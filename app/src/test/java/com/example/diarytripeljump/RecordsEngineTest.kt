@@ -106,6 +106,37 @@ class RecordsEngineTest {
     }
 
     @Test
+    fun barbell_weightIsResult_singleRecordAcrossWeights() {
+        fun squat(id: Long, kg: Double, day: Int) = ExerciseResult(
+            id = id, exerciseId = 1, exerciseName = "Присед", trainingSessionId = 1, date = day * this.day,
+            result = kg, resultUnit = ResultUnit.KG, inventoryName = "Штанга", inventoryUnit = ResultUnit.KG, inventoryValue = kg
+        )
+        val manual = TripleJumpResult(
+            id = 5, eventName = "Присед", result = 150.0, resultUnit = ResultUnit.KG, isCompetition = false,
+            date = 3 * day, inventoryName = "Штанга", inventoryUnit = ResultUnit.KG, inventoryValue = 150.0
+        )
+        val r = RecordsEngine.build(listOf(manual), listOf(squat(1, 120.0, 1), squat(2, 140.0, 2))).single()
+        assertEquals(150.0, r.best, 1e-9)
+        assertEquals("Присед · штанга", r.displayName)
+        assertTrue(RecordsEngine.isLoadedImplement(ResultUnit.KG, ResultUnit.KG))
+        assertFalse(RecordsEngine.isLoadedImplement(ResultUnit.CM, ResultUnit.CM))
+    }
+
+    @Test
+    fun shotWeights_areSeparateExercises() {
+        fun shot(id: Long, kg: Double, m: Double) = ExerciseResult(
+            id = id, exerciseId = 1, exerciseName = "Бросок ядра", trainingSessionId = 1, date = id * day,
+            result = m, resultUnit = ResultUnit.M, inventoryName = "Ядро", inventoryUnit = ResultUnit.KG, inventoryValue = kg
+        )
+        val records = RecordsEngine.build(emptyList(), listOf(shot(1, 5.0, 16.0), shot(2, 7.26, 14.0)))
+        assertEquals(2, records.size)
+        assertNotEquals(
+            RecordsEngine.variantKey("Бросок ядра", false, null, false, "Ядро", ResultUnit.KG, 5.0, ResultUnit.M),
+            RecordsEngine.variantKey("Бросок ядра", false, null, false, "Ядро", ResultUnit.KG, 7.26, ResultUnit.M)
+        )
+    }
+
+    @Test
     fun antiRecord_keepsWorstResult() {
         val r = RecordsEngine.build(
             tj = listOf(

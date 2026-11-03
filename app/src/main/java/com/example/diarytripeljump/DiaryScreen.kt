@@ -280,7 +280,7 @@ fun DiaryScreen(
 
     if (showFavoritesPicker) {
         FavoritesPickerDialog(
-            exercises = remember(allExercises) { allExercises.distinctBy { it.name.trim().lowercase() }.sortedBy { it.name.lowercase() } },
+            exercises = remember(allExercises) { allExercises.distinctBy { it.variantKey() }.sortedBy { it.title().lowercase() } },
             onToggle = { ex, fav -> viewModel.setExerciseFavorite(ex, fav) },
             onDismiss = { showFavoritesPicker = false }
         )
@@ -648,8 +648,11 @@ private fun FavoriteExerciseRow(
     onClick: () -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
-    val unit = getInferredUnitForExercise(exercise.name, exercise.defaultUnit)
-    val key = RecordsEngine.exerciseRecordKey(exercise.name, exercise.isSingleLeg, exercise.legSide, unit, exercise.inSpikes)
+    val unit = exercise.defaultUnit
+    val key = RecordsEngine.exerciseRecordKey(
+        exercise.name, exercise.isSingleLeg, exercise.legSide, unit, exercise.inSpikes,
+        RecordsEngine.recordInventory(exercise.inventoryName, exercise.inventoryUnit, exercise.inventoryValue, unit)
+    )
 
     val record = remember(records, key) {
         records.firstOrNull { !it.isAnti && it.key == key }
@@ -662,7 +665,12 @@ private fun FavoriteExerciseRow(
         trainings.asSequence()
             .filter { !it.training.isSkipped }
             .flatMap { it.exerciseResults.asSequence() }
-            .filter { RecordsEngine.exerciseRecordKey(it.exerciseName, it.isSingleLeg, it.legSide, it.resultUnit, it.inSpikes) == key && it.result > 0 }
+            .filter {
+                RecordsEngine.exerciseRecordKey(
+                    it.exerciseName, it.isSingleLeg, it.legSide, it.resultUnit, it.inSpikes,
+                    RecordsEngine.recordInventory(it.inventoryName, it.inventoryUnit, it.inventoryValue, it.resultUnit)
+                ) == key && it.result > 0
+            }
             .maxByOrNull { it.date }
     }
     val goalProgress = goals.firstOrNull { it.recordKey == (record?.key ?: key) }
@@ -682,8 +690,7 @@ private fun FavoriteExerciseRow(
                 IconBadge(icon = Icons.Default.FitnessCenter, tint = cs.primary)
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        text = exercise.name + RecordsEngine.legSuffix(exercise.isSingleLeg, exercise.legSide) +
-                            RecordsEngine.spikesSuffix(exercise.inSpikes),
+                        text = exercise.title(),
                         style = MaterialTheme.typography.titleSmall,
                         color = cs.onSurface,
                         maxLines = 2,
@@ -763,7 +770,7 @@ private fun FavoritesPickerDialog(
                         ) {
                             Checkbox(checked = ex.isFavorite, onCheckedChange = { onToggle(ex, it) })
                             Text(
-                                text = ex.name + RecordsEngine.legSuffix(ex.isSingleLeg, ex.legSide),
+                                text = ex.title(),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = cs.onSurface
                             )

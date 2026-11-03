@@ -101,9 +101,50 @@ object RecordsEngine {
     /** Суффикс ключа для шиповок; без шиповок ключ прежний, поэтому старые цели и правки рекордов не теряются. */
     private fun spikesCode(inSpikes: Boolean): String = if (inSpikes) "|spikes" else ""
 
-    /** Ключ рекорда упражнения из тренировок; по нему же хранятся цели. */
-    fun exerciseRecordKey(name: String, isSingleLeg: Boolean, legSide: String?, unit: ResultUnit, inSpikes: Boolean = false): String =
-        "ex|${name.trim().lowercase()}|${sideCode(isSingleLeg, legSide)}|${unit.name}" + spikesCode(inSpikes)
+    /**
+     * Ключ рекорда упражнения из тренировок; по нему же хранятся цели. [inventory] — снаряд, который меняет
+     * упражнение (ядро 5 кг и ядро 7,26 кг — разные рекорды); без снаряда ключ прежний.
+     */
+    fun exerciseRecordKey(
+        name: String, isSingleLeg: Boolean, legSide: String?, unit: ResultUnit, inSpikes: Boolean = false, inventory: String? = null
+    ): String =
+        "ex|${name.trim().lowercase()}|${sideCode(isSingleLeg, legSide)}|${unit.name}" + spikesCode(inSpikes) +
+            (inventory?.takeIf { it.isNotBlank() }?.let { "|inv:${it.trim().lowercase()}" } ?: "")
+
+    /**
+     * «Нагружаемый» снаряд силового упражнения: его вес в кг, и результат тоже в кг (штанга, гиря, гантели).
+     * Тогда вес снаряда и есть результат — отдельно его не вводят, и все веса штанги — один рекорд упражнения.
+     * Высота барьера или тумбы (см) сюда не относится: это условие упражнения, а не результат.
+     */
+    fun isLoadedImplement(invUnit: ResultUnit?, resultUnit: ResultUnit): Boolean =
+        invUnit == ResultUnit.KG && resultUnit == ResultUnit.KG
+
+    /** Снаряд, который отличает упражнение: для нагружаемого — только название, иначе название и вес/высота. */
+    fun variantInventory(invName: String?, invUnit: ResultUnit?, invValue: Double?, resultUnit: ResultUnit): String? {
+        if (invName.isNullOrBlank()) return null
+        return if (isLoadedImplement(invUnit, resultUnit)) invName.trim() else inventoryLabel(invName.trim(), invUnit, invValue)
+    }
+
+    /** Снаряд, который делает рекорд отдельным (ядро 7,26 кг); нагружаемая штанга рекорд не делит. */
+    fun recordInventory(invName: String?, invUnit: ResultUnit?, invValue: Double?, resultUnit: ResultUnit): String? =
+        if (isLoadedImplement(invUnit, resultUnit)) null else variantInventory(invName, invUnit, invValue, resultUnit)
+
+    /** Полное название упражнения со всеми свойствами: «Бросок ядра назад · ядро 7,26 кг · в шиповках». */
+    fun exerciseTitle(
+        name: String, isSingleLeg: Boolean, legSide: String?, inSpikes: Boolean,
+        invName: String?, invUnit: ResultUnit?, invValue: Double?, resultUnit: ResultUnit
+    ): String =
+        name.trim() + legSuffix(isSingleLeg, legSide) +
+            (variantInventory(invName, invUnit, invValue, resultUnit)?.let { " · " + it.replaceFirstChar { c -> c.lowercase() } } ?: "") +
+            spikesSuffix(inSpikes)
+
+    /** Идентичность упражнения в справочнике: одно название с разными свойствами — разные упражнения. */
+    fun variantKey(
+        name: String, isSingleLeg: Boolean, legSide: String?, inSpikes: Boolean,
+        invName: String?, invUnit: ResultUnit?, invValue: Double?, resultUnit: ResultUnit
+    ): String =
+        "${name.trim().lowercase()}|${sideCode(isSingleLeg, legSide)}|$inSpikes|" +
+            (variantInventory(invName, invUnit, invValue, resultUnit)?.lowercase() ?: "")
 
     /** Ключ записи, добавленной вручную (старт, антирекорд или запись с инвентарём). */
     fun manualRecordKey(
@@ -155,6 +196,8 @@ object RecordsEngine {
             val isAnti: Boolean,
             val isCompetition: Boolean,
             val inSpikes: Boolean,
+            /** Снаряд в названии: «ядро 7,26 кг» или «штанга» (вес штанги = результат). */
+            val inventory: String?,
             val samples: MutableList<Sample> = mutableListOf()
         )
 
@@ -166,15 +209,18 @@ object RecordsEngine {
             if (name.isBlank()) return@forEach
             val lower = isLowerBetter(name, res.resultUnit)
             val value = bestOfExercise(res, lower) ?: return@forEach
-            val key = exerciseRecordKey(name, res.isSingleLeg, res.legSide, res.resultUnit, res.inSpikes)
+            val inv = variantInventory(res.inventoryName, res.inventoryUnit, res.inventoryValue, res.resultUnit)
+            val key = exerciseRecordKey(
+                name, res.isSingleLeg, res.legSide, res.resultUnit, res.inSpikes,
+                recordInventory(res.inventoryName, res.inventoryUnit, res.inventoryValue, res.resultUnit)
+            )
             val g = groups.getOrPut(key) {
-                Group(key, name, res.resultUnit, res.isSingleLeg, res.legSide, false, false, res.inSpikes)
+                Group(key, name, res.resultUnit, res.isSingleLeg, res.legSide, false, false, res.inSpikes, inv)
             }
             g.samples.add(
                 Sample(
                     date = res.date, value = value, tjId = null, isIndoor = false, weather = null,
-                    inventory = inventoryLabel(res.inventoryName, res.inventoryUnit, res.inventoryValue),
-                    level = null, category = inferCategory(name), isCompetition = false
+                    inventory = inv, level = null, category = inferCategory(name), isCompetition = false
                 )
             )
         }
@@ -183,13 +229,14 @@ object RecordsEngine {
         tj.forEach { r ->
             if (r.result <= 0) return@forEach
             val name = r.eventName.trim()
-            val inv = inventoryLabel(r.inventoryName, r.inventoryUnit, r.inventoryValue)
-            // «тренировочные» записи без инвентаря сливаются с упражнениями; с инвентарём — отдельный рекорд
-            val merged = !r.isCompetition && !r.isAntiRecord && inv == null
-            val key = if (merged) exerciseRecordKey(name, r.isSingleLeg, r.legSide, r.resultUnit, r.inSpikes)
-            else manualRecordKey(name, r.isAntiRecord, r.isCompetition, r.resultUnit, r.isSingleLeg, r.legSide, inv, r.inSpikes)
+            val inv = variantInventory(r.inventoryName, r.inventoryUnit, r.inventoryValue, r.resultUnit)
+            val recInv = recordInventory(r.inventoryName, r.inventoryUnit, r.inventoryValue, r.resultUnit)
+            // «тренировочные» записи сливаются с тем же упражнением из тренировок (с тем же снарядом)
+            val merged = !r.isCompetition && !r.isAntiRecord
+            val key = if (merged) exerciseRecordKey(name, r.isSingleLeg, r.legSide, r.resultUnit, r.inSpikes, recInv)
+            else manualRecordKey(name, r.isAntiRecord, r.isCompetition, r.resultUnit, r.isSingleLeg, r.legSide, recInv ?: inv, r.inSpikes)
             val g = groups.getOrPut(key) {
-                Group(key, name, r.resultUnit, r.isSingleLeg, r.legSide, r.isAntiRecord, r.isCompetition, r.inSpikes)
+                Group(key, name, r.resultUnit, r.isSingleLeg, r.legSide, r.isAntiRecord, r.isCompetition, r.inSpikes, inv)
             }
             g.samples.add(
                 Sample(
@@ -221,7 +268,8 @@ object RecordsEngine {
             val base = RecordSummary(
                 key = g.key,
                 name = g.name,
-                displayName = g.name + legSuffix(g.isSingleLeg, g.legSide) + spikesSuffix(g.inSpikes),
+                displayName = g.name + legSuffix(g.isSingleLeg, g.legSide) +
+                    (g.inventory?.let { " · " + it.replaceFirstChar { c -> c.lowercase() } } ?: "") + spikesSuffix(g.inSpikes),
                 inSpikes = g.inSpikes,
                 unit = g.unit,
                 isSingleLeg = g.isSingleLeg,

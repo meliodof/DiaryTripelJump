@@ -101,7 +101,8 @@ fun CatalogScreen(
     val athleteProfile by viewModel.athleteProfile.collectAsState()
     val inventoryItems by viewModel.inventoryItems.collectAsState()
 
-    val exercises = remember(rawExercises) { rawExercises.distinctBy { it.name.trim().lowercase() } }
+    // одно название с разными свойствами (ядро 5 кг / 7,26 кг, шиповки) — разные упражнения
+    val exercises = remember(rawExercises) { rawExercises.distinctBy { it.variantKey() } }
 
     val goals by viewModel.goals.collectAsState()
     val records by viewModel.records.collectAsState()
@@ -119,6 +120,7 @@ fun CatalogScreen(
     var showExerciseEditor by remember { mutableStateOf(false) }
     var editingExercise by remember { mutableStateOf<Exercise?>(null) }
     var exerciseToDelete by remember { mutableStateOf<Exercise?>(null) }
+    var pendingCatalogVariant by remember { mutableStateOf<Pair<Exercise, ExerciseConfig>?>(null) }
     var showInventoryDialog by remember { mutableStateOf(false) }
 
     var showComplexEditor by remember { mutableStateOf(false) }
@@ -295,9 +297,45 @@ fun CatalogScreen(
             onCreateInventory = { showInventoryDialog = true },
             onDismiss = { showExerciseEditor = false },
             onConfirm = { cfg ->
-                if (target == null) viewModel.saveExerciseToDatabase(cfg)
-                else viewModel.updateExercise(target, cfg)
+                when {
+                    target == null -> viewModel.saveExerciseToDatabase(cfg)
+                    // изменилось то, что отличает упражнение (снаряд, шиповки, нога, название) — спросить, заменить или создать
+                    cfg.variantKey() != target.variantKey() || cfg.name.trim() != target.name.trim() ->
+                        pendingCatalogVariant = target to cfg
+                    else -> viewModel.updateExercise(target, cfg)
+                }
                 showExerciseEditor = false
+            }
+        )
+    }
+
+    pendingCatalogVariant?.let { (old, cfg) ->
+        AlertDialog(
+            onDismissRequest = { pendingCatalogVariant = null },
+            title = { Text("Упражнение изменилось") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Было: ${old.title()}", style = MaterialTheme.typography.bodyMedium)
+                    Text("Стало: ${cfg.title()}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Заменить — упражнение в справочнике получит новые параметры. Создать новое — в справочнике " +
+                            "будут оба. Прошлые тренировки и рекорды не меняются.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.saveExerciseToDatabase(cfg)
+                    pendingCatalogVariant = null
+                }) { Text("Создать новое") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    viewModel.updateExercise(old, cfg)
+                    pendingCatalogVariant = null
+                }) { Text("Заменить") }
             }
         )
     }
@@ -331,7 +369,7 @@ fun CatalogScreen(
 
     exerciseToDelete?.let { target ->
         DeleteExerciseDialog(
-            name = target.name,
+            name = target.title(),
             onDismiss = { exerciseToDelete = null },
             onConfirm = {
                 viewModel.deleteExerciseFromCatalog(target)
@@ -400,7 +438,8 @@ private fun ExerciseCatalogRow(
     onDelete: () -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
-    AppCard {
+    // нажатие на упражнение открывает конструктор
+    AppCard(onClick = onEdit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -410,18 +449,25 @@ private fun ExerciseCatalogRow(
         ) {
             IconBadge(icon = Icons.Default.FitnessCenter, tint = cs.primary)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                // снаряд, шиповки и нога — прямо в названии
                 Text(
-                    text = exercise.name,
+                    text = exercise.title(),
                     style = MaterialTheme.typography.titleSmall,
                     color = cs.onSurface,
-                    maxLines = 2,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis
                 )
                 val tags = buildList {
                     exercise.categoryName?.let { add(it) }
-                    if (exercise.isSingleLeg) add(RecordsEngine.legSuffix(true, exercise.legSide).removePrefix(" · "))
-                    if (exercise.inSpikes) add("в шиповках")
-                    RecordsEngine.inventoryLabel(exercise.inventoryName, exercise.inventoryUnit, exercise.inventoryValue)?.let { add(it) }
+                    add(
+                        when (exercise.defaultUnit) {
+                            com.example.diarytripeljump.data.ResultUnit.KG -> "результат в кг"
+                            com.example.diarytripeljump.data.ResultUnit.M -> "результат в метрах"
+                            com.example.diarytripeljump.data.ResultUnit.CM -> "результат в см"
+                            com.example.diarytripeljump.data.ResultUnit.SECONDS -> "результат в секундах"
+                            com.example.diarytripeljump.data.ResultUnit.REPS -> "результат в повторениях"
+                        }
+                    )
                 }
                 if (tags.isNotEmpty()) {
                     Text(
@@ -458,7 +504,8 @@ private fun ExerciseCatalogRow(
 private fun ComplexCard(complex: ComplexUi, onEdit: () -> Unit, onDelete: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val n = complex.exercises.size
-    AppCard {
+    // нажатие на карточку открывает редактирование состава и порядка
+    AppCard(onClick = onEdit) {
         Column(modifier = Modifier.padding(start = 14.dp, top = 8.dp, end = 4.dp, bottom = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconBadge(icon = Icons.Default.Layers, tint = cs.tertiary)
@@ -495,7 +542,7 @@ private fun ComplexCard(complex: ComplexUi, onEdit: () -> Unit, onDelete: () -> 
                     complex.exercises.forEachIndexed { i, ex ->
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                             StatusPill(text = "${i + 1}", contentColor = cs.onSecondaryContainer, containerColor = cs.secondaryContainer)
-                            Text(ex.name, style = MaterialTheme.typography.bodyMedium, color = cs.onSurface)
+                            Text(ex.title(), style = MaterialTheme.typography.bodyMedium, color = cs.onSurface)
                         }
                     }
                 }
@@ -560,7 +607,7 @@ fun ComplexEditorDialog(
                         StatusPill(text = "${i + 1}", contentColor = cs.onSecondaryContainer, containerColor = cs.secondaryContainer)
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            ex.name,
+                            ex.title(),
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.weight(1f),
                             maxLines = 2,
@@ -595,7 +642,7 @@ fun ComplexEditorDialog(
                     allExercises.forEach { ex ->
                         val isSel = ex.id in selected
                         ToggleChip(
-                            label = ex.name,
+                            label = ex.title(),
                             selected = isSel,
                             onClick = { selected = if (isSel) selected.filter { it != ex.id } else selected + ex.id }
                         )

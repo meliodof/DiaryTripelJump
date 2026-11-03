@@ -49,6 +49,19 @@ import com.example.diarytripeljump.data.formatNumber
 import com.example.diarytripeljump.data.formatRecordValue
 import androidx.compose.foundation.text.KeyboardOptions
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Rect as GeoRect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import com.example.diarytripeljump.ui.components.*
@@ -69,9 +82,9 @@ fun TrainingsScreen(
     var editingPeriod by remember { mutableStateOf<TrainingPeriod?>(null) }
     var showPeriodDialog by remember { mutableStateOf(false) }
 
-    // Deduplicate exercises by name
+    // Дубликаты справочника убираются по варианту: одно название с разными свойствами — разные упражнения
     val exercisesList = remember(rawExercisesList) {
-        rawExercisesList.distinctBy { it.name.trim().lowercase() }
+        rawExercisesList.distinctBy { it.variantKey() }
     }
 
     // rememberSaveable: при возврате на вкладку открыт тот же месяц и день, а не сегодняшний
@@ -85,6 +98,8 @@ fun TrainingsScreen(
     var warningMessage by remember { mutableStateOf<String?>(null) }
     var trainingToDelete by remember { mutableStateOf<TrainingWithExercises?>(null) }
     var exerciseToRemove by remember { mutableStateOf<Pair<TrainingWithExercises, ExerciseResult>?>(null) }
+    // перенос дня перетаскиванием в календаре ждёт подтверждения
+    var pendingMove by remember { mutableStateOf<Pair<Long, Long>?>(null) }
 
     val activeTrainingsOnSelectedDay = remember(trainingsList, selectedDateMillis) {
         if (selectedDateMillis == null) false
@@ -137,7 +152,8 @@ fun TrainingsScreen(
                     onDateSelected = { selectedDateMillis = it },
                     trainingsList = trainingsList,
                     competitionsList = competitionsList,
-                    periods = trainingPeriods
+                    periods = trainingPeriods,
+                    onMoveDay = { from, to -> pendingMove = from to to }
                 )
             }
 
@@ -330,6 +346,31 @@ fun TrainingsScreen(
         )
     }
 
+    pendingMove?.let { (from, to) ->
+        val fmt = remember { SimpleDateFormat("d MMMM", Locale("ru")) }
+        val moving = trainingsList.filter { startOfDay(it.training.date) == startOfDay(from) }
+        val targetBusy = trainingsList.any { startOfDay(it.training.date) == startOfDay(to) }
+        AlertDialog(
+            onDismissRequest = { pendingMove = null },
+            title = { Text("Перенести на ${fmt.format(Date(to))}?") },
+            text = {
+                Text(
+                    "Записи за ${fmt.format(Date(from))} (${moving.size} ${pluralRu(moving.size, "запись", "записи", "записей")}) " +
+                        "переедут на ${fmt.format(Date(to))}. Результаты сохранятся, рекорды пересчитаются по новой дате." +
+                        if (targetBusy) " В этот день уже есть записи — они останутся рядом." else ""
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.moveTrainingDay(from, to)
+                    selectedDateMillis = to
+                    pendingMove = null
+                }) { Text("Перенести") }
+            },
+            dismissButton = { TextButton(onClick = { pendingMove = null }) { Text("Отмена") } }
+        )
+    }
+
     // New Training Dialog
     if (showAddTrainingDialog) {
         AddTrainingDialog(
@@ -358,7 +399,7 @@ fun TrainingsScreen(
             inventoryItems = inventoryItems,
             onAddInventory = { name, unit -> viewModel.addInventory(name, unit) },
             complexes = complexes,
-            onSaveComplex = { name, description, ids -> viewModel.saveComplex(null, name, description, ids) },
+            onSaveComplex = { id, name, description, ids -> viewModel.saveComplex(id, name, description, ids) },
             onDeleteExercise = { viewModel.deleteExerciseFromCatalog(it) }
         )
     }
@@ -372,13 +413,13 @@ fun TrainingsScreen(
                              else exercisesList.find { it.id == exRes.exerciseId }?.name ?: "Упражнение"
                 val (pVal, sVal) = extractPrimarySecondaryValues(exRes)
                 val setResList = exRes.setResultsJson?.split(",")?.mapNotNull { it.toDoubleOrNull() } ?: emptyList()
-                val inferredUnit = getInferredUnitForExercise(exName, exRes.resultUnit)
+                val loaded = com.example.diarytripeljump.data.RecordsEngine.isLoadedImplement(exRes.inventoryUnit, exRes.resultUnit)
 
                 ExerciseResultInput(
                     exerciseId = exRes.exerciseId,
                     exerciseName = exName,
                     result = exRes.result,
-                    unit = inferredUnit,
+                    unit = exRes.resultUnit,
                     primaryValue = pVal,
                     secondaryValue = sVal,
                     sets = exRes.sets,
@@ -388,7 +429,8 @@ fun TrainingsScreen(
                     legSide = exRes.legSide,
                     inventoryName = exRes.inventoryName,
                     inventoryUnit = exRes.inventoryUnit,
-                    inventoryValue = exRes.inventoryValue,
+                    // вес штанги = результат, в форме он не хранится отдельно
+                    inventoryValue = if (loaded) null else exRes.inventoryValue,
                     inSpikes = exRes.inSpikes
                 )
             }
@@ -417,7 +459,7 @@ fun TrainingsScreen(
             inventoryItems = inventoryItems,
             onAddInventory = { name, unit -> viewModel.addInventory(name, unit) },
             complexes = complexes,
-            onSaveComplex = { name, description, ids -> viewModel.saveComplex(null, name, description, ids) },
+            onSaveComplex = { id, name, description, ids -> viewModel.saveComplex(id, name, description, ids) },
             onDeleteExercise = { viewModel.deleteExerciseFromCatalog(it) }
         )
     }
@@ -799,10 +841,19 @@ fun CompactTrainingCalendarWidget(
     onDateSelected: (Long) -> Unit,
     trainingsList: List<TrainingWithExercises>,
     competitionsList: List<Competition> = emptyList(),
-    periods: List<TrainingPeriod> = emptyList()
+    periods: List<TrainingPeriod> = emptyList(),
+    /** Перенос записей дня: удерживайте день с тренировкой и перетащите его на другой. */
+    onMoveDay: ((fromDay: Long, toDay: Long) -> Unit)? = null
 ) {
     val cs = MaterialTheme.colorScheme
+    val haptics = LocalHapticFeedback.current
     val monthFormat = remember { SimpleDateFormat("LLLL yyyy", Locale("ru")) }
+
+    // перетаскивание дня: границы ячеек в координатах окна, откуда тянем и где сейчас палец
+    val cellBounds = remember { mutableStateMapOf<Long, GeoRect>() }
+    var dragFrom by remember { mutableStateOf<Long?>(null) }
+    var dragPos by remember { mutableStateOf(Offset.Zero) }
+    val dropTarget = dragFrom?.let { cellBounds.entries.firstOrNull { (_, r) -> r.contains(dragPos) }?.key }
     val monthTitle = remember(currentMonth.timeInMillis) {
         monthFormat.format(currentMonth.time).replaceFirstChar { it.uppercase() }
     }
@@ -934,17 +985,9 @@ fun CompactTrainingCalendarWidget(
                             val isPeriodStart = period != null && dayStart == period.second
                             val isPeriodEnd = period != null && dayStart == period.third
                             val isEdge = isPeriodStart || isPeriodEnd
-
-                            // Полоса периода — как выделение диапазона в календарях: сплошная лента через всю неделю,
-                            // скругляется только на настоящих днях начала и окончания. Границы — кольцо цветом периода,
-                            // а не заливка, чтобы их не путали с выбранным днём (он единственный закрашен).
-                            val capRadius = 50
-                            val bandShape = RoundedCornerShape(
-                                topStartPercent = if (isPeriodStart) capRadius else 0,
-                                bottomStartPercent = if (isPeriodStart) capRadius else 0,
-                                topEndPercent = if (isPeriodEnd) capRadius else 0,
-                                bottomEndPercent = if (isPeriodEnd) capRadius else 0
-                            )
+                            val canDrag = onMoveDay != null && (hasTraining || hasSkipped)
+                            val isDragSource = dragFrom == dayStart
+                            val isDropTarget = dropTarget == dayStart && dragFrom != dayStart
 
                             val dotOnSelected = Color.White
                             var circleModifier = Modifier
@@ -953,8 +996,8 @@ fun CompactTrainingCalendarWidget(
                                 .clip(CircleShape)
                                 .background(if (isSelected) cs.primary else Color.Transparent)
                             circleModifier = when {
+                                isDropTarget -> circleModifier.border(BorderStroke(2.5.dp, cs.tertiary), CircleShape)
                                 isSelected -> circleModifier
-                                isEdge && periodColor != null -> circleModifier.border(BorderStroke(2.dp, periodColor), CircleShape)
                                 isToday -> circleModifier.border(BorderStroke(1.5.dp, cs.primary), CircleShape)
                                 else -> circleModifier
                             }
@@ -963,21 +1006,71 @@ fun CompactTrainingCalendarWidget(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .aspectRatio(1f),
+                                    .aspectRatio(1f)
+                                    .onGloballyPositioned { cellBounds[dayStart] = it.boundsInRoot() }
+                                    .alpha(if (isDragSource) 0.4f else 1f)
+                                    .then(
+                                        if (!canDrag) Modifier else Modifier.pointerInput(dayStart) {
+                                            // долгое нажатие и перетаскивание переносит записи дня на другую дату
+                                            detectDragGesturesAfterLongPress(
+                                                onDragStart = { local ->
+                                                    dragFrom = dayStart
+                                                    dragPos = (cellBounds[dayStart]?.topLeft ?: Offset.Zero) + local
+                                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                },
+                                                onDrag = { change, delta ->
+                                                    change.consume()
+                                                    dragPos += delta
+                                                },
+                                                onDragEnd = {
+                                                    val from = dragFrom
+                                                    val to = cellBounds.entries.firstOrNull { (_, r) -> r.contains(dragPos) }?.key
+                                                    dragFrom = null
+                                                    if (from != null && to != null && to != from) onMoveDay?.invoke(from, to)
+                                                },
+                                                onDragCancel = { dragFrom = null }
+                                            )
+                                        }
+                                    ),
                                 contentAlignment = Alignment.Center
                             ) {
+                                // Период — обводка без заливки: сплошной контур через неделю,
+                                // скругляется на днях начала и окончания периода
                                 if (periodColor != null) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .fillMaxHeight(0.78f)
-                                            .padding(
-                                                start = if (isPeriodStart) 3.dp else 0.dp,
-                                                end = if (isPeriodEnd) 3.dp else 0.dp
-                                            )
-                                            .clip(bandShape)
-                                            .background(periodColor.copy(alpha = 0.18f))
-                                    )
+                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                        val stroke = 1.6.dp.toPx()
+                                        val bandH = size.height * 0.78f
+                                        val top = (size.height - bandH) / 2 + stroke / 2
+                                        val bottom = top + bandH - stroke
+                                        val r = (bottom - top) / 2
+                                        val inset = 3.dp.toPx() + stroke / 2
+                                        val left = if (isPeriodStart) inset else 0f
+                                        val right = if (isPeriodEnd) size.width - inset else size.width
+                                        val outline = Path()
+                                        when {
+                                            isPeriodStart && isPeriodEnd ->
+                                                outline.addRoundRect(RoundRect(left, top, right, bottom, CornerRadius(r)))
+                                            isPeriodStart -> {
+                                                outline.moveTo(right, top)
+                                                outline.lineTo(left + r, top)
+                                                outline.arcTo(GeoRect(left, top, left + 2 * r, bottom), 270f, -180f, false)
+                                                outline.lineTo(right, bottom)
+                                            }
+                                            isPeriodEnd -> {
+                                                outline.moveTo(left, top)
+                                                outline.lineTo(right - r, top)
+                                                outline.arcTo(GeoRect(right - 2 * r, top, right, bottom), 270f, 180f, false)
+                                                outline.lineTo(left, bottom)
+                                            }
+                                            else -> {
+                                                outline.moveTo(0f, top)
+                                                outline.lineTo(size.width, top)
+                                                outline.moveTo(0f, bottom)
+                                                outline.lineTo(size.width, bottom)
+                                            }
+                                        }
+                                        drawPath(outline, periodColor, style = Stroke(width = stroke))
+                                    }
                                 }
                                 // Внешние (вложенные) периоды — непрерывные линии снизу ячейки
                                 if (otherPeriods.isNotEmpty()) {
@@ -1055,6 +1148,14 @@ fun CompactTrainingCalendarWidget(
                 LegendItem(color = cs.primary, label = "Тренировки")
                 LegendItem(color = cs.error, label = "Пропуски")
                 LegendItem(color = cs.tertiary, label = "Старты")
+            }
+            if (onMoveDay != null) {
+                Text(
+                    text = if (dragFrom != null) "Отпустите на нужном дне" else "Удерживайте день с тренировкой и перетащите, чтобы перенести",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (dragFrom != null) cs.tertiary else cs.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
             }
             if (monthPeriods.isNotEmpty()) {
                 Row(
@@ -1262,9 +1363,16 @@ fun AddTrainingDialog(
     inventoryItems: List<InventoryItem> = emptyList(),
     onAddInventory: (name: String, unit: ResultUnit) -> Unit = { _, _ -> },
     complexes: List<ComplexUi> = emptyList(),
-    onSaveComplex: (name: String, description: String?, exerciseIds: List<Long>) -> Unit = { _, _, _ -> },
+    onSaveComplex: (id: Long?, name: String, description: String?, exerciseIds: List<Long>) -> Unit = { _, _, _, _ -> },
     onDeleteExercise: (Exercise) -> Unit = {}
 ) {
+    // дату можно поменять и у новой, и у сохранённой тренировки
+    var trainingDate by remember { mutableLongStateOf(initialDate) }
+    var pickingDate by remember { mutableStateOf(false) }
+    var editingComplex by remember { mutableStateOf<ComplexUi?>(null) }
+    // правка упражнения прямо в тренировке: индекс выполнения и параметры, ожидающие выбора «заменить / создать»
+    var variantEditIndex by remember { mutableStateOf<Int?>(null) }
+    var pendingVariant by remember { mutableStateOf<Pair<Int, ExerciseConfig>?>(null) }
     var showCreateComplexModal by remember { mutableStateOf(false) }
     var exerciseToDeleteFromCatalog by remember { mutableStateOf<Exercise?>(null) }
     var showCreateInventoryModal by remember { mutableStateOf(false) }
@@ -1282,7 +1390,7 @@ fun AddTrainingDialog(
     var showSaveConfirmDialog by remember { mutableStateOf(false) }
 
     val filteredExercises = remember(exercisesList, selectedCategoryFilter) {
-        val list = exercisesList.distinctBy { it.name.trim().lowercase() }
+        val list = exercisesList.distinctBy { it.variantKey() }
         when (selectedCategoryFilter) {
             1 -> list.filter { it.categoryName?.contains("бег", ignoreCase = true) == true }
             2 -> list.filter { it.categoryName?.contains("техник", ignoreCase = true) == true || it.categoryName?.contains("тройн", ignoreCase = true) == true }
@@ -1305,6 +1413,8 @@ fun AddTrainingDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                DateField(label = "Дата тренировки", millis = trainingDate, onClick = { pickingDate = true }, modifier = Modifier.fillMaxWidth())
+
                 // Фильтр справочника по виду: короткие подписи, обычный размер шрифта
                 Row(
                     modifier = Modifier
@@ -1330,32 +1440,15 @@ fun AddTrainingDialog(
                 if (filteredExercises.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         exercisesToShow.forEach { ex ->
-                            val isAdded = addedExerciseInputs.any { it.exerciseName.equals(ex.name, ignoreCase = true) }
-                            val inferredUnit = getInferredUnitForExercise(ex.name, ex.defaultUnit)
+                            val exKey = ex.variantKey()
+                            val isAdded = addedExerciseInputs.any { it.variantKey() == exKey }
 
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        if (isAdded) {
-                                            addedExerciseInputs = addedExerciseInputs.filter { !it.exerciseName.equals(ex.name, ignoreCase = true) }
-                                        } else {
-                                            val input = ExerciseResultInput(
-                                                exerciseId = ex.id,
-                                                exerciseName = ex.name,
-                                                result = 0.0,
-                                                unit = inferredUnit,
-                                                sets = null,
-                                                reps = 10,
-                                                isSingleLeg = ex.isSingleLeg,
-                                                legSide = ex.legSide,
-                                                inventoryName = ex.inventoryName,
-                                                inventoryUnit = ex.inventoryUnit,
-                                                inventoryValue = ex.inventoryValue,
-                                                inSpikes = ex.inSpikes
-                                            )
-                                            addedExerciseInputs = addedExerciseInputs + input
-                                        }
+                                        addedExerciseInputs = if (isAdded) addedExerciseInputs.filter { it.variantKey() != exKey }
+                                        else addedExerciseInputs + ex.toInput()
                                     },
                                 shape = RoundedCornerShape(8.dp),
                                 colors = CardDefaults.cardColors(
@@ -1370,24 +1463,13 @@ fun AddTrainingDialog(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column(modifier = Modifier.weight(1f).padding(vertical = 6.dp)) {
+                                        // снаряд, шиповки, нога — прямо в названии упражнения
                                         Text(
-                                            text = ex.name,
+                                            text = ex.title(),
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = if (isAdded) FontWeight.Bold else FontWeight.Medium,
                                             color = if (isAdded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                         )
-                                        val tags = buildList {
-                                            if (ex.isSingleLeg) add(RecordsEngine.legSuffix(true, ex.legSide).removePrefix(" · ").replaceFirstChar { it.uppercase() })
-                                            if (ex.inSpikes) add("В шиповках")
-                                            RecordsEngine.inventoryLabel(ex.inventoryName, ex.inventoryUnit, ex.inventoryValue)?.let { add(it) }
-                                        }
-                                        if (tags.isNotEmpty()) {
-                                            Text(
-                                                text = tags.joinToString(" · "),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
                                     }
                                     if (isAdded) {
                                         Icon(
@@ -1453,26 +1535,12 @@ fun AddTrainingDialog(
                             }
                         )
                         complexes.filter { it.exercises.isNotEmpty() }.forEach { c ->
-                            val allAdded = c.exercises.all { ex -> addedExerciseInputs.any { it.exerciseName.equals(ex.name, true) } }
+                            val allAdded = c.exercises.all { ex -> addedExerciseInputs.any { it.variantKey() == ex.variantKey() } }
                             AssistChip(
                                 onClick = {
                                     val toAdd = c.exercises
-                                        .filter { ex -> addedExerciseInputs.none { it.exerciseName.equals(ex.name, true) } }
-                                        .map { ex ->
-                                            ExerciseResultInput(
-                                                exerciseId = ex.id,
-                                                exerciseName = ex.name,
-                                                result = 0.0,
-                                                unit = getInferredUnitForExercise(ex.name, ex.defaultUnit),
-                                                reps = 10,
-                                                isSingleLeg = ex.isSingleLeg,
-                                                legSide = ex.legSide,
-                                                inventoryName = ex.inventoryName,
-                                                inventoryUnit = ex.inventoryUnit,
-                                                inventoryValue = ex.inventoryValue,
-                                                inSpikes = ex.inSpikes
-                                            )
-                                        }
+                                        .filter { ex -> addedExerciseInputs.none { it.variantKey() == ex.variantKey() } }
+                                        .map { it.toInput() }
                                     addedExerciseInputs = addedExerciseInputs + toAdd
                                 },
                                 label = { Text("${c.complex.name} · ${c.exercises.size}") },
@@ -1481,6 +1549,16 @@ fun AddTrainingDialog(
                                         imageVector = if (allAdded) Icons.Default.Check else Icons.Default.Layers,
                                         contentDescription = null,
                                         modifier = Modifier.size(AssistChipDefaults.IconSize)
+                                    )
+                                },
+                                // карандаш на чипе — изменить состав и порядок комплекса
+                                trailingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Изменить комплекс",
+                                        modifier = Modifier
+                                            .size(AssistChipDefaults.IconSize)
+                                            .clickable { editingComplex = c }
                                     )
                                 }
                             )
@@ -1517,7 +1595,8 @@ fun AddTrainingDialog(
                             },
                             onRemove = {
                                 itemToDeleteIndex = index
-                            }
+                            },
+                            onEditExercise = { variantEditIndex = index }
                         )
                     }
                 }
@@ -1538,7 +1617,7 @@ fun AddTrainingDialog(
                         if (addedExerciseInputs.isNotEmpty()) {
                             showSaveConfirmDialog = true
                         } else {
-                            onConfirm(initialDate, addedExerciseInputs)
+                            onConfirm(trainingDate, addedExerciseInputs)
                         }
                     }
                 ) {
@@ -1595,7 +1674,7 @@ fun AddTrainingDialog(
                 Button(
                     onClick = {
                         showSaveConfirmDialog = false
-                        onConfirm(initialDate, addedExerciseInputs)
+                        onConfirm(trainingDate, addedExerciseInputs)
                     }
                 ) {
                     Text("Да, сохранить")
@@ -1609,17 +1688,106 @@ fun AddTrainingDialog(
         )
     }
 
-    // Создание комплекса прямо из окна тренировки; после сохранения он появляется в списке «Комплексы»
-    if (showCreateComplexModal) {
+    // Создание и правка комплекса прямо из окна тренировки
+    if (showCreateComplexModal || editingComplex != null) {
+        val target = editingComplex
         ComplexEditorDialog(
-            initial = null,
-            allExercises = exercisesList.distinctBy { it.name.trim().lowercase() },
-            onDismiss = { showCreateComplexModal = false },
+            initial = target,
+            allExercises = exercisesList.distinctBy { it.variantKey() },
+            onDismiss = { showCreateComplexModal = false; editingComplex = null },
             onSave = { name, description, ids ->
-                onSaveComplex(name, description, ids)
+                onSaveComplex(target?.complex?.id, name, description, ids)
                 showCreateComplexModal = false
+                editingComplex = null
             }
         )
+    }
+
+    if (pickingDate) {
+        AppDatePickerDialog(
+            initialMillis = trainingDate,
+            onDismiss = { pickingDate = false },
+            onConfirm = {
+                trainingDate = it
+                pickingDate = false
+            }
+        )
+    }
+
+    // Правка упражнения прямо в тренировке: конструктор с параметрами этого выполнения
+    variantEditIndex?.let { index ->
+        val input = addedExerciseInputs.getOrNull(index)
+        if (input == null) {
+            variantEditIndex = null
+        } else {
+            val catalogEx = exercisesList.firstOrNull { it.id == input.exerciseId }
+                ?: exercisesList.firstOrNull { it.variantKey() == input.variantKey() }
+            ExerciseEditorDialog(
+                initial = null,
+                initialConfig = input.toConfig(catalogEx?.categoryName ?: "Силовое упражнение"),
+                inventoryItems = inventoryItems,
+                onCreateInventory = { showCreateInventoryModal = true },
+                onDismiss = { variantEditIndex = null },
+                onConfirm = { cfg ->
+                    variantEditIndex = null
+                    // ничего, что отличает упражнение, не поменялось — просто обновить параметры
+                    if (cfg.variantKey() == input.variantKey() && cfg.name.trim() == input.exerciseName.trim()) {
+                        addedExerciseInputs = addedExerciseInputs.mapIndexed { i, item -> if (i == index) item.withConfig(cfg) else item }
+                    } else {
+                        pendingVariant = index to cfg
+                    }
+                }
+            )
+        }
+    }
+
+    // Изменённое упражнение: заменить старое в справочнике или сохранить как новое
+    pendingVariant?.let { (index, cfg) ->
+        val input = addedExerciseInputs.getOrNull(index)
+        if (input == null) {
+            pendingVariant = null
+        } else {
+            val oldKey = input.variantKey()
+            val catalogEx = exercisesList.firstOrNull { it.id == input.exerciseId }
+                ?: exercisesList.firstOrNull { it.variantKey() == oldKey }
+            val newExists = exercisesList.any { it.variantKey() == cfg.variantKey() }
+            AlertDialog(
+                onDismissRequest = { pendingVariant = null },
+                title = { Text("Упражнение изменилось") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Было: ${input.title()}", style = MaterialTheme.typography.bodyMedium)
+                        Text("Стало: ${cfg.title()}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Заменить — старое упражнение в справочнике получит новые параметры. " +
+                                "Создать новое — старое останется, в эту тренировку пойдёт новое. " +
+                                "Прошлые тренировки и их рекорды не меняются в обоих случаях.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        if (!newExists) onSaveExercise(cfg)
+                        addedExerciseInputs = addedExerciseInputs.mapIndexed { i, item ->
+                            if (i == index) item.withConfig(cfg, exerciseId = 0) else item
+                        }
+                        pendingVariant = null
+                    }) { Text(if (newExists) "Взять существующее" else "Создать новое") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        if (catalogEx != null) onUpdateExercise(catalogEx, cfg) else onSaveExercise(cfg)
+                        // в этой тренировке меняются все выполнения прежнего варианта
+                        addedExerciseInputs = addedExerciseInputs.map { item ->
+                            if (item.variantKey() == oldKey) item.withConfig(cfg) else item
+                        }
+                        pendingVariant = null
+                    }) { Text("Заменить") }
+                }
+            )
+        }
     }
 
     if (showCreateInventoryModal) {
@@ -1641,21 +1809,7 @@ fun AddTrainingDialog(
             onDismiss = { showCreateExerciseModal = false },
             onConfirm = { cfg ->
                 onSaveExercise(cfg)
-                val input = ExerciseResultInput(
-                    exerciseId = System.currentTimeMillis(),
-                    exerciseName = cfg.name,
-                    result = 0.0,
-                    unit = getInferredUnitForExercise(cfg.name),
-                    sets = null,
-                    reps = 10,
-                    isSingleLeg = cfg.isSingleLeg,
-                    legSide = cfg.legSide,
-                    inventoryName = cfg.inventoryName,
-                    inventoryUnit = cfg.inventoryUnit,
-                    inventoryValue = cfg.inventoryValue,
-                    inSpikes = cfg.inSpikes
-                )
-                addedExerciseInputs = addedExerciseInputs + input
+                addedExerciseInputs = addedExerciseInputs + cfg.toInput()
                 showCreateExerciseModal = false
             }
         )
@@ -1671,19 +1825,10 @@ fun AddTrainingDialog(
             onDismiss = { editingExercise = null },
             onConfirm = { cfg ->
                 onUpdateExercise(target, cfg)
-                // Уже добавленные в эту тренировку упражнения получают новые параметры
+                // Уже добавленные в эту тренировку выполнения этого упражнения получают новые параметры
+                val targetKey = target.variantKey()
                 addedExerciseInputs = addedExerciseInputs.map { item ->
-                    if (item.exerciseName.equals(target.name, ignoreCase = true)) {
-                        item.copy(
-                            exerciseName = cfg.name,
-                            isSingleLeg = cfg.isSingleLeg,
-                            legSide = cfg.legSide,
-                            inventoryName = cfg.inventoryName,
-                            inventoryUnit = cfg.inventoryUnit,
-                            inventoryValue = cfg.inventoryValue,
-                            inSpikes = cfg.inSpikes
-                        )
-                    } else item
+                    if (item.variantKey() == targetKey) item.withConfig(cfg) else item
                 }
                 editingExercise = null
             }
@@ -1697,7 +1842,9 @@ fun AddTrainingDialog(
 fun ExerciseResultEditorCard(
     input: ExerciseResultInput,
     onUpdate: (ExerciseResultInput) -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    /** Открыть конструктор: поменять снаряд, шиповки, ногу или название этого упражнения. */
+    onEditExercise: () -> Unit = {}
 ) {
     var showPerSetDialog by remember { mutableStateOf(false) }
 
@@ -1732,36 +1879,26 @@ fun ExerciseResultEditorCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                // Полное название со снарядом, шиповками и ногой; нажатие открывает конструктор
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onEditExercise)
+                        .padding(vertical = 2.dp)
+                ) {
                     Text(
-                        text = input.exerciseName,
+                        text = input.title(),
                         style = MaterialTheme.typography.titleSmall,
                         color = cs.onSurface
                     )
-                    val inventoryText = RecordsEngine.inventoryLabel(input.inventoryName, input.inventoryUnit, input.inventoryValue)
-                    if (input.isSingleLeg || inventoryText != null) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.padding(top = 4.dp)
-                        ) {
-                            if (input.isSingleLeg) {
-                                StatusPill(
-                                    text = RecordsEngine.legSuffix(true, input.legSide).removePrefix(" · ").replaceFirstChar { it.uppercase() },
-                                    contentColor = cs.onSecondaryContainer,
-                                    containerColor = cs.secondaryContainer
-                                )
-                            }
-                            if (inventoryText != null) {
-                                StatusPill(
-                                    text = inventoryText,
-                                    contentColor = cs.onSurfaceVariant,
-                                    containerColor = cs.surfaceContainerHigh,
-                                    icon = Icons.Default.FitnessCenter
-                                )
-                            }
-                        }
-                    }
+                    Text(
+                        text = if (RecordsEngine.isLoadedImplement(input.inventoryUnit, input.unit))
+                            "Вес снаряда = результат попытки · нажмите, чтобы изменить упражнение"
+                        else "Нажмите, чтобы изменить снаряд, шиповки или ногу",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = cs.primary
+                    )
                 }
                 IconButton(onClick = onRemove) {
                     Icon(
@@ -1799,16 +1936,6 @@ fun ExerciseResultEditorCard(
                 )
             }
 
-            // Шиповки отмечаются для каждого выполнения: рекорды в шиповках ведутся отдельно
-            FilterChip(
-                selected = input.inSpikes,
-                onClick = { onUpdate(input.copy(inSpikes = !input.inSpikes)) },
-                label = { Text("В шиповках") },
-                leadingIcon = if (input.inSpikes) {
-                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
-                } else null
-            )
-
             val totalRepsCount = repsStr.toIntOrNull() ?: 10
             OutlinedButton(
                 onClick = { showPerSetDialog = true },
@@ -1827,8 +1954,7 @@ fun ExerciseResultEditorCard(
     if (showPerSetDialog) {
         val totalRepsCount = repsStr.toIntOrNull() ?: 10
         PerSetResultsModalDialog(
-            exerciseName = input.exerciseName + RecordsEngine.legSuffix(input.isSingleLeg, input.legSide) +
-                RecordsEngine.spikesSuffix(input.inSpikes),
+            exerciseName = input.title(),
             repsCount = totalRepsCount,
             unit = input.unit,
             initialResults = input.setResults,
@@ -2045,7 +2171,9 @@ data class ExerciseConfig(
     val inventoryName: String?,
     val inventoryUnit: ResultUnit?,
     val inventoryValue: Double?,
-    val inSpikes: Boolean = false
+    val inSpikes: Boolean = false,
+    /** В чём измеряется результат: от неё зависит, является ли снаряд «нагружаемым» (штанга при результате в кг). */
+    val unit: ResultUnit = ResultUnit.KG
 )
 
 // Dialog: Mark Skipped Day

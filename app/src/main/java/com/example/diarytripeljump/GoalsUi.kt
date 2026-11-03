@@ -33,11 +33,14 @@ data class GoalCandidate(
 
 /** Кандидат для упражнения каталога: ключ тот же, что у рекорда, поэтому прогресс считается сам. */
 fun goalCandidateFor(ex: Exercise): GoalCandidate {
-    val unit = getInferredUnitForExercise(ex.name, ex.defaultUnit)
+    val unit = ex.defaultUnit
     return GoalCandidate(
-        key = RecordsEngine.exerciseRecordKey(ex.name, ex.isSingleLeg, ex.legSide, unit, ex.inSpikes),
+        key = RecordsEngine.exerciseRecordKey(
+            ex.name, ex.isSingleLeg, ex.legSide, unit, ex.inSpikes,
+            RecordsEngine.recordInventory(ex.inventoryName, ex.inventoryUnit, ex.inventoryValue, unit)
+        ),
         name = ex.name,
-        displayName = ex.name + RecordsEngine.legSuffix(ex.isSingleLeg, ex.legSide) + RecordsEngine.spikesSuffix(ex.inSpikes),
+        displayName = ex.title(),
         unit = unit,
         lowerIsBetter = RecordsEngine.isLowerBetter(ex.name, unit)
     )

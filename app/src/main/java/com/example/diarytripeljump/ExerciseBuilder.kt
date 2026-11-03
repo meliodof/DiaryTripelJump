@@ -104,22 +104,36 @@ fun ExerciseEditorDialog(
     inventoryItems: List<InventoryItem>,
     onCreateInventory: () -> Unit,
     onDismiss: () -> Unit,
-    onConfirm: (ExerciseConfig) -> Unit
+    onConfirm: (ExerciseConfig) -> Unit,
+    /** Параметры выполнения из тренировки — открыть конструктор для правки упражнения прямо в тренировке. */
+    initialConfig: ExerciseConfig? = null
 ) {
     val cs = MaterialTheme.colorScheme
     val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
+    val start = initialConfig ?: initial?.let {
+        ExerciseConfig(
+            name = it.name, category = it.categoryName ?: "Силовое упражнение", isSingleLeg = it.isSingleLeg,
+            legSide = it.legSide, inventoryName = it.inventoryName, inventoryUnit = it.inventoryUnit,
+            inventoryValue = it.inventoryValue, inSpikes = it.inSpikes, unit = it.defaultUnit
+        )
+    }
 
-    var name by remember { mutableStateOf(initial?.name ?: "") }
-    var category by remember { mutableStateOf(initial?.categoryName ?: "Силовое упражнение") }
-    var inSpikes by remember { mutableStateOf(initial?.inSpikes ?: false) }
-    var singleLeg by remember { mutableStateOf(initial?.isSingleLeg ?: false) }
-    var legSide by remember { mutableStateOf(initial?.legSide) }
-    var hasInventory by remember { mutableStateOf(!initial?.inventoryName.isNullOrBlank()) }
-    var inventoryName by remember { mutableStateOf(initial?.inventoryName) }
-    var inventoryUnit by remember { mutableStateOf(initial?.inventoryUnit) }
-    var inventoryValueText by remember { mutableStateOf(initial?.inventoryValue?.let { formatNumber(it).replace(',', '.') } ?: "") }
+    var name by remember { mutableStateOf(start?.name ?: "") }
+    var category by remember { mutableStateOf(start?.category ?: "Силовое упражнение") }
+    var unit by remember { mutableStateOf(start?.unit ?: ResultUnit.KG) }
+    // пока единицу не выбрали вручную, она подсказывается по названию (бег — секунды, присед — кг…)
+    var unitTouched by remember { mutableStateOf(start != null) }
+    var inSpikes by remember { mutableStateOf(start?.inSpikes ?: false) }
+    var singleLeg by remember { mutableStateOf(start?.isSingleLeg ?: false) }
+    var legSide by remember { mutableStateOf(start?.legSide) }
+    var hasInventory by remember { mutableStateOf(!start?.inventoryName.isNullOrBlank()) }
+    var inventoryName by remember { mutableStateOf(start?.inventoryName) }
+    var inventoryUnit by remember { mutableStateOf(start?.inventoryUnit) }
+    var inventoryValueText by remember { mutableStateOf(start?.inventoryValue?.let { formatNumber(it).replace(',', '.') } ?: "") }
     var showErrors by remember { mutableStateOf(false) }
+    // штанга при результате в кг: вес снаряда и есть результат — отдельно не вводится
+    val loadedImplement = hasInventory && RecordsEngine.isLoadedImplement(inventoryUnit, unit)
 
     fun isAdded(b: BuilderBlock) = when (b) {
         BuilderBlock.SPIKES -> inSpikes
@@ -159,11 +173,11 @@ fun ExerciseEditorDialog(
 
     val inventoryMissing = hasInventory && inventoryName.isNullOrBlank()
     val canSave = name.isNotBlank() && !inventoryMissing
-    val inventoryText = if (hasInventory) RecordsEngine.inventoryLabel(inventoryName, inventoryUnit, inventoryValueText.toDoubleOrNull()) else null
-    val preview = name.trim().ifBlank { "Название" } +
-        RecordsEngine.legSuffix(singleLeg, legSide) +
-        RecordsEngine.spikesSuffix(inSpikes) +
-        (inventoryText?.let { " · $it" } ?: "")
+    val inventoryText = if (hasInventory) RecordsEngine.variantInventory(inventoryName, inventoryUnit, inventoryValueText.toDoubleOrNull(), unit) else null
+    val preview = RecordsEngine.exerciseTitle(
+        name.ifBlank { "Название" }, singleLeg, legSide, inSpikes,
+        if (hasInventory) inventoryName else null, inventoryUnit, inventoryValueText.toDoubleOrNull(), unit
+    )
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(modifier = Modifier.fillMaxSize(), color = cs.background) {
@@ -182,7 +196,7 @@ fun ExerciseEditorDialog(
                     ) {
                         IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Закрыть") }
                         Text(
-                            text = if (initial == null) "Новое упражнение" else "Упражнение",
+                            text = if (start == null) "Новое упражнение" else "Упражнение",
                             style = MaterialTheme.typography.titleLarge,
                             modifier = Modifier.weight(1f)
                         )
@@ -199,8 +213,9 @@ fun ExerciseEditorDialog(
                                             legSide = if (singleLeg) legSide else null,
                                             inventoryName = if (hasInventory) inventoryName else null,
                                             inventoryUnit = if (hasInventory) inventoryUnit else null,
-                                            inventoryValue = if (hasInventory) inventoryValueText.toDoubleOrNull() else null,
-                                            inSpikes = inSpikes
+                                            inventoryValue = if (hasInventory && !loadedImplement) inventoryValueText.toDoubleOrNull() else null,
+                                            inSpikes = inSpikes,
+                                            unit = unit
                                         )
                                     )
                                 }
@@ -218,7 +233,10 @@ fun ExerciseEditorDialog(
                     ) {
                         OutlinedTextField(
                             value = name,
-                            onValueChange = { name = it },
+                            onValueChange = {
+                                name = it
+                                if (!unitTouched) unit = getInferredUnitForExercise(it, unit)
+                            },
                             label = { Text("Название") },
                             placeholder = { Text("Например, прыжки через барьеры") },
                             isError = showErrors && name.isBlank(),
@@ -361,7 +379,14 @@ fun ExerciseEditorDialog(
                                 if (showErrors && inventoryMissing) {
                                     Text("Выберите инвентарь или уберите блок", style = MaterialTheme.typography.bodySmall, color = cs.error)
                                 }
-                                if (!inventoryName.isNullOrBlank()) {
+                                if (loadedImplement) {
+                                    // штанга, гиря и т.п. при результате в кг: рекорд — это вес снаряда
+                                    Text(
+                                        text = "Вес снаряда — это и есть результат: вводится в попытках и всегда равен рекорду.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = cs.onSurfaceVariant
+                                    )
+                                } else if (!inventoryName.isNullOrBlank()) {
                                     OutlinedTextField(
                                         value = inventoryValueText,
                                         onValueChange = { v -> inventoryValueText = v.replace(',', '.').filter { it.isDigit() || it == '.' } },
@@ -386,8 +411,32 @@ fun ExerciseEditorDialog(
                                 EXERCISE_CATEGORIES.forEach { cat ->
                                     FilterChip(
                                         selected = category == cat,
-                                        onClick = { category = cat },
+                                        onClick = {
+                                            category = cat
+                                            // силовые измеряются весом — подставляем кг, если единицу ещё не выбирали
+                                            if (!unitTouched && cat == "Силовое упражнение") unit = ResultUnit.KG
+                                        },
                                         label = { Text(cat.removeSuffix(" упражнение").removePrefix("Упражнение ").replaceFirstChar { it.uppercase() }) }
+                                    )
+                                }
+                            }
+                        }
+
+                        // --- В чём измеряется результат ---
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            BuilderLabel("Результат измеряется в")
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                listOf(
+                                    ResultUnit.KG to "кг", ResultUnit.M to "метрах", ResultUnit.CM to "см",
+                                    ResultUnit.SECONDS to "секундах", ResultUnit.REPS to "повторениях"
+                                ).forEach { (u, label) ->
+                                    FilterChip(
+                                        selected = unit == u,
+                                        onClick = { unit = u; unitTouched = true },
+                                        label = { Text(label) }
                                     )
                                 }
                             }
