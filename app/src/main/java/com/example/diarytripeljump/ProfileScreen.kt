@@ -31,11 +31,18 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import com.example.diarytripeljump.data.AgeGroups
 import com.example.diarytripeljump.data.AthleteProfile
+import com.example.diarytripeljump.data.AutoRank
+import com.example.diarytripeljump.data.RunUpHistoryEntry
+import com.example.diarytripeljump.data.RunUpLength
+import com.example.diarytripeljump.data.formatNumber
 import com.example.diarytripeljump.data.DiaryBackup
 import java.util.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.ui.text.style.TextOverflow
 import com.example.diarytripeljump.data.ResultUnit
+import com.example.diarytripeljump.data.SportRanks
+import com.example.diarytripeljump.data.formatRecordValue
 import com.example.diarytripeljump.ui.components.*
 import com.example.diarytripeljump.ui.theme.extraColors
 import kotlinx.coroutines.Dispatchers
@@ -125,6 +132,11 @@ fun ProfileScreen(
     val ageText = calculateAgeText(birthDateMillis)
     val birthDateFormattedText = formatBirthDateFull(birthDateMillis)
     val ageGroup = remember(birthDateMillis, athleteProfile?.gender) { AgeGroups.of(birthDateMillis, athleteProfile?.gender) }
+    val autoRank by viewModel.autoRank.collectAsState()
+    val runUpHistory by viewModel.runUpHistory.collectAsState()
+    var showRanksDialog by remember { mutableStateOf(false) }
+    var showRunUpDialog by remember { mutableStateOf(false) }
+    val sportRank = autoRank?.rank
 
     val fullName = remember(athleteProfile) {
         val f = athleteProfile?.firstName ?: ""
@@ -268,6 +280,14 @@ fun ProfileScreen(
                             icon = Icons.Default.Groups
                         )
                     }
+                    if (sportRank != null) {
+                        StatusPill(
+                            text = sportRank.shortName,
+                            contentColor = MaterialTheme.extraColors.onGoldContainer,
+                            containerColor = MaterialTheme.extraColors.goldContainer,
+                            icon = Icons.Default.MilitaryTech
+                        )
+                    }
                 }
             }
 
@@ -317,6 +337,34 @@ fun ProfileScreen(
                         }
                     }
                 }
+            }
+
+            AppCard {
+                ProfileOptionRow(
+                    icon = Icons.Default.MilitaryTech,
+                    title = sportRank?.title ?: "Разряд пока не выполнен",
+                    subtitle = rankSubtitle(autoRank, athleteProfile?.gender),
+                    onClick = { showRanksDialog = true }
+                )
+                HorizontalDivider(modifier = Modifier.padding(start = 70.dp), color = cs.outlineVariant)
+                ProfileOptionRow(
+                    icon = Icons.AutoMirrored.Filled.DirectionsRun,
+                    title = when (athleteProfile?.leadingLeg) {
+                        "LEFT" -> "Ведущая нога: левая"
+                        "RIGHT" -> "Ведущая нога: правая"
+                        else -> "Ведущая нога не указана"
+                    },
+                    subtitle = "Нога отталкивания в тройном прыжке",
+                    onClick = { showEditDialog = true }
+                )
+                HorizontalDivider(modifier = Modifier.padding(start = 70.dp), color = cs.outlineVariant)
+                val currentRunUp = runUpHistory.firstOrNull()
+                ProfileOptionRow(
+                    icon = Icons.Default.Straighten,
+                    title = currentRunUp?.let { "Разбег: " + RunUpLength.label(it.lengthCm, it.lengthFeet) } ?: "Размер разбега не указан",
+                    subtitle = if (currentRunUp == null) "Нажмите, чтобы указать" else "Меняется, когда отнёс или поднёс отметку",
+                    onClick = { showRunUpDialog = true }
+                )
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -449,13 +497,29 @@ fun ProfileScreen(
     }
 
 
+    if (showRanksDialog) {
+        RanksDialog(autoRank = autoRank, gender = athleteProfile?.gender, onDismiss = { showRanksDialog = false })
+    }
+
+    if (showRunUpDialog) {
+        RunUpLengthDialog(
+            history = runUpHistory,
+            onDismiss = { showRunUpDialog = false },
+            onSave = { cm, feet ->
+                viewModel.saveRunUpLength(cm, feet)
+                showRunUpDialog = false
+            }
+        )
+    }
+
     if (showEditDialog) {
         EditProfileDialog(
             currentProfile = athleteProfile,
             onDismiss = { showEditDialog = false },
-            onConfirm = { firstName, lastName, nickname, greetingPref, birthDateMillis, height, weight, customPb, gender ->
+            onConfirm = { firstName, lastName, nickname, greetingPref, birthDateMillis, height, weight, customPb, gender, leadingLeg ->
                 viewModel.updateAthleteProfile(
                     gender = gender,
+                    leadingLeg = leadingLeg,
                     firstName = firstName,
                     lastName = lastName,
                     nickname = nickname,
@@ -471,6 +535,150 @@ fun ProfileScreen(
         )
     }
 }
+
+private fun shortDate(millis: Long): String = java.text.SimpleDateFormat("d MMM yyyy", Locale("ru")).format(Date(millis))
+
+/** Подпись к разряду: откуда он взялся и сколько осталось до следующего. */
+private fun rankSubtitle(auto: AutoRank?, gender: String?): String {
+    val best = auto?.bestResult
+    return when {
+        gender == null -> "Укажите пол в профиле, чтобы сверять результат с нормами"
+        best == null -> "Определится по результату на соревнованиях"
+        else -> {
+            val next = SportRanks.next(auto?.rank)
+            val limit = next?.let { SportRanks.norm(it, gender) }
+            "Лучший результат ${formatRecordValue(best, ResultUnit.M)}" +
+                if (next != null && limit != null && limit > best) {
+                    ", до нормы ${next.shortName}: ${formatRecordValue(limit - best, ResultUnit.M)}"
+                } else ""
+        }
+    }
+}
+
+/** Все разряды с нормами в тройном прыжке; выполненный выделен. */
+@Composable
+private fun RanksDialog(autoRank: AutoRank?, gender: String?, onDismiss: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Разряды в тройном прыжке") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                SportRanks.all.forEach { rank ->
+                    val current = rank == autoRank?.rank
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (current) cs.primaryContainer else cs.surfaceContainerLow
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(text = rank.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                            Text(
+                                text = SportRanks.norm(rank, gender)?.let { formatRecordValue(it, ResultUnit.M) }
+                                    ?: "М ${formatRecordValue(rank.maleNorm, ResultUnit.M)}, Ж ${formatRecordValue(rank.femaleNorm, ResultUnit.M)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = "Разряд определяется автоматически по лучшему результату на соревнованиях и рекорду из профиля. " +
+                        "Норма засчитывается при попутном ветре не более 2 м/с на соревнованиях нужного статуса, " +
+                        "а присваивает разряд уполномоченная организация. ЕВСК, приказ Минспорта России от 10.03.2026 № 201.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } }
+    )
+}
+
+/** Размер разбега: ручной замер и история изменений. */
+@Composable
+private fun RunUpLengthDialog(
+    history: List<RunUpHistoryEntry>,
+    onDismiss: () -> Unit,
+    onSave: (lengthCm: Double?, lengthFeet: Double?) -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    val current = history.firstOrNull()
+    fun plain(v: Double?) = v?.let { formatNumber(it).replace(',', '.') } ?: ""
+    var cmText by remember { mutableStateOf(plain(current?.lengthCm)) }
+    var feetText by remember { mutableStateOf(plain(current?.lengthFeet)) }
+    fun numeric(v: String) = v.replace(',', '.').filter { it.isDigit() || it == '.' }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Размер разбега") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = cmText,
+                        onValueChange = { cmText = numeric(it) },
+                        label = { Text("Сантиметры") },
+                        suffix = { Text("см") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = feetText,
+                        onValueChange = { feetText = numeric(it) },
+                        label = { Text("Стопы") },
+                        suffix = { Text("ст.") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Text(
+                    text = "Можно указать одно или оба значения. Сантиметры меняются на сантиметры переноса, стопы — на стопы.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant
+                )
+                if (history.isNotEmpty()) {
+                    Text("История", style = MaterialTheme.typography.titleSmall, color = cs.onSurface)
+                    history.forEach { entry ->
+                        Column {
+                            Text(
+                                text = RunUpLength.label(entry.lengthCm, entry.lengthFeet),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = cs.onSurface
+                            )
+                            val cmDelta = entry.deltaCm?.takeIf { it != 0.0 }?.let { signedAmount(it, "см") }
+                            val feetDelta = entry.deltaFeet?.takeIf { it != 0.0 }?.let { signedAmount(it, "ст.") }
+                            Text(
+                                text = listOfNotNull(shortDate(entry.date), entry.source, cmDelta, feetDelta).joinToString(", "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = cs.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSave(cmText.toDoubleOrNull(), feetText.toDoubleOrNull()) }) { Text("Сохранить замер") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } }
+    )
+}
+
+private fun signedAmount(value: Double, unit: String): String =
+    (if (value > 0) "+" else "−") + formatNumber(Math.abs(value)) + " " + unit
 
 /** Перезапуск процесса: восстановленная база подключается при следующем старте приложения. */
 private fun restartApp(context: Context) {
@@ -494,7 +702,8 @@ fun EditProfileDialog(
         height: Double?,
         weight: Double?,
         customPbMeters: Double?,
-        gender: String?
+        gender: String?,
+        leadingLeg: String?
     ) -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
@@ -508,6 +717,7 @@ fun EditProfileDialog(
     var pbText by remember { mutableStateOf(currentProfile?.customPbMeters?.toString() ?: "") }
     var birthMillis by remember { mutableStateOf(currentProfile?.birthDate) }
     var showDatePicker by remember { mutableStateOf(false) }
+    var leadingLeg by remember { mutableStateOf(currentProfile?.leadingLeg) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -612,6 +822,21 @@ fun EditProfileDialog(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                ProfileFormLabel("Ведущая нога")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = leadingLeg == "LEFT",
+                        onClick = { leadingLeg = if (leadingLeg == "LEFT") null else "LEFT" },
+                        label = { Text("Левая") }
+                    )
+                    FilterChip(
+                        selected = leadingLeg == "RIGHT",
+                        onClick = { leadingLeg = if (leadingLeg == "RIGHT") null else "RIGHT" },
+                        label = { Text("Правая") }
+                    )
+                }
+
             }
         },
         confirmButton = {
@@ -625,7 +850,8 @@ fun EditProfileDialog(
                     heightText.toDoubleOrNull(),
                     weightText.toDoubleOrNull(),
                     pbText.toDoubleOrNull(),
-                    gender
+                    gender,
+                    leadingLeg
                 )
             }) { Text("Сохранить") }
         },

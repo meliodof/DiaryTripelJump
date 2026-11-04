@@ -39,7 +39,11 @@ data class RecordSummary(
     val autoBest: Double = best,
     val isManuallyEdited: Boolean = false,
     /** Рекорд в шиповках ведётся отдельно от результата в обычной обуви. */
-    val inSpikes: Boolean = false
+    val inSpikes: Boolean = false,
+    /** Снаряд отдельными полями — для формы редактирования. */
+    val inventoryName: String? = null,
+    val inventoryUnit: ResultUnit? = null,
+    val inventoryValue: Double? = null
 )
 
 /** Событие «рекорд обновлён» для ленты на главном экране. */
@@ -74,7 +78,10 @@ object RecordsEngine {
         val level: String?,
         val category: String,
         val isCompetition: Boolean,
-        val notes: String? = null
+        val notes: String? = null,
+        val invName: String? = null,
+        val invUnit: ResultUnit? = null,
+        val invValue: Double? = null
     )
 
     /** Для бега на время лучший результат — меньший. Для остальных единиц — больший. */
@@ -129,14 +136,16 @@ object RecordsEngine {
     fun recordInventory(invName: String?, invUnit: ResultUnit?, invValue: Double?, resultUnit: ResultUnit): String? =
         if (isLoadedImplement(invUnit, resultUnit)) null else variantInventory(invName, invUnit, invValue, resultUnit)
 
-    /** Полное название упражнения со всеми свойствами: «Бросок ядра назад · ядро 7,26 кг · в шиповках». */
+    /** Полное название со всеми свойствами: «Бросок ядра назад ядро 7,26 кг в шиповках»; на экране свойства выделяются цветом. */
     fun exerciseTitle(
         name: String, isSingleLeg: Boolean, legSide: String?, inSpikes: Boolean,
         invName: String?, invUnit: ResultUnit?, invValue: Double?, resultUnit: ResultUnit
     ): String =
-        name.trim() + legSuffix(isSingleLeg, legSide) +
-            (variantInventory(invName, invUnit, invValue, resultUnit)?.let { " · " + it.replaceFirstChar { c -> c.lowercase() } } ?: "") +
-            spikesSuffix(inSpikes)
+        titleOf(name.trim(), isSingleLeg, legSide, variantInventory(invName, invUnit, invValue, resultUnit), inSpikes)
+
+    private fun titleOf(name: String, isSingleLeg: Boolean, legSide: String?, inventory: String?, inSpikes: Boolean): String =
+        name + legSuffix(isSingleLeg, legSide) +
+            (inventory?.let { " " + it.replaceFirstChar { c -> c.lowercase() } } ?: "") + spikesSuffix(inSpikes)
 
     /** Идентичность упражнения в справочнике: одно название с разными свойствами — разные упражнения. */
     fun variantKey(
@@ -154,13 +163,13 @@ object RecordsEngine {
         "tj|${name.trim().lowercase()}|$isAnti|$isCompetition|${unit.name}|${sideCode(isSingleLeg, legSide)}|${inventory?.lowercase() ?: ""}" +
             spikesCode(inSpikes)
 
-    fun spikesSuffix(inSpikes: Boolean): String = if (inSpikes) " · в шиповках" else ""
+    fun spikesSuffix(inSpikes: Boolean): String = if (inSpikes) " в шиповках" else ""
 
     fun legSuffix(isSingleLeg: Boolean, legSide: String?): String = when {
         !isSingleLeg -> ""
-        legSide == "LEFT" -> " · левая нога"
-        legSide == "RIGHT" -> " · правая нога"
-        else -> " · одна нога"
+        legSide == "LEFT" -> " левая нога"
+        legSide == "RIGHT" -> " правая нога"
+        else -> " одна нога"
     }
 
     fun inventoryLabel(name: String?, unit: ResultUnit?, value: Double?): String? {
@@ -220,7 +229,8 @@ object RecordsEngine {
             g.samples.add(
                 Sample(
                     date = res.date, value = value, tjId = null, isIndoor = false, weather = null,
-                    inventory = inv, level = null, category = inferCategory(name), isCompetition = false
+                    inventory = inv, level = null, category = inferCategory(name), isCompetition = false,
+                    invName = res.inventoryName, invUnit = res.inventoryUnit, invValue = res.inventoryValue
                 )
             )
         }
@@ -242,7 +252,8 @@ object RecordsEngine {
                 Sample(
                     date = r.date, value = r.result, tjId = r.id, isIndoor = r.isIndoor,
                     weather = r.weatherConditions, inventory = inv, level = r.recordLevel,
-                    category = r.exerciseCategory, isCompetition = r.isCompetition, notes = r.notes
+                    category = r.exerciseCategory, isCompetition = r.isCompetition, notes = r.notes,
+                    invName = r.inventoryName, invUnit = r.inventoryUnit, invValue = r.inventoryValue
                 )
             )
         }
@@ -268,8 +279,7 @@ object RecordsEngine {
             val base = RecordSummary(
                 key = g.key,
                 name = g.name,
-                displayName = g.name + legSuffix(g.isSingleLeg, g.legSide) +
-                    (g.inventory?.let { " · " + it.replaceFirstChar { c -> c.lowercase() } } ?: "") + spikesSuffix(g.inSpikes),
+                displayName = titleOf(g.name, g.isSingleLeg, g.legSide, g.inventory, g.inSpikes),
                 inSpikes = g.inSpikes,
                 unit = g.unit,
                 isSingleLeg = g.isSingleLeg,
@@ -289,7 +299,10 @@ object RecordsEngine {
                 history = chain.map { (s, prev) ->
                     RecordHistoryEntry(s.date, s.value, prev, s.isCompetition || g.isCompetition, s.inventory)
                 },
-                notes = best.notes
+                notes = best.notes,
+                inventoryName = best.invName,
+                inventoryUnit = best.invUnit,
+                inventoryValue = best.invValue
             )
 
             // Ручная правка рекорда из тренировок действует, пока рекорд не обновился новым результатом
@@ -297,7 +310,7 @@ object RecordsEngine {
             if (override != null && base.deletableResultId == null && Math.abs(override.baseBest - base.best) < 1e-9) {
                 val fixedHistory = if (base.history.isEmpty()) base.history else
                     base.history.dropLast(1) + base.history.last().copy(value = override.value, date = override.date)
-                base.copy(
+                val edited = base.copy(
                     best = override.value,
                     bestDate = override.date,
                     isIndoor = override.isIndoor,
@@ -306,8 +319,34 @@ object RecordsEngine {
                     history = fixedHistory,
                     isManuallyEdited = true
                 )
+                applyFullOverride(edited, override)
             } else base
         }.sortedByDescending { it.bestDate }
+    }
+
+    /** Полная правка: кроме значения и условий меняются название, вид, нога, шиповки, снаряд, уровень и источник. */
+    private fun applyFullOverride(record: RecordSummary, o: RecordOverride): RecordSummary {
+        val name = o.eventName ?: return record
+        val unit = o.unit ?: record.unit
+        val single = o.isSingleLeg ?: record.isSingleLeg
+        val spikes = o.inSpikes ?: record.inSpikes
+        val inventory = variantInventory(o.inventoryName, o.inventoryUnit, o.inventoryValue, unit)
+        return record.copy(
+            name = name,
+            displayName = titleOf(name, single, o.legSide, inventory, spikes),
+            unit = unit,
+            category = o.category ?: record.category,
+            levelLabel = o.recordLevel ?: record.levelLabel,
+            isCompetition = o.isCompetition ?: record.isCompetition,
+            isSingleLeg = single,
+            legSide = o.legSide,
+            inSpikes = spikes,
+            inventoryLabel = inventory,
+            inventoryName = o.inventoryName,
+            inventoryUnit = o.inventoryUnit,
+            inventoryValue = o.inventoryValue,
+            lowerIsBetter = isLowerBetter(name, unit) xor record.isAnti
+        )
     }
 
     /** Все обновления рекордов, новые сверху. */

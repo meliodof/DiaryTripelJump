@@ -1,5 +1,8 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.data.RunUp
+import com.example.diarytripeljump.data.RunUpAttempt
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -148,7 +151,7 @@ fun CompetitionsScreen(
         AddOrEditCompetitionDialog(
             competitionToEdit = null,
             onDismiss = { showAddDialog = false },
-            onConfirm = { name, country, city, streetAndNumber, eventTime, hasQual, qualStandard, didNotQual, placement, attemptsJson, date ->
+            onConfirm = { name, country, city, streetAndNumber, eventTime, hasQual, qualStandard, didNotQual, placement, attemptsJson, date, runUpJson ->
                 viewModel.addCompetition(
                     name = name,
                     country = country,
@@ -161,7 +164,8 @@ fun CompetitionsScreen(
                     placement = placement,
                     attemptsJson = attemptsJson,
                     date = date,
-                    eventType = "Тройной прыжок"
+                    eventType = "Тройной прыжок",
+                    runUpJson = runUpJson
                 )
                 showAddDialog = false
             }
@@ -173,7 +177,7 @@ fun CompetitionsScreen(
         AddOrEditCompetitionDialog(
             competitionToEdit = editingCompetition,
             onDismiss = { editingCompetition = null },
-            onConfirm = { name, country, city, streetAndNumber, eventTime, hasQual, qualStandard, didNotQual, placement, attemptsJson, date ->
+            onConfirm = { name, country, city, streetAndNumber, eventTime, hasQual, qualStandard, didNotQual, placement, attemptsJson, date, runUpJson ->
                 val fullAddr = listOfNotNull(country, city, streetAndNumber).joinToString(", ")
                 val updated = editingCompetition!!.copy(
                     name = name,
@@ -188,7 +192,8 @@ fun CompetitionsScreen(
                     didNotQualifyForFinal = didNotQual,
                     placement = placement,
                     attemptsJson = attemptsJson,
-                    date = date
+                    date = date,
+                    runUpJson = runUpJson
                 )
                 viewModel.updateCompetition(updated)
                 editingCompetition = null
@@ -421,10 +426,24 @@ fun CompetitionCardItem(
                         }
                     }
                 }
+
+                val runUpLines = runUpSummary(RunUp.decode(competition.runUpJson))
+                if (runUpLines.isNotEmpty()) {
+                    Text(
+                        text = "Разбег:\n" + runUpLines.joinToString("\n"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant,
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
+                }
             }
         }
     }
 }
+
+/** Заполненные попытки с их настоящими номерами. */
+private fun runUpSummary(attempts: List<RunUpAttempt>): List<String> =
+    attempts.mapIndexedNotNull { i, a -> if (a.isEmpty) null else "${i + 1}. ${RunUp.describe(a)}" }
 
 @Composable
 private fun CompetitionInfoRow(icon: ImageVector, text: String) {
@@ -464,7 +483,8 @@ fun AddOrEditCompetitionDialog(
         didNotQualifyForFinal: Boolean,
         placement: String,
         attemptsJson: String,
-        date: Long
+        date: Long,
+        runUpJson: String?
     ) -> Unit
 ) {
     var nameText by remember { mutableStateOf(competitionToEdit?.name ?: "") }
@@ -512,6 +532,9 @@ fun AddOrEditCompetitionDialog(
             repeat(6) { i -> add(savedAttempts.getOrNull(i)?.let { it.equals("X", true) || it.equals("Х", true) } == true) }
         }
     }
+
+    var runUpAttempts by remember { mutableStateOf(RunUp.decode(competitionToEdit?.runUpJson)) }
+    var showRunUpDialog by remember { mutableStateOf(false) }
 
     var showNameError by remember { mutableStateOf(false) }
 
@@ -683,6 +706,14 @@ fun AddOrEditCompetitionDialog(
                         )
                     }
                 }
+
+                FormSectionTitle("Разбег")
+                runUpSummary(runUpAttempts).forEach { line ->
+                    Text(text = line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                OutlinedButton(onClick = { showRunUpDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (runUpAttempts.all { it.isEmpty }) "Указать разбег по попыткам" else "Изменить разбег по попыткам")
+                }
             }
         },
         confirmButton = {
@@ -708,7 +739,8 @@ fun AddOrEditCompetitionDialog(
                             didNotMakeTop8,
                             placementText,
                             finalAttemptsStr,
-                            dateMillis
+                            dateMillis,
+                            runUpAttempts.takeIf { list -> list.any { !it.isEmpty } }?.let { RunUp.encodeAll(it) }
                         )
                     } else {
                         showNameError = true
@@ -718,6 +750,19 @@ fun AddOrEditCompetitionDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
+
+    if (showRunUpDialog) {
+        RunUpResultsDialog(
+            exerciseName = nameText.ifBlank { "Попытки старта" },
+            initial = runUpAttempts,
+            fixedCount = if (didNotMakeTop8) 3 else 6,
+            onDismiss = { showRunUpDialog = false },
+            onConfirm = {
+                runUpAttempts = it
+                showRunUpDialog = false
+            }
+        )
+    }
 
     if (showDatePicker) {
         AppDatePickerDialog(

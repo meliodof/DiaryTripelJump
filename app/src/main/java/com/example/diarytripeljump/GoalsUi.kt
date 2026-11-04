@@ -13,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -117,7 +118,7 @@ fun GoalCard(progress: GoalProgress, onEdit: () -> Unit, onDelete: () -> Unit) {
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = progress.goal.displayName,
+                        text = styledTitle(progress.goal.displayName, progress.goal.name),
                         style = MaterialTheme.typography.titleSmall,
                         color = cs.onSurface,
                         maxLines = 2,
@@ -187,7 +188,7 @@ fun GoalEditorDialog(
             ) {
                 val sel = selected
                 if (initial != null && (fixed != null || existing != null)) {
-                    Text(initial.displayName, style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
+                    Text(styledTitle(initial.displayName, initial.name), style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
                 } else if (sel == null) {
                     OutlinedTextField(
                         value = query,
@@ -208,7 +209,7 @@ fun GoalEditorDialog(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = c.displayName + " · " + unitLabel(c.unit),
+                                text = styledTitle(c.displayName, c.name) + AnnotatedString(", " + unitLabel(c.unit)),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = cs.onSurface,
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
@@ -217,7 +218,7 @@ fun GoalEditorDialog(
                     }
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(sel.displayName, style = MaterialTheme.typography.titleMedium, color = cs.onSurface, modifier = Modifier.weight(1f))
+                        Text(styledTitle(sel.displayName, sel.name), style = MaterialTheme.typography.titleMedium, color = cs.onSurface, modifier = Modifier.weight(1f))
                         IconButton(onClick = { selected = null }) {
                             Icon(Icons.Default.Close, contentDescription = "Выбрать другое")
                         }

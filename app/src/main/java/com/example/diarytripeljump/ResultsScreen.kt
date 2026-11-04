@@ -286,17 +286,23 @@ fun ResultsScreen(
 
     val editingRecord = editingKey?.let { key -> records.find { it.key == key } }
     if (editingRecord != null) {
-        EditRecordDialog(
-            record = editingRecord,
+        AddRecordDialog(
+            isAntiRecord = editingRecord.isAnti,
+            inventoryItems = inventoryItems,
+            onAddInventory = { name, unit -> viewModel.addInventory(name, unit) },
+            initial = editingRecord.toRecordInput(),
             onDismiss = { editingKey = null },
-            onSave = { value, date, indoor, weather, notes ->
-                viewModel.updateRecord(editingRecord, value, date, indoor, weather, notes)
+            onConfirm = { input ->
+                viewModel.updateRecord(editingRecord, input)
                 editingKey = null
             },
-            onResetManual = {
+            onResetManual = if (editingRecord.isManuallyEdited) ({
                 viewModel.clearRecordOverride(editingRecord.key)
                 editingKey = null
-            }
+            }) else null,
+            manualHint = if (!editingRecord.isManuallyEdited && editingRecord.deletableResultId == null) {
+                "Запись создана из тренировки. Ручная правка действует до тех пор, пока рекорд не будет улучшен новым результатом."
+            } else null
         )
     }
 
@@ -438,7 +444,7 @@ fun RecordCard(
 
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = record.displayName,
+                    text = styledTitle(record.displayName, record.name),
                     style = MaterialTheme.typography.titleSmall,
                     color = cs.onSurface,
                     maxLines = 2,
@@ -548,131 +554,29 @@ fun RecordCard(
     }
 }
 
-/** Ручное редактирование рекорда или анти-рекорда: результат, дата, место, условия, заметка. */
-@Composable
-private fun EditRecordDialog(
-    record: RecordSummary,
-    onDismiss: () -> Unit,
-    onSave: (value: Double, date: Long, isIndoor: Boolean, weather: String?, notes: String?) -> Unit,
-    onResetManual: () -> Unit
-) {
-    val cs = MaterialTheme.colorScheme
-    var valueText by remember {
-        mutableStateOf(
-            when (record.unit) {
-                ResultUnit.M, ResultUnit.SECONDS -> String.format(Locale.US, "%.2f", record.best)
-                else -> formatNumber(record.best)
-            }
-        )
-    }
-    var date by remember { mutableStateOf(record.bestDate) }
-    var isIndoor by remember { mutableStateOf(record.isIndoor) }
-    var weather by remember { mutableStateOf(record.weather ?: "") }
-    var notes by remember { mutableStateOf(record.notes ?: "") }
-    var showValueError by remember { mutableStateOf(false) }
-    var pickingDate by remember { mutableStateOf(false) }
+/** Все показатели рекорда для формы редактирования. */
+private fun RecordSummary.toRecordInput() = NewRecordInput(
+    eventName = name,
+    result = best,
+    unit = unit,
+    isIndoor = isIndoor,
+    recordLevel = levelLabel,
+    category = category,
+    isCompetition = isCompetition,
+    weather = weather,
+    notes = notes,
+    isSingleLeg = isSingleLeg,
+    legSide = legSide,
+    inventoryName = inventoryName,
+    inventoryUnit = inventoryUnit,
+    inventoryValue = inventoryValue,
+    inSpikes = inSpikes,
+    date = bestDate
+)
 
-    val unitLabel = when (record.unit) {
-        ResultUnit.M -> "м"
-        ResultUnit.CM -> "см"
-        ResultUnit.KG -> "кг"
-        ResultUnit.SECONDS -> "сек"
-        ResultUnit.REPS -> "раз"
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Column {
-                Text(
-                    text = if (record.isAnti) "Редактировать анти-рекорд" else "Редактировать рекорд",
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = record.displayName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = cs.onSurfaceVariant
-                )
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                OutlinedTextField(
-                    value = valueText,
-                    onValueChange = { v ->
-                        valueText = v.replace(',', '.').filter { it.isDigit() || it == '.' }
-                        showValueError = false
-                    },
-                    label = { Text("Результат, $unitLabel") },
-                    isError = showValueError,
-                    supportingText = if (showValueError) {
-                        { Text("Введите число больше нуля") }
-                    } else null,
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                DateField(label = "Дата", millis = date, onClick = { pickingDate = true }, modifier = Modifier.fillMaxWidth())
-
-                Text(text = "Место", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
-                SegmentedControl(
-                    options = listOf("На улице", "В помещении"),
-                    selectedIndex = if (isIndoor) 1 else 0,
-                    onSelect = { isIndoor = it == 1 }
-                )
-
-                OutlinedTextField(
-                    value = weather,
-                    onValueChange = { weather = it },
-                    label = { Text("Условия (погода, ветер, покрытие)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = notes,
-                    onValueChange = { notes = it },
-                    label = { Text("Заметка") },
-                    minLines = 2,
-                    maxLines = 4,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                if (record.isManuallyEdited) {
-                    TextButton(onClick = {
-                        onResetManual()
-                    }) { Text("Вернуть автоматическое значение") }
-                } else if (record.deletableResultId == null) {
-                    Text(
-                        text = "Запись создана из тренировки. Ручная правка действует до тех пор, пока рекорд не будет улучшен новым результатом.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = cs.onSurfaceVariant
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(onClick = {
-                val parsed = valueText.toDoubleOrNull()
-                if (parsed == null || parsed <= 0.0) showValueError = true
-                else onSave(parsed, date, isIndoor, weather.trim().ifBlank { null }, notes.trim().ifBlank { null })
-            }) { Text("Сохранить") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
-    )
-
-    if (pickingDate) {
-        AppDatePickerDialog(
-            initialMillis = date,
-            onDismiss = { pickingDate = false },
-            onConfirm = {
-                date = it
-                pickingDate = false
-            }
-        )
-    }
+private fun recordValueText(value: Double, unit: ResultUnit): String = when (unit) {
+    ResultUnit.M, ResultUnit.SECONDS -> String.format(Locale.US, "%.2f", value)
+    else -> formatNumber(value).replace(',', '.')
 }
 
 /** Нижняя панель с историей: когда и насколько обновлялся рекорд. */
@@ -697,7 +601,7 @@ private fun RecordHistorySheet(record: RecordSummary, onDismiss: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(text = record.displayName, style = MaterialTheme.typography.titleLarge, color = cs.onSurface)
+                Text(text = styledTitle(record.displayName, record.name), style = MaterialTheme.typography.titleLarge, color = cs.onSurface)
                 Text(
                     text = (if (record.isAnti) "Анти-рекорд" else "Личный рекорд") + " · " +
                         if (record.isCompetition) "старты" else "тренировки",
@@ -809,33 +713,39 @@ fun AddRecordDialog(
     inventoryItems: List<InventoryItem>,
     onAddInventory: (name: String, unit: ResultUnit) -> Unit,
     onDismiss: () -> Unit,
-    onConfirm: (NewRecordInput) -> Unit
+    onConfirm: (NewRecordInput) -> Unit,
+    /** Показатели редактируемого рекорда; null — новая запись. */
+    initial: NewRecordInput? = null,
+    /** Вернуть рассчитанное значение рекорда из тренировок. */
+    onResetManual: (() -> Unit)? = null,
+    manualHint: String? = null
 ) {
     val cs = MaterialTheme.colorScheme
-    var eventNameText by remember { mutableStateOf("Тройной прыжок") }
-    var resultValueText by remember { mutableStateOf("") }
+    var eventNameText by remember { mutableStateOf(initial?.eventName ?: "Тройной прыжок") }
+    var resultValueText by remember { mutableStateOf(initial?.let { recordValueText(it.result, it.unit) } ?: "") }
 
-    // Единицы результата: метры, секунды, килограммы
-    val units = listOf(ResultUnit.M, ResultUnit.SECONDS, ResultUnit.KG)
-    var selectedUnit by remember { mutableStateOf(ResultUnit.M) }
-    var isIndoor by remember { mutableStateOf(false) }
-    var recordLevel by remember { mutableStateOf("PB") }
-    var selectedCategory by remember { mutableStateOf("Прыжковые") }
-    var isCompetition by remember { mutableStateOf(true) }
+    val units = listOf(ResultUnit.M, ResultUnit.CM, ResultUnit.SECONDS, ResultUnit.KG, ResultUnit.REPS)
+    var selectedUnit by remember { mutableStateOf(initial?.unit ?: ResultUnit.M) }
+    var isIndoor by remember { mutableStateOf(initial?.isIndoor ?: false) }
+    var recordLevel by remember { mutableStateOf(initial?.recordLevel ?: "PB") }
+    var selectedCategory by remember { mutableStateOf(initial?.category ?: "Прыжковые") }
+    var isCompetition by remember { mutableStateOf(initial?.isCompetition ?: true) }
 
-    var isSingleLeg by remember { mutableStateOf(false) }
-    var legSide by remember { mutableStateOf<String?>(null) }
-    var inSpikes by remember { mutableStateOf(false) }
+    var isSingleLeg by remember { mutableStateOf(initial?.isSingleLeg ?: false) }
+    var legSide by remember { mutableStateOf(initial?.legSide) }
+    var inSpikes by remember { mutableStateOf(initial?.inSpikes ?: false) }
 
-    var inventoryName by remember { mutableStateOf<String?>(null) }
-    var inventoryUnit by remember { mutableStateOf<ResultUnit?>(null) }
-    var inventoryValueText by remember { mutableStateOf("") }
+    var inventoryName by remember { mutableStateOf(initial?.inventoryName) }
+    var inventoryUnit by remember { mutableStateOf(initial?.inventoryUnit) }
+    var inventoryValueText by remember {
+        mutableStateOf(initial?.inventoryValue?.let { formatNumber(it).replace(',', '.') } ?: "")
+    }
     var showCreateInventory by remember { mutableStateOf(false) }
 
-    var weatherText by remember { mutableStateOf("") }
-    var notesText by remember { mutableStateOf("") }
+    var weatherText by remember { mutableStateOf(initial?.weather ?: "") }
+    var notesText by remember { mutableStateOf(initial?.notes ?: "") }
     // дата, когда рекорд установлен (по умолчанию — сегодня)
-    var recordDate by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var recordDate by remember { mutableLongStateOf(initial?.date ?: System.currentTimeMillis()) }
     var pickingRecordDate by remember { mutableStateOf(false) }
 
     var showNameError by remember { mutableStateOf(false) }
@@ -845,7 +755,12 @@ fun AddRecordDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = if (isAntiRecord) "Новый анти-рекорд" else "Новый рекорд",
+                text = when {
+                    initial != null && isAntiRecord -> "Редактировать анти-рекорд"
+                    initial != null -> "Редактировать рекорд"
+                    isAntiRecord -> "Новый анти-рекорд"
+                    else -> "Новый рекорд"
+                },
                 fontWeight = FontWeight.Bold,
                 color = if (isAntiRecord) cs.error else cs.primary
             )
@@ -890,11 +805,16 @@ fun AddRecordDialog(
                 }
 
                 Text(text = "Единица результата", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
-                SegmentedControl(
-                    options = listOf("Метры", "Секунды", "Килограммы"),
-                    selectedIndex = units.indexOf(selectedUnit),
-                    onSelect = { selectedUnit = units[it] }
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    units.forEach { u ->
+                        ToggleChip(label = getUnitTitle(u), selected = selectedUnit == u, onClick = { selectedUnit = u })
+                    }
+                }
 
                 OutlinedTextField(
                     value = resultValueText,
@@ -1037,14 +957,12 @@ fun AddRecordDialog(
                     }
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Соревновательный результат", style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = isCompetition, onCheckedChange = { isCompetition = it })
-                }
+                Text(text = "Где показан", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                SegmentedControl(
+                    options = listOf("На соревнованиях", "На тренировке"),
+                    selectedIndex = if (isCompetition) 0 else 1,
+                    onSelect = { isCompetition = it == 0 }
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1068,6 +986,12 @@ fun AddRecordDialog(
                     label = { Text("Заметки (необязательно)") },
                     modifier = Modifier.fillMaxWidth()
                 )
+                if (onResetManual != null) {
+                    TextButton(onClick = onResetManual) { Text("Вернуть автоматическое значение") }
+                }
+                if (manualHint != null) {
+                    Text(text = manualHint, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
             }
         },
         confirmButton = {

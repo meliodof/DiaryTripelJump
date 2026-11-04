@@ -54,8 +54,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.example.diarytripeljump.data.Exercise
 import com.example.diarytripeljump.data.RecordsEngine
@@ -233,11 +236,25 @@ fun CatalogScreen(
 
             if (tab == 0) {
                 item {
-                    Text(
-                        text = "${filtered.size} ${pluralRu(filtered.size, "упражнение", "упражнения", "упражнений")}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = cs.onSurfaceVariant
-                    )
+                    Column {
+                        Text(
+                            text = "${filtered.size} ${pluralRu(filtered.size, "упражнение", "упражнения", "упражнений")}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = cs.onSurfaceVariant
+                        )
+                        Text(
+                            text = buildAnnotatedString {
+                                withStyle(SpanStyle(color = cs.tertiary)) { append("Синее название") }
+                                append(": в шиповках, ")
+                                withStyle(SpanStyle(color = cs.secondary)) { append("оранжевым") }
+                                append(": снаряд, ")
+                                withStyle(SpanStyle(color = cs.primary)) { append("зелёным") }
+                                append(": нога")
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = cs.onSurfaceVariant
+                        )
+                    }
                 }
                 if (filtered.isEmpty()) {
                     val filtering = query.isNotBlank() || onlyFavorites || categoryFilter != 0
@@ -451,7 +468,7 @@ private fun ExerciseCatalogRow(
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 // снаряд, шиповки и нога — прямо в названии
                 Text(
-                    text = exercise.title(),
+                    text = exercise.styledTitle(),
                     style = MaterialTheme.typography.titleSmall,
                     color = cs.onSurface,
                     maxLines = 3,
@@ -460,7 +477,8 @@ private fun ExerciseCatalogRow(
                 val tags = buildList {
                     exercise.categoryName?.let { add(it) }
                     add(
-                        when (exercise.defaultUnit) {
+                        if (com.example.diarytripeljump.data.RunUp.isExercise(exercise.name)) "попадание и перенос отметки"
+                        else when (exercise.defaultUnit) {
                             com.example.diarytripeljump.data.ResultUnit.KG -> "результат в кг"
                             com.example.diarytripeljump.data.ResultUnit.M -> "результат в метрах"
                             com.example.diarytripeljump.data.ResultUnit.CM -> "результат в см"
@@ -542,7 +560,7 @@ private fun ComplexCard(complex: ComplexUi, onEdit: () -> Unit, onDelete: () -> 
                     complex.exercises.forEachIndexed { i, ex ->
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                             StatusPill(text = "${i + 1}", contentColor = cs.onSecondaryContainer, containerColor = cs.secondaryContainer)
-                            Text(ex.title(), style = MaterialTheme.typography.bodyMedium, color = cs.onSurface)
+                            Text(ex.styledTitle(), style = MaterialTheme.typography.bodyMedium, color = cs.onSurface)
                         }
                     }
                 }
@@ -607,7 +625,7 @@ fun ComplexEditorDialog(
                         StatusPill(text = "${i + 1}", contentColor = cs.onSecondaryContainer, containerColor = cs.secondaryContainer)
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            ex.title(),
+                            ex.styledTitle(),
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.weight(1f),
                             maxLines = 2,

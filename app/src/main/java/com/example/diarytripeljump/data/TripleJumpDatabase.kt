@@ -30,7 +30,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RecordOverride::class,
         ExerciseComplex::class,
         ComplexExercise::class,
-        ExerciseGoal::class
+        ExerciseGoal::class,
+        RunUpMeasurement::class
     ],
     version = TripleJumpDatabase.CURRENT_VERSION,
     exportSchema = true
@@ -57,6 +58,7 @@ abstract class TripleJumpDatabase : RoomDatabase() {
     abstract fun recordOverrideDao(): RecordOverrideDao
     abstract fun exerciseComplexDao(): ExerciseComplexDao
     abstract fun exerciseGoalDao(): ExerciseGoalDao
+    abstract fun runUpMeasurementDao(): RunUpMeasurementDao
 
     companion object {
         /** 11 → 12: одна нога и инвентарь в результатах упражнений + таблица инвентаря. Данные сохраняются. */
@@ -170,14 +172,51 @@ abstract class TripleJumpDatabase : RoomDatabase() {
             }
         }
 
+        /** 17 → 18: разряд и толчковая нога в профиле, упражнения по разбегу, полная правка рекордов. Данные сохраняются. */
+        internal val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE athlete_profile ADD COLUMN sportRank TEXT")
+                db.execSQL("ALTER TABLE athlete_profile ADD COLUMN sportRankDate INTEGER")
+                db.execSQL("ALTER TABLE athlete_profile ADD COLUMN leadingLeg TEXT")
+                db.execSQL("ALTER TABLE exercise_results ADD COLUMN runUpJson TEXT")
+                db.execSQL("ALTER TABLE record_overrides ADD COLUMN eventName TEXT")
+                db.execSQL("ALTER TABLE record_overrides ADD COLUMN category TEXT")
+                db.execSQL("ALTER TABLE record_overrides ADD COLUMN unit TEXT")
+                db.execSQL("ALTER TABLE record_overrides ADD COLUMN recordLevel TEXT")
+                db.execSQL("ALTER TABLE record_overrides ADD COLUMN isCompetition INTEGER")
+                db.execSQL("ALTER TABLE record_overrides ADD COLUMN isSingleLeg INTEGER")
+                db.execSQL("ALTER TABLE record_overrides ADD COLUMN legSide TEXT")
+                db.execSQL("ALTER TABLE record_overrides ADD COLUMN inSpikes INTEGER")
+                db.execSQL("ALTER TABLE record_overrides ADD COLUMN inventoryName TEXT")
+                db.execSQL("ALTER TABLE record_overrides ADD COLUMN inventoryUnit TEXT")
+                db.execSQL("ALTER TABLE record_overrides ADD COLUMN inventoryValue REAL")
+            }
+        }
+
+        /** 18 → 19: разбег в попытках старта, замеры размера разбега, вид «На разбег» убран. Данные сохраняются. */
+        internal val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE competitions ADD COLUMN runUpJson TEXT")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS run_up_measurements (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "date INTEGER NOT NULL, " +
+                        "lengthCm REAL, " +
+                        "lengthFeet REAL)"
+                )
+                db.execSQL("UPDATE exercises SET categoryName = 'Прыжковое упражнение' WHERE categoryName = 'Упражнение на разбег'")
+            }
+        }
+
         internal val ALL_MIGRATIONS = arrayOf(
-            MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17
+            MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17,
+            MIGRATION_17_18, MIGRATION_18_19
         )
 
         const val DATABASE_NAME = "triple_jump_database"
 
         // Уже выпущенную версию не меняем: любое изменение схемы — новая версия и новая миграция
-        const val CURRENT_VERSION = 17
+        const val CURRENT_VERSION = 19
 
         /** Самая старая версия, которую можно перенести без потери данных. */
         const val MIN_MIGRATABLE_VERSION = 11

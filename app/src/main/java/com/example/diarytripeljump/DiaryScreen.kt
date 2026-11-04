@@ -690,7 +690,7 @@ private fun FavoriteExerciseRow(
                 IconBadge(icon = Icons.Default.FitnessCenter, tint = cs.primary)
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        text = exercise.title(),
+                        text = exercise.styledTitle(),
                         style = MaterialTheme.typography.titleSmall,
                         color = cs.onSurface,
                         maxLines = 2,
@@ -770,7 +770,7 @@ private fun FavoritesPickerDialog(
                         ) {
                             Checkbox(checked = ex.isFavorite, onCheckedChange = { onToggle(ex, it) })
                             Text(
-                                text = ex.title(),
+                                text = ex.styledTitle(),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = cs.onSurface
                             )

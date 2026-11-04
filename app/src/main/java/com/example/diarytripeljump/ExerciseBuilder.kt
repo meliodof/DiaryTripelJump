@@ -75,6 +75,7 @@ import com.example.diarytripeljump.data.Exercise
 import com.example.diarytripeljump.data.InventoryItem
 import com.example.diarytripeljump.data.RecordsEngine
 import com.example.diarytripeljump.data.ResultUnit
+import com.example.diarytripeljump.data.RunUp
 import com.example.diarytripeljump.data.formatNumber
 import kotlin.math.roundToInt
 
@@ -215,7 +216,8 @@ fun ExerciseEditorDialog(
                                             inventoryUnit = if (hasInventory) inventoryUnit else null,
                                             inventoryValue = if (hasInventory && !loadedImplement) inventoryValueText.toDoubleOrNull() else null,
                                             inSpikes = inSpikes,
-                                            unit = unit
+                                            // у разбега своя форма результата, единица не выбирается
+                                            unit = if (RunUp.isExercise(name)) ResultUnit.CM else unit
                                         )
                                     )
                                 }
@@ -306,7 +308,7 @@ fun ExerciseEditorDialog(
                                                 when (b) {
                                                     BuilderBlock.SPIKES -> "В шиповках"
                                                     BuilderBlock.INVENTORY -> inventoryText ?: "Инвентарь"
-                                                    BuilderBlock.SINGLE_LEG -> RecordsEngine.legSuffix(true, legSide).removePrefix(" · ")
+                                                    BuilderBlock.SINGLE_LEG -> RecordsEngine.legSuffix(true, legSide).trim()
                                                         .replaceFirstChar { it.uppercase() }
                                                 }
                                             )
@@ -423,7 +425,13 @@ fun ExerciseEditorDialog(
                         }
 
                         // --- В чём измеряется результат ---
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (RunUp.isExercise(name)) {
+                            Text(
+                                text = "Вместо результата в тренировке открывается окно попыток: попал или нет, сколько стоп, на сколько отнёс или поднёс отметку.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = cs.onSurfaceVariant
+                            )
+                        } else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             BuilderLabel("Результат измеряется в")
                             FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -447,7 +455,7 @@ fun ExerciseEditorDialog(
                         // --- Как будет выглядеть ---
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             BuilderLabel("В тренировках и рекордах")
-                            Text(preview, style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
+                            Text(styledTitle(preview, name.trim().ifBlank { "Название" }), style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
                             Text(
                                 text = "Шиповки, инвентарь и одна нога ведут отдельные рекорды — результаты с ними не смешиваются с обычными.",
                                 style = MaterialTheme.typography.bodySmall,

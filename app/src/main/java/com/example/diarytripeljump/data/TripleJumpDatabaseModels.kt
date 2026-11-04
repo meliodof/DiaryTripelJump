@@ -20,7 +20,12 @@ data class AthleteProfile(
     val customPbMeters: Double? = null,
     val notes: String? = null,
     /** "MALE" / "FEMALE" / null — нужен для возрастной группы взрослых (мужчины / женщины). */
-    val gender: String? = null
+    val gender: String? = null,
+    /** Не используется: разряд определяется автоматически (см. [SportRanks.best]). Колонки остались в схеме версии 18. */
+    val sportRank: String? = null,
+    val sportRankDate: Long? = null,
+    /** Ведущая нога: "LEFT" / "RIGHT" / null. */
+    val leadingLeg: String? = null
 )
 
 @Entity(tableName = "competitions")
@@ -42,7 +47,9 @@ data class Competition(
     val eventType: String = "Тройной прыжок",
     val status: CompetitionStatus = CompetitionStatus.UPCOMING,
     val skipReason: String? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    /** Точность разбега по попыткам, формат [RunUp.encodeAll]: номер попытки сохраняется. */
+    val runUpJson: String? = null
 )
 
 enum class CompetitionStatus { ONGOING, UPCOMING, COMPLETED, SKIPPED, CANCELLED }
@@ -190,7 +197,9 @@ data class ExerciseResult(
     val inventoryUnit: ResultUnit? = null,
     val inventoryValue: Double? = null,
     // Упражнение выполнялось в шиповках — рекорды ведутся отдельно от выполнения в обычной обуви
-    val inSpikes: Boolean = false
+    val inSpikes: Boolean = false,
+    // Упражнение по разбегу: попытки в формате [RunUp.encode]; null — обычное упражнение
+    val runUpJson: String? = null
 )
 
 /** Цель по результату. Ключ совпадает с ключом рекорда ([RecordSummary.key]), поэтому прогресс считается автоматически. */
@@ -260,7 +269,28 @@ data class RecordOverride(
     val date: Long,
     val isIndoor: Boolean,
     val weather: String?,
-    val notes: String?
+    val notes: String?,
+    // Остальные показатели рекорда; eventName = null — правка старого формата, они не менялись
+    val eventName: String? = null,
+    val category: String? = null,
+    val unit: ResultUnit? = null,
+    val recordLevel: String? = null,
+    val isCompetition: Boolean? = null,
+    val isSingleLeg: Boolean? = null,
+    val legSide: String? = null,
+    val inSpikes: Boolean? = null,
+    val inventoryName: String? = null,
+    val inventoryUnit: ResultUnit? = null,
+    val inventoryValue: Double? = null
+)
+
+/** Ручной замер размера разбега; дальше размер меняется вместе с переносами отметки (см. [RunUpLength]). */
+@Entity(tableName = "run_up_measurements")
+data class RunUpMeasurement(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val date: Long,
+    val lengthCm: Double? = null,
+    val lengthFeet: Double? = null
 )
 
 /** Инвентарь пользователя: название и единица, в которой он измеряется (см или кг). */

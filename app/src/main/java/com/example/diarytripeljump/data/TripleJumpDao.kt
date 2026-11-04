@@ -380,3 +380,12 @@ interface ExerciseGoalDao {
     @Query("DELETE FROM exercise_goals WHERE recordKey = :key")
     suspend fun deleteByKey(key: String)
 }
+
+@Dao
+interface RunUpMeasurementDao {
+    @Query("SELECT * FROM run_up_measurements ORDER BY date ASC")
+    fun getAll(): Flow<List<RunUpMeasurement>>
+
+    @Insert
+    suspend fun insert(measurement: RunUpMeasurement)
+}

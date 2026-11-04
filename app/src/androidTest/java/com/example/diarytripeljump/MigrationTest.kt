@@ -64,4 +64,55 @@ class MigrationTest {
             assertTrue(c.isNull(1))
         }
     }
+
+    @Test
+    fun migrate18To19_keepsCompetitionsAndResetsRunUpCategory() {
+        helper.createDatabase(dbName, 18).apply {
+            execSQL(
+                "INSERT INTO exercises (id, name, categoryName, categoryColorHex, defaultUnit, isSingleLeg, isFavorite, inSpikes) " +
+                    "VALUES (1, 'По разбегу', 'Упражнение на разбег', '#1E4D3B', 'CM', 0, 0, 0)"
+            )
+            execSQL(
+                "INSERT INTO competitions (id, name, date, hasQualification, didNotQualifyForFinal, eventType, status) " +
+                    "VALUES (1, 'Первенство', 1000, 0, 0, 'Тройной прыжок', 'UPCOMING')"
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 19, true, *TripleJumpDatabase.ALL_MIGRATIONS)
+        db.query("SELECT categoryName FROM exercises WHERE id = 1").use { c ->
+            c.moveToFirst()
+            assertEquals("Прыжковое упражнение", c.getString(0))
+        }
+        db.query("SELECT name, runUpJson FROM competitions WHERE id = 1").use { c ->
+            c.moveToFirst()
+            assertEquals("Первенство", c.getString(0))
+            assertTrue(c.isNull(1))
+        }
+    }
+
+    @Test
+    fun migrate17To18_keepsProfileAndRecordOverrides() {
+        helper.createDatabase(dbName, 17).apply {
+            execSQL("INSERT INTO athlete_profile (id, firstName) VALUES (1, 'Иван')")
+            execSQL(
+                "INSERT INTO record_overrides (recordKey, baseBest, value, date, isIndoor) " +
+                    "VALUES ('ex|присед|BOTH|KG', 100.0, 102.5, 1000, 0)"
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 18, true, *TripleJumpDatabase.ALL_MIGRATIONS)
+        db.query("SELECT firstName, sportRank, leadingLeg FROM athlete_profile WHERE id = 1").use { c ->
+            c.moveToFirst()
+            assertEquals("Иван", c.getString(0))
+            assertTrue(c.isNull(1))
+            assertTrue(c.isNull(2))
+        }
+        db.query("SELECT value, eventName FROM record_overrides").use { c ->
+            c.moveToFirst()
+            assertEquals(102.5, c.getDouble(0), 1e-9)
+            assertTrue(c.isNull(1))
+        }
+    }
 }

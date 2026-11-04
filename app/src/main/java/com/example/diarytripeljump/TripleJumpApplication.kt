@@ -65,7 +65,8 @@ class TripleJumpApplication : Application() {
             trainingPeriodDao = database.trainingPeriodDao(),
             recordOverrideDao = database.recordOverrideDao(),
             exerciseComplexDao = database.exerciseComplexDao(),
-            exerciseGoalDao = database.exerciseGoalDao()
+            exerciseGoalDao = database.exerciseGoalDao(),
+            runUpMeasurementDao = database.runUpMeasurementDao()
         )
         if (demo) {
             val seed = SeedDatabase(repository)

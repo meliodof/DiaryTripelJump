@@ -106,6 +106,31 @@ class RecordsEngineTest {
     }
 
     @Test
+    fun fullOverride_changesAllFieldsOfTrainingRecord() {
+        val results = listOf(ex(1, "Присед", 100.0, ResultUnit.KG, 1))
+        val key = RecordsEngine.exerciseRecordKey("Присед", false, null, ResultUnit.KG)
+        val override = RecordOverride(
+            key, baseBest = 100.0, value = 105.0, date = 2 * day, isIndoor = true, weather = null, notes = null,
+            eventName = "Присед глубокий", category = "Силовые", unit = ResultUnit.KG, recordLevel = "SB",
+            isCompetition = true, isSingleLeg = true, legSide = "LEFT", inSpikes = true
+        )
+        val r = RecordsEngine.build(emptyList(), results, listOf(override)).single()
+        assertEquals(key, r.key)
+        assertEquals("Присед глубокий левая нога в шиповках", r.displayName)
+        assertEquals("SB", r.levelLabel)
+        assertTrue(r.isCompetition)
+    }
+
+    @Test
+    fun runUpExercise_doesNotCreateRecord() {
+        val runUp = ExerciseResult(
+            id = 1, exerciseId = 1, exerciseName = "Разбег", trainingSessionId = 1, date = day,
+            result = 0.0, resultUnit = ResultUnit.CM, runUpJson = RunUp.encode(listOf(RunUpAttempt(boardFeet = 1.5)))
+        )
+        assertTrue(RecordsEngine.build(emptyList(), listOf(runUp)).isEmpty())
+    }
+
+    @Test
     fun barbell_weightIsResult_singleRecordAcrossWeights() {
         fun squat(id: Long, kg: Double, day: Int) = ExerciseResult(
             id = id, exerciseId = 1, exerciseName = "Присед", trainingSessionId = 1, date = day * this.day,
@@ -117,7 +142,7 @@ class RecordsEngineTest {
         )
         val r = RecordsEngine.build(listOf(manual), listOf(squat(1, 120.0, 1), squat(2, 140.0, 2))).single()
         assertEquals(150.0, r.best, 1e-9)
-        assertEquals("Присед · штанга", r.displayName)
+        assertEquals("Присед штанга", r.displayName)
         assertTrue(RecordsEngine.isLoadedImplement(ResultUnit.KG, ResultUnit.KG))
         assertFalse(RecordsEngine.isLoadedImplement(ResultUnit.CM, ResultUnit.CM))
     }

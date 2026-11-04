@@ -45,6 +45,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.Stroke
 import com.example.diarytripeljump.data.startOfDay
 import com.example.diarytripeljump.data.RecordsEngine
+import com.example.diarytripeljump.data.RunUp
+import com.example.diarytripeljump.data.RunUpAttempt
 import com.example.diarytripeljump.data.formatNumber
 import com.example.diarytripeljump.data.formatRecordValue
 import androidx.compose.foundation.text.KeyboardOptions
@@ -114,7 +116,8 @@ fun TrainingsScreen(
             trainingsList
         } else {
             val key = calDayKey(selectedDateMillis!!)
-            trainingsList.filter { item -> calDayKey(item.training.date) == key }
+            // в течение дня — по времени: утренняя тренировка выше вечерней
+            trainingsList.filter { item -> calDayKey(item.training.date) == key }.sortedBy { it.training.date }
         }
     }
 
@@ -431,7 +434,8 @@ fun TrainingsScreen(
                     inventoryUnit = exRes.inventoryUnit,
                     // вес штанги = результат, в форме он не хранится отдельно
                     inventoryValue = if (loaded) null else exRes.inventoryValue,
-                    inSpikes = exRes.inSpikes
+                    inSpikes = exRes.inSpikes,
+                    runUp = exRes.runUpJson?.let { RunUp.decode(it) }
                 )
             }
         }
@@ -439,6 +443,7 @@ fun TrainingsScreen(
         AddTrainingDialog(
             exercisesList = exercisesList,
             initialDate = session.date,
+            keepInitialTime = true,
             existingInputs = existingInputs,
             dialogTitle = "Тренировка",
             onDismiss = { editingTrainingItem = null },
@@ -1234,7 +1239,8 @@ fun TrainingSessionCard(
                     )
                     Text(
                         text = if (isSkipped) "Причина: ${session.skipReason ?: "не указана"}"
-                        else "$exerciseCount ${pluralRu(exerciseCount, "упражнение", "упражнения", "упражнений")}",
+                        else SimpleDateFormat("HH:mm", Locale("ru")).format(Date(session.date)) +
+                            ", $exerciseCount ${pluralRu(exerciseCount, "упражнение", "упражнения", "упражнений")}",
                         style = MaterialTheme.typography.bodySmall,
                         color = cs.onSurfaceVariant,
                         maxLines = 2,
@@ -1266,15 +1272,18 @@ fun TrainingSessionCard(
                         val lowerBetter = RecordsEngine.isLowerBetter(exName, exRes.resultUnit)
                         val candidates = attempts + listOfNotNull(exRes.result.takeIf { it > 0 })
                         val best = if (lowerBetter) candidates.minOrNull() else candidates.maxOrNull()
+                        val runUpLines = exRes.runUpJson?.let { RunUp.decode(it) }?.map { RunUp.describe(it) }
                         val detail = when {
+                            runUpLines != null -> runUpLines.mapIndexed { i, line -> "${i + 1}. $line" }
+                                .joinToString("\n").ifBlank { "Попытки не заполнены" }
                             attempts.size > 1 -> attempts.joinToString(" · ") { plainAttempt(it) }
                             exRes.sets != null && exRes.sets > 0 && exRes.reps != null && exRes.reps > 0 -> "${exRes.sets} × ${exRes.reps}"
                             else -> null
                         }
-                        val inventoryText = RecordsEngine.inventoryLabel(exRes.inventoryName, exRes.inventoryUnit, exRes.inventoryValue)
-                        val tags = (RecordsEngine.legSuffix(exRes.isSingleLeg, exRes.legSide) +
-                            RecordsEngine.spikesSuffix(exRes.inSpikes) +
-                            (if (inventoryText != null) " · $inventoryText" else "")).removePrefix(" · ")
+                        val fullTitle = RecordsEngine.exerciseTitle(
+                            exName, exRes.isSingleLeg, exRes.legSide, exRes.inSpikes,
+                            exRes.inventoryName, exRes.inventoryUnit, exRes.inventoryValue, exRes.resultUnit
+                        )
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1282,20 +1291,17 @@ fun TrainingSessionCard(
                         ) {
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                                 Text(
-                                    text = exName,
+                                    text = styledTitle(fullTitle, exName),
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Medium,
                                     color = cs.onSurface
                                 )
-                                if (tags.isNotBlank()) {
-                                    Text(text = tags, style = MaterialTheme.typography.labelSmall, color = cs.tertiary)
-                                }
                                 if (detail != null) {
                                     Text(
                                         text = detail,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = cs.onSurfaceVariant,
-                                        maxLines = 1,
+                                        maxLines = if (runUpLines != null) Int.MAX_VALUE else 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
@@ -1351,6 +1357,8 @@ fun TrainingSessionCard(
 fun AddTrainingDialog(
     exercisesList: List<Exercise>,
     initialDate: Long,
+    /** true — сохранённая тренировка со своим временем; у новой подставляется текущее время. */
+    keepInitialTime: Boolean = false,
     existingInputs: List<ExerciseResultInput> = emptyList(),
     dialogTitle: String = "Новая тренировка",
     onDismiss: () -> Unit,
@@ -1366,9 +1374,15 @@ fun AddTrainingDialog(
     onSaveComplex: (id: Long?, name: String, description: String?, exerciseIds: List<Long>) -> Unit = { _, _, _, _ -> },
     onDeleteExercise: (Exercise) -> Unit = {}
 ) {
-    // дату можно поменять и у новой, и у сохранённой тренировки
-    var trainingDate by remember { mutableLongStateOf(initialDate) }
+    // дату и время можно поменять и у новой, и у сохранённой тренировки; за день тренировок может быть несколько
+    var trainingDate by remember {
+        mutableLongStateOf(
+            if (keepInitialTime) initialDate
+            else startOfDay(initialDate) + (System.currentTimeMillis() - startOfDay(System.currentTimeMillis()))
+        )
+    }
     var pickingDate by remember { mutableStateOf(false) }
+    var pickingTime by remember { mutableStateOf(false) }
     var editingComplex by remember { mutableStateOf<ComplexUi?>(null) }
     // правка упражнения прямо в тренировке: индекс выполнения и параметры, ожидающие выбора «заменить / создать»
     var variantEditIndex by remember { mutableStateOf<Int?>(null) }
@@ -1413,7 +1427,10 @@ fun AddTrainingDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                DateField(label = "Дата тренировки", millis = trainingDate, onClick = { pickingDate = true }, modifier = Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DateField(label = "Дата тренировки", millis = trainingDate, onClick = { pickingDate = true }, modifier = Modifier.weight(1f))
+                    TimeField(label = "Время", millis = trainingDate, onClick = { pickingTime = true })
+                }
 
                 // Фильтр справочника по виду: короткие подписи, обычный размер шрифта
                 Row(
@@ -1465,7 +1482,7 @@ fun AddTrainingDialog(
                                     Column(modifier = Modifier.weight(1f).padding(vertical = 6.dp)) {
                                         // снаряд, шиповки, нога — прямо в названии упражнения
                                         Text(
-                                            text = ex.title(),
+                                            text = ex.styledTitle(),
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = if (isAdded) FontWeight.Bold else FontWeight.Medium,
                                             color = if (isAdded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
@@ -1564,6 +1581,23 @@ fun AddTrainingDialog(
                             )
                         }
                     }
+                }
+
+                // Разбег — отдельное упражнение: вместо результата окно с попытками
+                OutlinedButton(
+                    onClick = {
+                        if (addedExerciseInputs.none { it.runUp != null }) {
+                            addedExerciseInputs = addedExerciseInputs + ExerciseResultInput(
+                                exerciseId = 0, exerciseName = RunUp.NAME, result = 0.0, unit = ResultUnit.CM, runUp = emptyList()
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(imageVector = Icons.Default.Straighten, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = RunUp.NAME)
                 }
 
                 // Создание упражнения — в конструкторе
@@ -1708,8 +1742,20 @@ fun AddTrainingDialog(
             initialMillis = trainingDate,
             onDismiss = { pickingDate = false },
             onConfirm = {
-                trainingDate = it
+                // выбранный день, время остаётся прежним
+                trainingDate = startOfDay(it) + (trainingDate - startOfDay(trainingDate))
                 pickingDate = false
+            }
+        )
+    }
+
+    if (pickingTime) {
+        AppTimePickerDialog(
+            initialMillis = trainingDate,
+            onDismiss = { pickingTime = false },
+            onConfirm = { hour, minute ->
+                trainingDate = startOfDay(trainingDate) + (hour * 60L + minute) * 60_000L
+                pickingTime = false
             }
         )
     }
@@ -1847,6 +1893,7 @@ fun ExerciseResultEditorCard(
     onEditExercise: () -> Unit = {}
 ) {
     var showPerSetDialog by remember { mutableStateOf(false) }
+    var showRunUpDialog by remember { mutableStateOf(false) }
 
     var setsStr by remember(input.exerciseName) { mutableStateOf(input.sets?.toString() ?: "") }
     var repsStr by remember(input.exerciseName) { mutableStateOf(input.reps?.toString() ?: "") }
@@ -1888,7 +1935,7 @@ fun ExerciseResultEditorCard(
                         .padding(vertical = 2.dp)
                 ) {
                     Text(
-                        text = input.title(),
+                        text = input.styledTitle(),
                         style = MaterialTheme.typography.titleSmall,
                         color = cs.onSurface
                     )
@@ -1909,6 +1956,20 @@ fun ExerciseResultEditorCard(
                 }
             }
 
+            if (input.runUp != null) {
+                input.runUp.forEachIndexed { i, attempt ->
+                    Text(
+                        text = "${i + 1}. ${RunUp.describe(attempt)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant
+                    )
+                }
+                OutlinedButton(onClick = { showRunUpDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(imageVector = Icons.Default.Straighten, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = if (input.runUp.isEmpty()) "Ввести попытки разбега" else "Изменить попытки разбега")
+                }
+            } else {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1948,7 +2009,20 @@ fun ExerciseResultEditorCard(
                     else "Ввести результаты попыток"
                 )
             }
+            }
         }
+    }
+
+    if (showRunUpDialog) {
+        RunUpResultsDialog(
+            exerciseName = input.title(),
+            initial = input.runUp.orEmpty(),
+            onDismiss = { showRunUpDialog = false },
+            onConfirm = { attempts ->
+                onUpdate(input.copy(result = 0.0, runUp = attempts))
+                showRunUpDialog = false
+            }
+        )
     }
 
     if (showPerSetDialog) {
@@ -1965,6 +2039,183 @@ fun ExerciseResultEditorCard(
             }
         )
     }
+}
+
+/** Строка формы разбега. [board]: 0 — не указано, 1 — заступил, 2 — не доступил, 3 — попал. [move]: 0 — нет, 1 — отнёс, 2 — поднёс. */
+private data class RunUpRow(
+    val board: Int = 0,
+    val boardFeet: String = "",
+    val move: Int = 0,
+    val moveCm: String = "",
+    val moveFeet: String = ""
+) {
+    fun toAttempt(): RunUpAttempt {
+        val feet = boardFeet.toDoubleOrNull()
+        val sign = if (move == 2) -1 else 1
+        return RunUpAttempt(
+            boardFeet = when (board) {
+                1 -> feet
+                2 -> feet?.let { -it }
+                3 -> 0.0
+                else -> null
+            },
+            moveCm = moveCm.toDoubleOrNull()?.takeIf { move != 0 }?.let { it * sign },
+            moveFeet = moveFeet.toDoubleOrNull()?.takeIf { move != 0 }?.let { it * sign }
+        )
+    }
+}
+
+private fun plainNumber(value: Double): String = Math.abs(value).let { if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() }
+
+private fun RunUpAttempt.toRow(): RunUpRow {
+    val moved = moveCm ?: moveFeet
+    return RunUpRow(
+        board = when {
+            boardFeet == null -> 0
+            boardFeet > 0 -> 1
+            boardFeet < 0 -> 2
+            else -> 3
+        },
+        boardFeet = boardFeet?.takeIf { it != 0.0 }?.let { plainNumber(it) } ?: "",
+        move = when {
+            moved == null -> 0
+            moved > 0 -> 1
+            else -> 2
+        },
+        moveCm = moveCm?.let { plainNumber(it) } ?: "",
+        moveFeet = moveFeet?.let { plainNumber(it) } ?: ""
+    )
+}
+
+/**
+ * Окно попыток с разбега: попал или нет, сколько стоп, на сколько отнёс или поднёс отметку.
+ * [fixedCount] — у старта число попыток задано, и номер попытки сохраняется вместе с пустыми.
+ */
+@Composable
+fun RunUpResultsDialog(
+    exerciseName: String,
+    initial: List<RunUpAttempt>,
+    onDismiss: () -> Unit,
+    onConfirm: (List<RunUpAttempt>) -> Unit,
+    fixedCount: Int? = null
+) {
+    val cs = MaterialTheme.colorScheme
+    val rows = remember {
+        mutableStateListOf<RunUpRow>().apply {
+            addAll(initial.map { it.toRow() })
+            if (fixedCount != null) {
+                while (size < fixedCount) add(RunUpRow())
+                while (size > fixedCount) removeAt(lastIndex)
+            } else if (isEmpty()) {
+                add(RunUpRow())
+            }
+        }
+    }
+    fun numeric(v: String) = v.replace(',', '.').filter { it.isDigit() || it == '.' }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(text = "Разбег", style = MaterialTheme.typography.titleLarge)
+                Text(text = exerciseName, style = MaterialTheme.typography.bodyMedium, color = cs.primary)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                rows.forEachIndexed { i, row ->
+                    AppCard(containerColor = cs.surfaceContainerLow) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "Попытка ${i + 1}",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = cs.onSurface,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (rows.size > 1 && fixedCount == null) {
+                                    IconButton(onClick = { rows.removeAt(i) }, modifier = Modifier.size(28.dp)) {
+                                        Icon(Icons.Default.Close, contentDescription = "Убрать попытку", modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf(1 to "Заступил", 2 to "Не доступил", 3 to "Попал").forEach { (code, label) ->
+                                    ToggleChip(
+                                        label = label,
+                                        selected = row.board == code,
+                                        onClick = { rows[i] = row.copy(board = if (row.board == code) 0 else code) }
+                                    )
+                                }
+                            }
+                            if (row.board == 1 || row.board == 2) {
+                                OutlinedTextField(
+                                    value = row.boardFeet,
+                                    onValueChange = { rows[i] = row.copy(boardFeet = numeric(it)) },
+                                    label = { Text("Сколько стоп") },
+                                    suffix = { Text("ст.") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf(1 to "Отнёс", 2 to "Поднёс").forEach { (code, label) ->
+                                    ToggleChip(
+                                        label = label,
+                                        selected = row.move == code,
+                                        onClick = { rows[i] = row.copy(move = if (row.move == code) 0 else code) }
+                                    )
+                                }
+                            }
+                            if (row.move != 0) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedTextField(
+                                        value = row.moveCm,
+                                        onValueChange = { rows[i] = row.copy(moveCm = numeric(it)) },
+                                        label = { Text("Сантиметры") },
+                                        suffix = { Text("см") },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    OutlinedTextField(
+                                        value = row.moveFeet,
+                                        onValueChange = { rows[i] = row.copy(moveFeet = numeric(it)) },
+                                        label = { Text("Стопы") },
+                                        suffix = { Text("ст.") },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                if (fixedCount == null) {
+                    TextButton(onClick = { rows.add(RunUpRow()) }) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Ещё попытка")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val attempts = rows.map { it.toAttempt() }
+                onConfirm(if (fixedCount != null) attempts else attempts.filterNot { it.isEmpty })
+            }) { Text("Готово") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
 }
 
 /** Создание инвентаря: название и единица измерения (см или кг). */

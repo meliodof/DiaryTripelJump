@@ -26,7 +26,10 @@ import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -577,6 +580,54 @@ fun DateField(
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(text = text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+/** Диалог выбора времени в 24-часовом формате. Возвращает часы и минуты. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AppTimePickerDialog(
+    initialMillis: Long,
+    onDismiss: () -> Unit,
+    onConfirm: (hour: Int, minute: Int) -> Unit
+) {
+    val local = java.util.Calendar.getInstance().apply { timeInMillis = initialMillis }
+    val state = rememberTimePickerState(
+        initialHour = local.get(java.util.Calendar.HOUR_OF_DAY),
+        initialMinute = local.get(java.util.Calendar.MINUTE),
+        is24Hour = true
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        text = { TimePicker(state = state) },
+        confirmButton = { TextButton(onClick = { onConfirm(state.hour, state.minute) }) { Text("Готово") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
+}
+
+/** Поле-кнопка выбора времени с подписью. */
+@Composable
+fun TimeField(
+    label: String,
+    millis: Long,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                text = SimpleDateFormat("HH:mm", Locale("ru")).format(Date(millis)),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
         }
     }
 }

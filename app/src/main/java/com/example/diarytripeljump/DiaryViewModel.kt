@@ -24,7 +24,9 @@ data class ExerciseResultInput(
     val inventoryUnit: ResultUnit? = null,
     val inventoryValue: Double? = null,
     /** Выполнялось в шиповках — рекорд ведётся отдельно. */
-    val inSpikes: Boolean = false
+    val inSpikes: Boolean = false,
+    /** Упражнение по разбегу: заступы и перенос отметки вместо обычных результатов; null — обычное упражнение. */
+    val runUp: List<RunUpAttempt>? = null
 )
 
 /** Результат старта в тройном прыжке для главного экрана. */
@@ -140,6 +142,41 @@ class DiaryViewModel(
     val goals: StateFlow<List<ExerciseGoal>> = repository.getAllGoals()
         .stateIn(viewModelScope, AppSharing, emptyList())
 
+    /** Разряд определяется сам по лучшим результатам в тройном прыжке на соревнованиях и по рекорду из профиля. */
+    val autoRank: StateFlow<AutoRank?> = combine(athleteProfile, allCompetitions, rawTripleJumpResults) { profile, comps, results ->
+        val today = startOfDay(System.currentTimeMillis())
+        val samples = buildList<Pair<Double, Long>> {
+            comps.filter { it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED && startOfDay(it.date) <= today }
+                .forEach { c -> bestOfAttempts(c.attemptsJson)?.let { add(it to c.date) } }
+            results.filter {
+                it.isCompetition && !it.isAntiRecord && it.resultUnit == ResultUnit.M && !it.isSingleLeg &&
+                    it.eventName.contains("тройной", ignoreCase = true)
+            }.forEach { add(it.result to it.date) }
+            profile?.customPbMeters?.takeIf { it > 0 }?.let { add(it to System.currentTimeMillis()) }
+        }
+        SportRanks.best(samples, profile?.gender, profile?.birthDate)
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, null)
+
+    /** История размера разбега: ручные замеры и все переносы отметки из тренировок и стартов. */
+    val runUpHistory: StateFlow<List<RunUpHistoryEntry>> =
+        combine(repository.getRunUpMeasurements(), allExerciseResults, allCompetitions) { measurements, exercises, comps ->
+            val moves = exercises.mapNotNull { r ->
+                r.runUpJson?.let { RunUp.moveOf(r.date, RunUp.decode(it), "Тренировка") }
+            } + comps.filter { it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED }.mapNotNull { c ->
+                c.runUpJson?.let { RunUp.moveOf(c.date, RunUp.decode(it), c.name) }
+            }
+            RunUpLength.build(measurements, moves)
+        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, emptyList())
+
+    fun saveRunUpLength(lengthCm: Double?, lengthFeet: Double?) {
+        if (lengthCm == null && lengthFeet == null) return
+        viewModelScope.launch {
+            repository.insertRunUpMeasurement(
+                RunUpMeasurement(date = System.currentTimeMillis(), lengthCm = lengthCm, lengthFeet = lengthFeet)
+            )
+        }
+    }
+
     /** Избранные упражнения каталога — именно они показываются на главном экране. */
     val favoriteExercises: StateFlow<List<Exercise>> = allExercises
         .map { list -> list.filter { it.isFavorite }.distinctBy { it.variantKey() }.sortedBy { it.title().lowercase() } }
@@ -200,7 +237,8 @@ class DiaryViewModel(
         height: Double?,
         weight: Double?,
         customPbMeters: Double?,
-        gender: String?
+        gender: String?,
+        leadingLeg: String?
     ) {
         viewModelScope.launch {
             val current = repository.getProfile().first() ?: AthleteProfile()
@@ -216,7 +254,8 @@ class DiaryViewModel(
                     birthDate = birthDate,
                     height = height,
                     weight = weight,
-                    customPbMeters = customPbMeters
+                    customPbMeters = customPbMeters,
+                    leadingLeg = leadingLeg
                 )
             )
         }
@@ -287,18 +326,40 @@ class DiaryViewModel(
     }
 
     // --- Manual record edits ---
-    fun updateRecord(record: RecordSummary, value: Double, date: Long, isIndoor: Boolean, weather: String?, notes: String?) {
+    /**
+     * Полная правка рекорда. Запись, внесённая вручную, меняется сама; рекорд из тренировок вычисляется,
+     * поэтому для него хранится правка, которая действует, пока рекорд не обновится новым результатом.
+     */
+    fun updateRecord(record: RecordSummary, input: NewRecordInput) {
         viewModelScope.launch {
+            val hasInventory = !input.inventoryName.isNullOrBlank()
+            val weather = if (input.isIndoor) null else input.weather?.takeIf { it.isNotBlank() }
+            val notes = input.notes?.takeIf { it.isNotBlank() }
+            val legSide = if (input.isSingleLeg) input.legSide else null
+            val inventoryName = if (hasInventory) input.inventoryName else null
+            val inventoryUnit = if (hasInventory) input.inventoryUnit else null
+            val inventoryValue = if (hasInventory) input.inventoryValue else null
             val id = record.deletableResultId
             if (id != null) {
                 val row = repository.getAllResults().first().find { it.id == id } ?: return@launch
                 repository.updateTripleJumpResult(
                     row.copy(
-                        result = value,
-                        date = date,
-                        isIndoor = isIndoor,
-                        weatherConditions = weather?.takeIf { it.isNotBlank() },
-                        notes = notes?.takeIf { it.isNotBlank() }
+                        eventName = input.eventName.trim(),
+                        result = input.result,
+                        resultUnit = input.unit,
+                        date = input.date,
+                        isIndoor = input.isIndoor,
+                        recordLevel = input.recordLevel,
+                        exerciseCategory = input.category,
+                        isCompetition = input.isCompetition,
+                        weatherConditions = weather,
+                        notes = notes,
+                        isSingleLeg = input.isSingleLeg,
+                        legSide = legSide,
+                        inventoryName = inventoryName,
+                        inventoryUnit = inventoryUnit,
+                        inventoryValue = inventoryValue,
+                        inSpikes = input.inSpikes
                     )
                 )
             } else {
@@ -306,11 +367,22 @@ class DiaryViewModel(
                     RecordOverride(
                         recordKey = record.key,
                         baseBest = record.autoBest,
-                        value = value,
-                        date = date,
-                        isIndoor = isIndoor,
-                        weather = weather?.takeIf { it.isNotBlank() },
-                        notes = notes?.takeIf { it.isNotBlank() }
+                        value = input.result,
+                        date = input.date,
+                        isIndoor = input.isIndoor,
+                        weather = weather,
+                        notes = notes,
+                        eventName = input.eventName.trim(),
+                        category = input.category,
+                        unit = input.unit,
+                        recordLevel = input.recordLevel,
+                        isCompetition = input.isCompetition,
+                        isSingleLeg = input.isSingleLeg,
+                        legSide = legSide,
+                        inSpikes = input.inSpikes,
+                        inventoryName = inventoryName,
+                        inventoryUnit = inventoryUnit,
+                        inventoryValue = inventoryValue
                     )
                 )
             }
@@ -452,7 +524,8 @@ class DiaryViewModel(
         placement: String? = null,
         attemptsJson: String? = null,
         date: Long = System.currentTimeMillis(),
-        eventType: String = "Тройной прыжок"
+        eventType: String = "Тройной прыжок",
+        runUpJson: String? = null
     ) {
         viewModelScope.launch {
             val fullAddr = address ?: listOfNotNull(country, city, streetAndNumber).joinToString(", ")
@@ -472,7 +545,8 @@ class DiaryViewModel(
                     attemptsJson = attemptsJson,
                     date = date,
                     eventType = eventType,
-                    status = CompetitionStatus.UPCOMING
+                    status = CompetitionStatus.UPCOMING,
+                    runUpJson = runUpJson
                 )
             )
         }
@@ -548,10 +622,9 @@ class DiaryViewModel(
     ) {
         viewModelScope.launch {
             repository.inTransaction {
-                // дата тренировки тоже меняется (раньше менялись только даты упражнений); время дня сохраняется
+                // [date] — дата и время из окна тренировки
                 repository.getAllTrainingsWithExercises().first().find { it.training.id == sessionId }?.training?.let { s ->
-                    val newDate = keepTimeOfDay(s.date, date)
-                    if (newDate != s.date) repository.updateTrainingSession(s.copy(date = newDate))
+                    if (date != s.date) repository.updateTrainingSession(s.copy(date = date))
                 }
                 val oldResults = repository.getResultsForTraining(sessionId).first()
                 oldResults.forEach { repository.deleteExerciseResult(it) }
@@ -593,7 +666,8 @@ class DiaryViewModel(
             // сначала то же упражнение справочника, если его вариант не менялся; иначе — по названию и свойствам
             val exId = byId[input.exerciseId]?.takeIf { it.variantKey() == key }?.id ?: byVariant[key]?.id ?: run {
                 val created = Exercise(
-                    name = input.exerciseName, categoryName = "Пользовательские", defaultUnit = input.unit,
+                    name = input.exerciseName, categoryName = if (input.runUp != null) "Прыжковое упражнение" else "Пользовательские",
+                    defaultUnit = input.unit,
                     isSingleLeg = input.isSingleLeg, legSide = input.legSide, inventoryName = input.inventoryName,
                     inventoryUnit = input.inventoryUnit, inventoryValue = input.inventoryValue, inSpikes = input.inSpikes
                 )
@@ -624,7 +698,8 @@ class DiaryViewModel(
                         loaded -> input.result.takeIf { it > 0 }
                         else -> input.inventoryValue
                     },
-                    inSpikes = input.inSpikes
+                    inSpikes = input.inSpikes,
+                    runUpJson = input.runUp?.let { RunUp.encode(it) }
                 )
             )
         }
