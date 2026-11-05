@@ -244,12 +244,12 @@ fun CatalogScreen(
                         )
                         Text(
                             text = buildAnnotatedString {
-                                withStyle(SpanStyle(color = cs.tertiary)) { append("Синее название") }
-                                append(": в шиповках, ")
+                                withStyle(SpanStyle(color = cs.tertiary)) { append("синим") }
+                                append(" шиповки, ")
                                 withStyle(SpanStyle(color = cs.secondary)) { append("оранжевым") }
-                                append(": снаряд, ")
+                                append(" снаряд, ")
                                 withStyle(SpanStyle(color = cs.primary)) { append("зелёным") }
-                                append(": нога")
+                                append(" нога")
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = cs.onSurfaceVariant

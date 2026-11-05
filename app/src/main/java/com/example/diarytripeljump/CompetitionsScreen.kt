@@ -3,10 +3,7 @@ package com.example.diarytripeljump
 import com.example.diarytripeljump.data.RunUp
 import com.example.diarytripeljump.data.RunUpAttempt
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,13 +19,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.diarytripeljump.data.Competition
 import com.example.diarytripeljump.data.CompetitionStatus
-import java.text.SimpleDateFormat
 import java.util.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.offset
@@ -151,7 +145,7 @@ fun CompetitionsScreen(
         AddOrEditCompetitionDialog(
             competitionToEdit = null,
             onDismiss = { showAddDialog = false },
-            onConfirm = { name, country, city, streetAndNumber, eventTime, hasQual, qualStandard, didNotQual, placement, attemptsJson, date, runUpJson ->
+            onConfirm = { name, country, city, streetAndNumber, eventTime, hasQual, qualStandard, didNotQual, placement, attemptsJson, date, runUpJson, qualification ->
                 viewModel.addCompetition(
                     name = name,
                     country = country,
@@ -165,7 +159,8 @@ fun CompetitionsScreen(
                     attemptsJson = attemptsJson,
                     date = date,
                     eventType = "Тройной прыжок",
-                    runUpJson = runUpJson
+                    runUpJson = runUpJson,
+                    qualification = qualification
                 )
                 showAddDialog = false
             }
@@ -177,7 +172,7 @@ fun CompetitionsScreen(
         AddOrEditCompetitionDialog(
             competitionToEdit = editingCompetition,
             onDismiss = { editingCompetition = null },
-            onConfirm = { name, country, city, streetAndNumber, eventTime, hasQual, qualStandard, didNotQual, placement, attemptsJson, date, runUpJson ->
+            onConfirm = { name, country, city, streetAndNumber, eventTime, hasQual, qualStandard, didNotQual, placement, attemptsJson, date, runUpJson, qualification ->
                 val fullAddr = listOfNotNull(country, city, streetAndNumber).joinToString(", ")
                 val updated = editingCompetition!!.copy(
                     name = name,
@@ -193,7 +188,10 @@ fun CompetitionsScreen(
                     placement = placement,
                     attemptsJson = attemptsJson,
                     date = date,
-                    runUpJson = runUpJson
+                    runUpJson = runUpJson,
+                    qualificationAttemptsJson = qualification.attemptsJson,
+                    qualificationRunUpJson = qualification.runUpJson,
+                    qualifiedForFinal = qualification.qualified
                 )
                 viewModel.updateCompetition(updated)
                 editingCompetition = null
@@ -373,7 +371,7 @@ fun CompetitionCardItem(
                     }
                     if (competition.hasQualification) {
                         StatusPill(
-                            text = "Квалификация",
+                            text = if (competition.qualifiedForFinal) "Квалификация" else "Не вышел в финал",
                             contentColor = cs.onSecondaryContainer,
                             containerColor = cs.secondaryContainer
                         )
@@ -397,6 +395,9 @@ fun CompetitionCardItem(
                     }
                     if (competition.hasQualification && !competition.qualificationStandard.isNullOrBlank()) {
                         CompetitionInfoRow(icon = Icons.Default.CheckCircleOutline, text = "Норматив: ${competition.qualificationStandard}")
+                    }
+                    if (competition.hasQualification && !competition.qualificationAttemptsJson.isNullOrBlank()) {
+                        CompetitionInfoRow(icon = Icons.Default.Timer, text = "Квалификация: ${competition.qualificationAttemptsJson}")
                     }
                 }
 
@@ -425,6 +426,16 @@ fun CompetitionCardItem(
                             )
                         }
                     }
+                }
+
+                val qualificationRunUpLines = runUpSummary(RunUp.decode(competition.qualificationRunUpJson))
+                if (qualificationRunUpLines.isNotEmpty()) {
+                    Text(
+                        text = "Разбег в квалификации:\n" + qualificationRunUpLines.joinToString("\n"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant,
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
                 }
 
                 val runUpLines = runUpSummary(RunUp.decode(competition.runUpJson))
@@ -484,7 +495,8 @@ fun AddOrEditCompetitionDialog(
         placement: String,
         attemptsJson: String,
         date: Long,
-        runUpJson: String?
+        runUpJson: String?,
+        qualification: QualificationInput
     ) -> Unit
 ) {
     var nameText by remember { mutableStateOf(competitionToEdit?.name ?: "") }
@@ -535,6 +547,25 @@ fun AddOrEditCompetitionDialog(
 
     var runUpAttempts by remember { mutableStateOf(RunUp.decode(competitionToEdit?.runUpJson)) }
     var showRunUpDialog by remember { mutableStateOf(false) }
+
+    // Квалификация: три попытки, разбег в них и выход в финал
+    val savedQualification = remember(competitionToEdit) {
+        competitionToEdit?.qualificationAttemptsJson?.split(",")?.map { it.trim() } ?: emptyList()
+    }
+    val qualDistList = remember(competitionToEdit) {
+        mutableStateListOf<String>().apply {
+            repeat(3) { i -> add(savedQualification.getOrNull(i)?.takeIf { it.toDoubleOrNull() != null } ?: "") }
+        }
+    }
+    val qualFoulList = remember(competitionToEdit) {
+        mutableStateListOf<Boolean>().apply {
+            repeat(3) { i -> add(savedQualification.getOrNull(i)?.let { it.equals("X", true) || it.equals("Х", true) } == true) }
+        }
+    }
+    var qualified by remember { mutableStateOf(competitionToEdit?.qualifiedForFinal ?: true) }
+    var qualRunUpAttempts by remember { mutableStateOf(RunUp.decode(competitionToEdit?.qualificationRunUpJson)) }
+    var showQualRunUpDialog by remember { mutableStateOf(false) }
+    val showFinal = !hasQual || qualified
 
     var showNameError by remember { mutableStateOf(false) }
 
@@ -675,8 +706,40 @@ fun AddOrEditCompetitionDialog(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    Text("Попытки квалификации", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    for (i in 0 until 3) {
+                        AttemptRow(
+                            number = i + 1,
+                            distance = qualDistList[i],
+                            foul = qualFoulList[i],
+                            onDistance = { qualDistList[i] = it },
+                            onFoul = { qualFoulList[i] = it }
+                        )
+                    }
+                    val standard = qualStandardText.replace(',', '.').toDoubleOrNull()
+                    val bestQualification = (0 until 3).filterNot { qualFoulList[it] }.mapNotNull { qualDistList[it].toDoubleOrNull() }.maxOrNull()
+                    if (standard != null && bestQualification != null) {
+                        Text(
+                            text = if (bestQualification >= standard) "Норматив выполнен" else "Норматив не выполнен",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    FormSwitchRow(
+                        title = "Вышел в финал",
+                        subtitle = "Можно выйти и без норматива: по числу участников",
+                        checked = qualified,
+                        onChange = { qualified = it }
+                    )
+                    runUpSummary(qualRunUpAttempts).forEach { line ->
+                        Text(text = line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    OutlinedButton(onClick = { showQualRunUpDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (qualRunUpAttempts.all { it.isEmpty }) "Указать разбег в квалификации" else "Изменить разбег в квалификации")
+                    }
                 }
 
+                if (showFinal) {
                 Text("Попытки 1–3", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 for (i in 0 until 3) {
                     AttemptRow(
@@ -714,6 +777,7 @@ fun AddOrEditCompetitionDialog(
                 OutlinedButton(onClick = { showRunUpDialog = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(if (runUpAttempts.all { it.isEmpty }) "Указать разбег по попыткам" else "Изменить разбег по попыткам")
                 }
+                }
             }
         },
         confirmButton = {
@@ -722,11 +786,19 @@ fun AddOrEditCompetitionDialog(
                     if (nameText.isNotBlank()) {
                         val finalCityName = if (isCustomCity) customCityText.ifBlank { "Москва" } else selectedCity
 
-                        val finalAttemptsStr = (0 until 6).joinToString(", ") { i ->
+                        val finalAttemptsStr = if (!showFinal) "" else (0 until 6).joinToString(", ") { i ->
                             if (i >= 3 && didNotMakeTop8) "-"
                             else if (finalAttemptsFoulList[i]) "X"
                             else finalAttemptsDistList[i].ifBlank { "-" }
                         }
+                        val qualificationStr = (0 until 3).joinToString(", ") { i ->
+                            if (qualFoulList[i]) "X" else qualDistList[i].ifBlank { "-" }
+                        }
+                        val qualification = if (!hasQual) QualificationInput() else QualificationInput(
+                            attemptsJson = qualificationStr,
+                            runUpJson = qualRunUpAttempts.takeIf { list -> list.any { !it.isEmpty } }?.let { RunUp.encodeAll(it) },
+                            qualified = qualified
+                        )
 
                         onConfirm(
                             nameText.trim(),
@@ -740,7 +812,8 @@ fun AddOrEditCompetitionDialog(
                             placementText,
                             finalAttemptsStr,
                             dateMillis,
-                            runUpAttempts.takeIf { list -> list.any { !it.isEmpty } }?.let { RunUp.encodeAll(it) }
+                            runUpAttempts.takeIf { list -> showFinal && list.any { !it.isEmpty } }?.let { RunUp.encodeAll(it) },
+                            qualification
                         )
                     } else {
                         showNameError = true
@@ -750,6 +823,19 @@ fun AddOrEditCompetitionDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
+
+    if (showQualRunUpDialog) {
+        RunUpResultsDialog(
+            exerciseName = "Квалификация",
+            initial = qualRunUpAttempts,
+            fixedCount = 3,
+            onDismiss = { showQualRunUpDialog = false },
+            onConfirm = {
+                qualRunUpAttempts = it
+                showQualRunUpDialog = false
+            }
+        )
+    }
 
     if (showRunUpDialog) {
         RunUpResultsDialog(

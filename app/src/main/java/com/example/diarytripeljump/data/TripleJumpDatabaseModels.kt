@@ -49,7 +49,12 @@ data class Competition(
     val skipReason: String? = null,
     val notes: String? = null,
     /** Точность разбега по попыткам, формат [RunUp.encodeAll]: номер попытки сохраняется. */
-    val runUpJson: String? = null
+    val runUpJson: String? = null,
+    /** Попытки квалификации в том же формате, что [attemptsJson]. */
+    val qualificationAttemptsJson: String? = null,
+    val qualificationRunUpJson: String? = null,
+    /** false — квалификация не пройдена, в финале спортсмен не выступал. */
+    val qualifiedForFinal: Boolean = true
 )
 
 enum class CompetitionStatus { ONGOING, UPCOMING, COMPLETED, SKIPPED, CANCELLED }
@@ -160,7 +165,9 @@ data class Exercise(
     // Избранное: отображается на главном экране
     val isFavorite: Boolean = false,
     // Обычно выполняется в шиповках: значение по умолчанию при добавлении в тренировку
-    val inSpikes: Boolean = false
+    val inSpikes: Boolean = false,
+    // Где в названии стоят нога, снаряд и шиповки, см. [TitleGrammar.compose]; null — автоматически
+    val titleLayout: String? = null
 )
 
 @Entity(
@@ -199,7 +206,11 @@ data class ExerciseResult(
     // Упражнение выполнялось в шиповках — рекорды ведутся отдельно от выполнения в обычной обуви
     val inSpikes: Boolean = false,
     // Упражнение по разбегу: попытки в формате [RunUp.encode]; null — обычное упражнение
-    val runUpJson: String? = null
+    val runUpJson: String? = null,
+    // Положение свойств в названии, как у упражнения в справочнике
+    val titleLayout: String? = null,
+    // Повторения по подходам, если их было разное число: «5,5,3»; null — во всех подходах по [reps]
+    val repsPerSetJson: String? = null
 )
 
 /** Цель по результату. Ключ совпадает с ключом рекорда ([RecordSummary.key]), поэтому прогресс считается автоматически. */

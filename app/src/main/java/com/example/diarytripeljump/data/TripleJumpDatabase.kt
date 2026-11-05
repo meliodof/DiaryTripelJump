@@ -208,15 +208,39 @@ abstract class TripleJumpDatabase : RoomDatabase() {
             }
         }
 
+        /** 19 → 20: попытки квалификации и выход в финал. Данные сохраняются. */
+        internal val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE competitions ADD COLUMN qualificationAttemptsJson TEXT")
+                db.execSQL("ALTER TABLE competitions ADD COLUMN qualificationRunUpJson TEXT")
+                db.execSQL("ALTER TABLE competitions ADD COLUMN qualifiedForFinal INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
+        /** 20 → 21: положение ноги, снаряда и шиповок в названии упражнения. Данные сохраняются. */
+        internal val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE exercises ADD COLUMN titleLayout TEXT")
+                db.execSQL("ALTER TABLE exercise_results ADD COLUMN titleLayout TEXT")
+            }
+        }
+
+        /** 21 → 22: разное число повторений в подходах. Данные сохраняются. */
+        internal val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE exercise_results ADD COLUMN repsPerSetJson TEXT")
+            }
+        }
+
         internal val ALL_MIGRATIONS = arrayOf(
             MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17,
-            MIGRATION_17_18, MIGRATION_18_19
+            MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22
         )
 
         const val DATABASE_NAME = "triple_jump_database"
 
         // Уже выпущенную версию не меняем: любое изменение схемы — новая версия и новая миграция
-        const val CURRENT_VERSION = 19
+        const val CURRENT_VERSION = 22
 
         /** Самая старая версия, которую можно перенести без потери данных. */
         const val MIN_MIGRATABLE_VERSION = 11

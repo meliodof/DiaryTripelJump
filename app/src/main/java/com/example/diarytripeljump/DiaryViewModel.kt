@@ -26,7 +26,11 @@ data class ExerciseResultInput(
     /** Выполнялось в шиповках — рекорд ведётся отдельно. */
     val inSpikes: Boolean = false,
     /** Упражнение по разбегу: заступы и перенос отметки вместо обычных результатов; null — обычное упражнение. */
-    val runUp: List<RunUpAttempt>? = null
+    val runUp: List<RunUpAttempt>? = null,
+    /** Положение свойств в названии, см. [TitleGrammar.compose]. */
+    val titleLayout: String? = null,
+    /** Повторения по подходам, если их было разное число; null — во всех подходах по [reps]. */
+    val repsPerSet: List<Int>? = null
 )
 
 /** Результат старта в тройном прыжке для главного экрана. */
@@ -36,6 +40,13 @@ data class StartResultUi(
     val placement: String?,
     val attemptsText: String?,
     val isPersonalBest: Boolean
+)
+
+/** Квалификация старта: попытки, разбег в них и вышел ли спортсмен в финал. */
+data class QualificationInput(
+    val attemptsJson: String? = null,
+    val runUpJson: String? = null,
+    val qualified: Boolean = true
 )
 
 /** Данные для записи, добавляемой на вкладке «Рекорды». */
@@ -64,6 +75,10 @@ private val NumberRegex = Regex("\\d+(?:[.,]\\d+)?")
 /** Лучшая попытка из строки вида «15.12, 15.31, X, 15.40». */
 private fun bestOfAttempts(text: String?): Double? =
     text?.let { NumberRegex.findAll(it).mapNotNull { m -> m.value.replace(',', '.').toDoubleOrNull() }.maxOrNull() }
+
+/** Лучшая попытка старта с учётом квалификации: норма может быть выполнена и там. */
+private fun bestOfCompetition(c: Competition): Double? =
+    listOfNotNull(bestOfAttempts(c.attemptsJson), bestOfAttempts(c.qualificationAttemptsJson)).maxOrNull()
 
 /** Комплекс вместе с развёрнутым списком упражнений (в порядке выполнения). */
 data class ComplexUi(
@@ -134,8 +149,12 @@ class DiaryViewModel(
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, emptyList())
 
     // Тяжёлые вычисления — в фоновом потоке, чтобы не задерживать отрисовку при переключении вкладок
-    val records: StateFlow<List<RecordSummary>> = combine(rawTripleJumpResults, allExerciseResults, recordOverrides) { tj, ex, ov ->
-        RecordsEngine.build(tj, ex, ov)
+    val records: StateFlow<List<RecordSummary>> = combine(rawTripleJumpResults, allExerciseResults, recordOverrides, allCompetitions) { tj, ex, ov, comps ->
+        val today = startOfDay(System.currentTimeMillis())
+        val starts = comps
+            .filter { it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED && startOfDay(it.date) <= today }
+            .mapNotNull { c -> bestOfCompetition(c)?.let { it to c.date } }
+        RecordsEngine.build(tj, ex, ov, starts)
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, emptyList())
 
     /** Цели по результатам; ключ совпадает с ключом рекорда. */
@@ -147,7 +166,7 @@ class DiaryViewModel(
         val today = startOfDay(System.currentTimeMillis())
         val samples = buildList<Pair<Double, Long>> {
             comps.filter { it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED && startOfDay(it.date) <= today }
-                .forEach { c -> bestOfAttempts(c.attemptsJson)?.let { add(it to c.date) } }
+                .forEach { c -> bestOfCompetition(c)?.let { add(it to c.date) } }
             results.filter {
                 it.isCompetition && !it.isAntiRecord && it.resultUnit == ResultUnit.M && !it.isSingleLeg &&
                     it.eventName.contains("тройной", ignoreCase = true)
@@ -163,7 +182,7 @@ class DiaryViewModel(
             val moves = exercises.mapNotNull { r ->
                 r.runUpJson?.let { RunUp.moveOf(r.date, RunUp.decode(it), "Тренировка") }
             } + comps.filter { it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED }.mapNotNull { c ->
-                c.runUpJson?.let { RunUp.moveOf(c.date, RunUp.decode(it), c.name) }
+                RunUp.moveOf(c.date, RunUp.decode(c.qualificationRunUpJson) + RunUp.decode(c.runUpJson), c.name)
             }
             RunUpLength.build(measurements, moves)
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, emptyList())
@@ -191,7 +210,7 @@ class DiaryViewModel(
                 .filter { startOfDay(it.date) <= today }
                 .mapNotNull { c ->
                     val linked = results.filter { it.competitionId == c.id && !it.isAntiRecord && it.result > 0 }
-                    val best = linked.maxOfOrNull { it.result } ?: bestOfAttempts(c.attemptsJson) ?: return@mapNotNull null
+                    val best = linked.maxOfOrNull { it.result } ?: bestOfCompetition(c) ?: return@mapNotNull null
                     StartResultUi(c, best, c.placement, c.attemptsJson, false)
                 }
                 .sortedByDescending { it.competition.date }
@@ -505,7 +524,8 @@ class DiaryViewModel(
             inventoryUnit = if (hasInventory) cfg.inventoryUnit else null,
             // вес нагружаемого снаряда (штанги) не хранится — он равен результату
             inventoryValue = if (hasInventory && !cfg.isLoadedImplement) cfg.inventoryValue else null,
-            inSpikes = cfg.inSpikes
+            inSpikes = cfg.inSpikes,
+            titleLayout = cfg.titleLayout
         )
     }
 
@@ -525,7 +545,8 @@ class DiaryViewModel(
         attemptsJson: String? = null,
         date: Long = System.currentTimeMillis(),
         eventType: String = "Тройной прыжок",
-        runUpJson: String? = null
+        runUpJson: String? = null,
+        qualification: QualificationInput = QualificationInput()
     ) {
         viewModelScope.launch {
             val fullAddr = address ?: listOfNotNull(country, city, streetAndNumber).joinToString(", ")
@@ -546,7 +567,10 @@ class DiaryViewModel(
                     date = date,
                     eventType = eventType,
                     status = CompetitionStatus.UPCOMING,
-                    runUpJson = runUpJson
+                    runUpJson = runUpJson,
+                    qualificationAttemptsJson = qualification.attemptsJson,
+                    qualificationRunUpJson = qualification.runUpJson,
+                    qualifiedForFinal = qualification.qualified
                 )
             )
         }
@@ -669,7 +693,8 @@ class DiaryViewModel(
                     name = input.exerciseName, categoryName = if (input.runUp != null) "Прыжковое упражнение" else "Пользовательские",
                     defaultUnit = input.unit,
                     isSingleLeg = input.isSingleLeg, legSide = input.legSide, inventoryName = input.inventoryName,
-                    inventoryUnit = input.inventoryUnit, inventoryValue = input.inventoryValue, inSpikes = input.inSpikes
+                    inventoryUnit = input.inventoryUnit, inventoryValue = input.inventoryValue, inSpikes = input.inSpikes,
+                    titleLayout = input.titleLayout
                 )
                 val id = repository.insertExercise(created)
                 byVariant[key] = created.copy(id = id)
@@ -699,7 +724,9 @@ class DiaryViewModel(
                         else -> input.inventoryValue
                     },
                     inSpikes = input.inSpikes,
-                    runUpJson = input.runUp?.let { RunUp.encode(it) }
+                    runUpJson = input.runUp?.let { RunUp.encode(it) },
+                    titleLayout = input.titleLayout,
+                    repsPerSetJson = input.repsPerSet?.joinToString(",")
                 )
             )
         }

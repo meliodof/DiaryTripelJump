@@ -47,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -76,6 +77,7 @@ import com.example.diarytripeljump.data.InventoryItem
 import com.example.diarytripeljump.data.RecordsEngine
 import com.example.diarytripeljump.data.ResultUnit
 import com.example.diarytripeljump.data.RunUp
+import com.example.diarytripeljump.data.TitleGrammar
 import com.example.diarytripeljump.data.formatNumber
 import kotlin.math.roundToInt
 
@@ -116,7 +118,7 @@ fun ExerciseEditorDialog(
         ExerciseConfig(
             name = it.name, category = it.categoryName ?: "Силовое упражнение", isSingleLeg = it.isSingleLeg,
             legSide = it.legSide, inventoryName = it.inventoryName, inventoryUnit = it.inventoryUnit,
-            inventoryValue = it.inventoryValue, inSpikes = it.inSpikes, unit = it.defaultUnit
+            inventoryValue = it.inventoryValue, inSpikes = it.inSpikes, unit = it.defaultUnit, titleLayout = it.titleLayout
         )
     }
 
@@ -133,6 +135,18 @@ fun ExerciseEditorDialog(
     var inventoryUnit by remember { mutableStateOf(start?.inventoryUnit) }
     var inventoryValueText by remember { mutableStateOf(start?.inventoryValue?.let { formatNumber(it).replace(',', '.') } ?: "") }
     var showErrors by remember { mutableStateOf(false) }
+    // только что созданный снаряд сразу выбирается, чтобы можно было указать его вес или размер
+    var knownInventory by remember { mutableStateOf(inventoryItems.map { it.id }.toSet()) }
+    LaunchedEffect(inventoryItems) {
+        inventoryItems.firstOrNull { it.id !in knownInventory }?.let { fresh ->
+            hasInventory = true
+            inventoryName = fresh.name
+            inventoryUnit = fresh.unit
+        }
+        knownInventory = inventoryItems.map { it.id }.toSet()
+    }
+    // позиции ноги, снаряда и шиповок в названии
+    var layout by remember { mutableStateOf(start?.titleLayout ?: TitleGrammar.DEFAULT_LAYOUT) }
     // штанга при результате в кг: вес снаряда и есть результат — отдельно не вводится
     val loadedImplement = hasInventory && RecordsEngine.isLoadedImplement(inventoryUnit, unit)
 
@@ -177,7 +191,7 @@ fun ExerciseEditorDialog(
     val inventoryText = if (hasInventory) RecordsEngine.variantInventory(inventoryName, inventoryUnit, inventoryValueText.toDoubleOrNull(), unit) else null
     val preview = RecordsEngine.exerciseTitle(
         name.ifBlank { "Название" }, singleLeg, legSide, inSpikes,
-        if (hasInventory) inventoryName else null, inventoryUnit, inventoryValueText.toDoubleOrNull(), unit
+        if (hasInventory) inventoryName else null, inventoryUnit, inventoryValueText.toDoubleOrNull(), unit, layout
     )
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -217,7 +231,8 @@ fun ExerciseEditorDialog(
                                             inventoryValue = if (hasInventory && !loadedImplement) inventoryValueText.toDoubleOrNull() else null,
                                             inSpikes = inSpikes,
                                             // у разбега своя форма результата, единица не выбирается
-                                            unit = if (RunUp.isExercise(name)) ResultUnit.CM else unit
+                                            unit = if (RunUp.isExercise(name)) ResultUnit.CM else unit,
+                                            titleLayout = layout.takeIf { it != TitleGrammar.DEFAULT_LAYOUT }
                                         )
                                     )
                                 }
@@ -352,10 +367,18 @@ fun ExerciseEditorDialog(
                         // --- Настройки добавленных блоков ---
                         if (singleLeg) {
                             BlockSettings(title = "Какая нога", icon = BuilderBlock.SINGLE_LEG.icon) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
                                     FilterChip(selected = legSide == null, onClick = { legSide = null }, label = { Text("Любая") })
                                     FilterChip(selected = legSide == "LEFT", onClick = { legSide = "LEFT" }, label = { Text("Левая") })
                                     FilterChip(selected = legSide == "RIGHT", onClick = { legSide = "RIGHT" }, label = { Text("Правая") })
+                                    FilterChip(
+                                        selected = legSide == TitleGrammar.ALTERNATE,
+                                        onClick = { legSide = TitleGrammar.ALTERNATE },
+                                        label = { Text("По очереди") }
+                                    )
                                 }
                             }
                         }
@@ -381,24 +404,61 @@ fun ExerciseEditorDialog(
                                 if (showErrors && inventoryMissing) {
                                     Text("Выберите инвентарь или уберите блок", style = MaterialTheme.typography.bodySmall, color = cs.error)
                                 }
-                                if (loadedImplement) {
-                                    // штанга, гиря и т.п. при результате в кг: рекорд — это вес снаряда
-                                    Text(
-                                        text = "Вес снаряда — это и есть результат: вводится в попытках и всегда равен рекорду.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = cs.onSurfaceVariant
-                                    )
-                                } else if (!inventoryName.isNullOrBlank()) {
+                                if (!inventoryName.isNullOrBlank()) {
                                     OutlinedTextField(
                                         value = inventoryValueText,
-                                        onValueChange = { v -> inventoryValueText = v.replace(',', '.').filter { it.isDigit() || it == '.' } },
-                                        label = { Text("Высота / вес (необязательно)") },
+                                        onValueChange = { v ->
+                                            inventoryValueText = v.replace(',', '.').filter { it.isDigit() || it == '.' }
+                                            // постоянный вес: снаряд не штанга, и результат считается не в кг
+                                            if (loadedImplement && inventoryValueText.isNotEmpty()) {
+                                                val low = name.lowercase()
+                                                val throwing = listOf("метан", "брос", "толк").any { low.contains(it) }
+                                                unit = if (throwing) ResultUnit.M else ResultUnit.REPS
+                                                unitTouched = true
+                                            }
+                                        },
+                                        label = { Text("Вес или размер снаряда") },
                                         suffix = { Text(getUnitTitle(inventoryUnit ?: ResultUnit.CM)) },
+                                        supportingText = if (loadedImplement) {
+                                            { Text("Для штанги оставьте пустым: её вес вводится в попытках как результат") }
+                                        } else null,
                                         singleLine = true,
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier.fillMaxWidth()
                                     )
+                                }
+                            }
+                        }
+
+                        // --- Где в названии стоят свойства ---
+                        if (BuilderBlock.entries.any { isAdded(it) }) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                BuilderLabel("Место в названии")
+                                listOf(
+                                    Triple(0, "Нога", BuilderBlock.SINGLE_LEG),
+                                    Triple(1, "Снаряд", BuilderBlock.INVENTORY),
+                                    Triple(2, "Шиповки", BuilderBlock.SPIKES)
+                                ).filter { isAdded(it.third) }.forEach { (index, label, _) ->
+                                    Text(label, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        listOf(
+                                            TitleGrammar.AUTO to "Авто", TitleGrammar.START to "В начале",
+                                            TitleGrammar.MIDDLE to "В середине", TitleGrammar.END to "В конце"
+                                        ).forEach { (code, text) ->
+                                            FilterChip(
+                                                selected = layout.getOrElse(index) { TitleGrammar.AUTO } == code,
+                                                onClick = {
+                                                    layout = layout.padEnd(3, TitleGrammar.AUTO).toCharArray()
+                                                        .also { it[index] = code }.concatToString()
+                                                },
+                                                label = { Text(text) }
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }

@@ -66,6 +66,63 @@ class MigrationTest {
     }
 
     @Test
+    fun migrate21To22_keepsExerciseResults() {
+        helper.createDatabase(dbName, 21).apply {
+            execSQL("INSERT INTO training_sessions (id, date, trainingType, isSkipped) VALUES (1, 1000, 'HYBRID', 0)")
+            execSQL(
+                "INSERT INTO exercise_results (id, exerciseId, exerciseName, trainingSessionId, date, result, resultUnit, stage, isSingleLeg, inSpikes) " +
+                    "VALUES (1, 1, 'Присед', 1, 1000, 120.0, 'KG', 'MAIN', 0, 0)"
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 22, true, *TripleJumpDatabase.ALL_MIGRATIONS)
+        db.query("SELECT result, repsPerSetJson FROM exercise_results WHERE id = 1").use { c ->
+            c.moveToFirst()
+            assertEquals(120.0, c.getDouble(0), 1e-9)
+            assertTrue(c.isNull(1))
+        }
+    }
+
+    @Test
+    fun migrate20To21_keepsExercises() {
+        helper.createDatabase(dbName, 20).apply {
+            execSQL(
+                "INSERT INTO exercises (id, name, categoryColorHex, defaultUnit, isSingleLeg, isFavorite, inSpikes) " +
+                    "VALUES (1, 'Метание', '#1E4D3B', 'M', 0, 0, 1)"
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 21, true, *TripleJumpDatabase.ALL_MIGRATIONS)
+        db.query("SELECT name, inSpikes, titleLayout FROM exercises WHERE id = 1").use { c ->
+            c.moveToFirst()
+            assertEquals("Метание", c.getString(0))
+            assertEquals(1, c.getInt(1))
+            assertTrue(c.isNull(2))
+        }
+    }
+
+    @Test
+    fun migrate19To20_oldCompetitionsCountAsReachedFinal() {
+        helper.createDatabase(dbName, 19).apply {
+            execSQL(
+                "INSERT INTO competitions (id, name, date, hasQualification, didNotQualifyForFinal, eventType, status) " +
+                    "VALUES (1, 'Первенство', 1000, 1, 0, 'Тройной прыжок', 'UPCOMING')"
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 20, true, *TripleJumpDatabase.ALL_MIGRATIONS)
+        db.query("SELECT name, qualifiedForFinal, qualificationAttemptsJson FROM competitions WHERE id = 1").use { c ->
+            c.moveToFirst()
+            assertEquals("Первенство", c.getString(0))
+            assertEquals(1, c.getInt(1))
+            assertTrue(c.isNull(2))
+        }
+    }
+
+    @Test
     fun migrate18To19_keepsCompetitionsAndResetsRunUpCategory() {
         helper.createDatabase(dbName, 18).apply {
             execSQL(

@@ -863,7 +863,10 @@ fun AddRecordDialog(
                     )
                 }
                 if (isSingleLeg) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         ToggleChip(
                             label = "Левая",
                             selected = legSide == "LEFT",
@@ -873,6 +876,14 @@ fun AddRecordDialog(
                             label = "Правая",
                             selected = legSide == "RIGHT",
                             onClick = { legSide = if (legSide == "RIGHT") null else "RIGHT" }
+                        )
+                        ToggleChip(
+                            label = "По очереди",
+                            selected = legSide == com.example.diarytripeljump.data.TitleGrammar.ALTERNATE,
+                            onClick = {
+                                val alternate = com.example.diarytripeljump.data.TitleGrammar.ALTERNATE
+                                legSide = if (legSide == alternate) null else alternate
+                            }
                         )
                     }
                 }

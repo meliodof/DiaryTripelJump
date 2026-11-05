@@ -47,6 +47,7 @@ import com.example.diarytripeljump.data.startOfDay
 import com.example.diarytripeljump.data.RecordsEngine
 import com.example.diarytripeljump.data.RunUp
 import com.example.diarytripeljump.data.RunUpAttempt
+import com.example.diarytripeljump.data.SetResults
 import com.example.diarytripeljump.data.formatNumber
 import com.example.diarytripeljump.data.formatRecordValue
 import androidx.compose.foundation.text.KeyboardOptions
@@ -435,7 +436,9 @@ fun TrainingsScreen(
                     // вес штанги = результат, в форме он не хранится отдельно
                     inventoryValue = if (loaded) null else exRes.inventoryValue,
                     inSpikes = exRes.inSpikes,
-                    runUp = exRes.runUpJson?.let { RunUp.decode(it) }
+                    runUp = exRes.runUpJson?.let { RunUp.decode(it) },
+                    titleLayout = exRes.titleLayout,
+                    repsPerSet = SetResults.parseReps(exRes.repsPerSetJson)
                 )
             }
         }
@@ -1224,7 +1227,12 @@ fun TrainingSessionCard(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     // Заголовок по содержанию: первые упражнения вместо одинакового «Тренировка»
-                    val names = trainingItem.exerciseResults.map { it.exerciseName }.filter { it.isNotBlank() }.distinct()
+                    val names = trainingItem.exerciseResults.filter { it.exerciseName.isNotBlank() }.map { r ->
+                        RecordsEngine.exerciseTitle(
+                            r.exerciseName, r.isSingleLeg, r.legSide, r.inSpikes,
+                            r.inventoryName, r.inventoryUnit, r.inventoryValue, r.resultUnit, r.titleLayout
+                        )
+                    }.distinct()
                     Text(
                         text = when {
                             isSkipped -> "Пропуск тренировки"
@@ -1272,17 +1280,18 @@ fun TrainingSessionCard(
                         val lowerBetter = RecordsEngine.isLowerBetter(exName, exRes.resultUnit)
                         val candidates = attempts + listOfNotNull(exRes.result.takeIf { it > 0 })
                         val best = if (lowerBetter) candidates.minOrNull() else candidates.maxOrNull()
+                        val repsPlan = SetResults.repsBySet(exRes.sets, exRes.reps, exRes.repsPerSetJson)
                         val runUpLines = exRes.runUpJson?.let { RunUp.decode(it) }?.map { RunUp.describe(it) }
                         val detail = when {
                             runUpLines != null -> runUpLines.mapIndexed { i, line -> "${i + 1}. $line" }
                                 .joinToString("\n").ifBlank { "Попытки не заполнены" }
-                            attempts.size > 1 -> attempts.joinToString(" · ") { plainAttempt(it) }
-                            exRes.sets != null && exRes.sets > 0 && exRes.reps != null && exRes.reps > 0 -> "${exRes.sets} × ${exRes.reps}"
+                            attempts.size > 1 -> SetResults.summary(attempts, repsPlan) { plainAttempt(it) }
+                            repsPlan.isNotEmpty() -> SetResults.label(repsPlan)
                             else -> null
                         }
                         val fullTitle = RecordsEngine.exerciseTitle(
                             exName, exRes.isSingleLeg, exRes.legSide, exRes.inSpikes,
-                            exRes.inventoryName, exRes.inventoryUnit, exRes.inventoryValue, exRes.resultUnit
+                            exRes.inventoryName, exRes.inventoryUnit, exRes.inventoryValue, exRes.resultUnit, exRes.titleLayout
                         )
 
                         Row(
@@ -1897,6 +1906,23 @@ fun ExerciseResultEditorCard(
 
     var setsStr by remember(input.exerciseName) { mutableStateOf(input.sets?.toString() ?: "") }
     var repsStr by remember(input.exerciseName) { mutableStateOf(input.reps?.toString() ?: "") }
+    // в подходах может быть разное число повторений
+    var variedReps by remember(input.exerciseName) { mutableStateOf(input.repsPerSet != null) }
+    val perSetReps = remember(input.exerciseName) {
+        mutableStateListOf<String>().apply { addAll(input.repsPerSet.orEmpty().map { it.toString() }) }
+    }
+
+    fun syncPerSetReps() {
+        val sets = (setsStr.toIntOrNull() ?: 1).coerceAtLeast(1)
+        while (perSetReps.size < sets) perSetReps.add(repsStr)
+        while (perSetReps.size > sets) perSetReps.removeAt(perSetReps.lastIndex)
+    }
+
+    fun repsPlan(): List<Int> {
+        val sets = (setsStr.toIntOrNull() ?: 1).coerceAtLeast(1)
+        val common = (repsStr.toIntOrNull() ?: 10).coerceAtLeast(1)
+        return List(sets) { i -> if (variedReps) (perSetReps.getOrNull(i)?.toIntOrNull() ?: 1).coerceAtLeast(1) else common }
+    }
 
     val cs = MaterialTheme.colorScheme
 
@@ -1913,7 +1939,12 @@ fun ExerciseResultEditorCard(
             else -> positives.max()
         }
 
-        onUpdate(input.copy(result = best, sets = setsVal, reps = repsVal, setResults = newSetResults))
+        onUpdate(
+            input.copy(
+                result = best, sets = setsVal, reps = repsVal, setResults = newSetResults,
+                repsPerSet = if (variedReps) repsPlan() else null
+            )
+        )
     }
 
     AppCard(containerColor = cs.surfaceContainerLow) {
@@ -1979,25 +2010,68 @@ fun ExerciseResultEditorCard(
                     value = setsStr,
                     onValueChange = {
                         setsStr = it.filter { char -> char.isDigit() }
+                        if (variedReps) syncPerSetReps()
                         calculateAndEmit()
                     },
                     label = { Text("Подходов") },
                     modifier = Modifier.weight(1f),
                     singleLine = true
                 )
-                OutlinedTextField(
-                    value = repsStr,
-                    onValueChange = {
-                        repsStr = it.filter { char -> char.isDigit() }
-                        calculateAndEmit()
-                    },
-                    label = { Text("Повторений") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true
-                )
+                if (!variedReps) {
+                    OutlinedTextField(
+                        value = repsStr,
+                        onValueChange = {
+                            repsStr = it.filter { char -> char.isDigit() }
+                            calculateAndEmit()
+                        },
+                        label = { Text("Повторений") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                }
             }
 
-            val totalRepsCount = repsStr.toIntOrNull() ?: 10
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Разное число повторений",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = cs.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+                Switch(
+                    checked = variedReps,
+                    onCheckedChange = {
+                        variedReps = it
+                        if (it) syncPerSetReps()
+                        calculateAndEmit()
+                    }
+                )
+            }
+            if (variedReps) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    perSetReps.indices.forEach { i ->
+                        OutlinedTextField(
+                            value = perSetReps[i],
+                            onValueChange = { v ->
+                                perSetReps[i] = v.filter { char -> char.isDigit() }
+                                calculateAndEmit()
+                            },
+                            label = { Text("Подход ${i + 1}") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.width(104.dp)
+                        )
+                    }
+                }
+            }
+
             OutlinedButton(
                 onClick = { showPerSetDialog = true },
                 modifier = Modifier.fillMaxWidth()
@@ -2005,7 +2079,7 @@ fun ExerciseResultEditorCard(
                 Icon(imageVector = Icons.Default.FormatListNumbered, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (input.setResults.any { it > 0 }) "Результаты · заполнено ${input.setResults.count { it > 0 }}"
+                    text = if (input.setResults.any { it > 0 }) "Результаты: заполнено ${input.setResults.count { it > 0 }} из ${repsPlan().sum()}"
                     else "Ввести результаты попыток"
                 )
             }
@@ -2026,10 +2100,9 @@ fun ExerciseResultEditorCard(
     }
 
     if (showPerSetDialog) {
-        val totalRepsCount = repsStr.toIntOrNull() ?: 10
         PerSetResultsModalDialog(
             exerciseName = input.title(),
-            repsCount = totalRepsCount,
+            repsBySet = repsPlan(),
             unit = input.unit,
             initialResults = input.setResults,
             onDismiss = { showPerSetDialog = false },
@@ -2269,27 +2342,52 @@ fun CreateInventoryDialog(
 }
 
 /**
- * Ввод результатов попыток: сетка в две колонки, номер попытки в кружке, единица измерения справа.
- * Лучшая попытка подсвечивается, «Далее» на клавиатуре переводит к следующему полю, пустые поля не учитываются.
+ * Ввод результатов: полей столько, сколько подходов × повторений, сгруппированы по подходам.
+ * Если весь подход или все подходы выполнены с одним весом, вводится одно значение, а в список оно записывается
+ * на каждое повторение. Лучшая попытка подсвечивается, пустые поля не учитываются.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PerSetResultsModalDialog(
     exerciseName: String,
-    repsCount: Int,
+    /** Сколько повторений в каждом подходе. */
+    repsBySet: List<Int>,
     unit: ResultUnit,
     initialResults: List<Double>,
     onDismiss: () -> Unit,
     onConfirm: (List<Double>) -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
-    val values = remember(repsCount, initialResults) {
+    val sets = repsBySet.size
+    val total = repsBySet.sum()
+    val starts = repsBySet.runningFold(0) { sum, count -> sum + count }
+    fun rangeOf(set: Int) = starts[set] until starts[set + 1]
+    val values = remember(repsBySet, initialResults) {
         mutableStateListOf<String>().apply {
-            repeat(maxOf(repsCount, initialResults.size, 1)) { i ->
+            repeat(maxOf(total, initialResults.size)) { i ->
                 // без округления: 3.85 должно остаться 3.85, а 130.0 показываться как 130
                 add(initialResults.getOrNull(i)?.takeIf { it > 0 }?.let { if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() } ?: "")
             }
         }
     }
+    var mode by remember(repsBySet) { mutableIntStateOf(SetResults.sameValueMode(initialResults, repsBySet)) }
+
+    /** При смене режима значение разносится на весь подход или на все подходы. */
+    fun applyMode(newMode: Int) {
+        mode = newMode
+        when (newMode) {
+            SetResults.ALL -> {
+                val first = values.firstOrNull { it.isNotBlank() } ?: ""
+                for (i in 0 until total) values[i] = first
+            }
+            SetResults.PER_SET -> for (s in 0 until sets) {
+                val range = rangeOf(s)
+                val first = range.map { values[it] }.firstOrNull { it.isNotBlank() } ?: ""
+                for (i in range) values[i] = first
+            }
+        }
+    }
+
     val unitLabel = when (unit) {
         ResultUnit.SECONDS -> "сек"
         ResultUnit.M -> "м"
@@ -2297,6 +2395,7 @@ fun PerSetResultsModalDialog(
         ResultUnit.KG -> "кг"
         ResultUnit.REPS -> "раз"
     }
+    val word = if (unit == ResultUnit.KG) "вес" else "результат"
     val lowerBetter = RecordsEngine.isLowerBetter(exerciseName, unit)
     val parsed = values.map { it.toDoubleOrNull()?.takeIf { v -> v > 0 } }
     val filled = parsed.filterNotNull()
@@ -2331,35 +2430,93 @@ fun PerSetResultsModalDialog(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = if (best != null) "Лучшая: ${formatRecordValue(best, unit)} · заполнено ${filled.size} из ${values.size}"
-                            else "Впишите выполненные попытки — пустые не учитываются",
+                            text = if (best != null) "Лучшая: ${formatRecordValue(best, unit)}, заполнено ${filled.size} из ${values.size}"
+                            else "${SetResults.label(repsBySet)}: всего ${pluralRu(total, "попытка", "попытки", "попыток").let { "$total $it" }}. Пустые не учитываются",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (best != null) cs.onPrimaryContainer else cs.onSurfaceVariant
                         )
                     }
                 }
 
-                values.indices.chunked(2).forEach { pair ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        pair.forEach { i ->
-                            SetResultField(
-                                number = i + 1,
-                                value = values[i],
-                                unitLabel = unitLabel,
-                                isBest = i == bestIndex,
-                                isLast = i == values.lastIndex,
-                                onChange = { values[i] = it },
-                                modifier = Modifier.weight(1f)
-                            )
+                if (total > 1) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        ToggleChip(label = "Каждый раз отдельно", selected = mode == SetResults.EACH, onClick = { applyMode(SetResults.EACH) })
+                        if (repsBySet.any { it > 1 } && sets > 1) {
+                            ToggleChip(label = "Один $word на подход", selected = mode == SetResults.PER_SET, onClick = { applyMode(SetResults.PER_SET) })
                         }
-                        if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
+                        ToggleChip(
+                            label = if (sets > 1) "Один $word на все подходы" else "Один $word на весь подход",
+                            selected = mode == SetResults.ALL,
+                            onClick = { applyMode(SetResults.ALL) }
+                        )
                     }
                 }
 
-                TextButton(onClick = { values.add("") }) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Ещё попытка")
+                when (mode) {
+                    SetResults.ALL -> SetResultField(
+                        number = 1,
+                        value = values[0],
+                        unitLabel = unitLabel,
+                        isBest = bestIndex >= 0,
+                        isLast = true,
+                        onChange = { v -> for (i in 0 until total) values[i] = v },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    SetResults.PER_SET -> (0 until sets).chunked(2).forEach { pair ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            pair.forEach { s ->
+                                val range = rangeOf(s)
+                                SetResultField(
+                                    number = s + 1,
+                                    value = values[starts[s]],
+                                    unitLabel = unitLabel,
+                                    isBest = bestIndex in range,
+                                    isLast = s == sets - 1,
+                                    onChange = { v -> for (i in range) values[i] = v },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                    else -> {
+                        // всё, что сверх плана подходов, добавлено кнопкой «Ещё попытка»
+                        val groups = (0 until sets).map { rangeOf(it).toList() } +
+                            listOfNotNull((total until values.size).toList().takeIf { it.isNotEmpty() })
+                        groups.forEachIndexed { g, group ->
+                            if (sets > 1 || g >= sets) {
+                                Text(
+                                    text = if (g < sets) "Подход ${g + 1}" else "Дополнительно",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = cs.onSurfaceVariant
+                                )
+                            }
+                            group.chunked(2).forEach { pair ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    pair.forEach { i ->
+                                        SetResultField(
+                                            number = i - group.first() + 1,
+                                            value = values[i],
+                                            unitLabel = unitLabel,
+                                            isBest = i == bestIndex,
+                                            isLast = i == values.lastIndex,
+                                            onChange = { values[i] = it },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                        TextButton(onClick = { values.add("") }) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Ещё попытка")
+                        }
+                    }
                 }
             }
         },
@@ -2424,7 +2581,9 @@ data class ExerciseConfig(
     val inventoryValue: Double?,
     val inSpikes: Boolean = false,
     /** В чём измеряется результат: от неё зависит, является ли снаряд «нагружаемым» (штанга при результате в кг). */
-    val unit: ResultUnit = ResultUnit.KG
+    val unit: ResultUnit = ResultUnit.KG,
+    /** Где в названии стоят нога, снаряд и шиповки; null — автоматически. */
+    val titleLayout: String? = null
 )
 
 // Dialog: Mark Skipped Day

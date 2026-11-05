@@ -116,7 +116,7 @@ class RecordsEngineTest {
         )
         val r = RecordsEngine.build(emptyList(), results, listOf(override)).single()
         assertEquals(key, r.key)
-        assertEquals("Присед глубокий левая нога в шиповках", r.displayName)
+        assertEquals("Присед глубокий на левой ноге в шиповках", r.displayName)
         assertEquals("SB", r.levelLabel)
         assertTrue(r.isCompetition)
     }
@@ -142,7 +142,7 @@ class RecordsEngineTest {
         )
         val r = RecordsEngine.build(listOf(manual), listOf(squat(1, 120.0, 1), squat(2, 140.0, 2))).single()
         assertEquals(150.0, r.best, 1e-9)
-        assertEquals("Присед штанга", r.displayName)
+        assertEquals("Присед со штангой", r.displayName)
         assertTrue(RecordsEngine.isLoadedImplement(ResultUnit.KG, ResultUnit.KG))
         assertFalse(RecordsEngine.isLoadedImplement(ResultUnit.CM, ResultUnit.CM))
     }
@@ -159,6 +159,31 @@ class RecordsEngineTest {
             RecordsEngine.variantKey("Бросок ядра", false, null, false, "Ядро", ResultUnit.KG, 5.0, ResultUnit.M),
             RecordsEngine.variantKey("Бросок ядра", false, null, false, "Ядро", ResultUnit.KG, 7.26, ResultUnit.M)
         )
+    }
+
+    @Test
+    fun antiRecord_updatesFromTrainings() {
+        val anti = TripleJumpResult(
+            id = 1, eventName = "Присед", result = 60.0, resultUnit = ResultUnit.KG, isAntiRecord = true, isCompetition = false, date = day
+        )
+        val records = RecordsEngine.build(
+            listOf(anti),
+            listOf(ex(1, "Присед", 50.0, ResultUnit.KG, 2), ex(2, "Присед", 120.0, ResultUnit.KG, 3))
+        )
+        val r = records.single { it.isAnti }
+        assertEquals(50.0, r.best, 1e-9)
+        assertEquals(listOf(60.0, 50.0), r.history.map { it.value })
+        assertEquals(120.0, records.single { !it.isAnti }.best, 1e-9)
+    }
+
+    @Test
+    fun antiRecord_updatesFromStarts_andIgnoresSource() {
+        val anti = listOf(
+            TripleJumpResult(id = 1, result = 13.0, isAntiRecord = true, isCompetition = true, date = day),
+            TripleJumpResult(id = 2, result = 12.8, isAntiRecord = true, isCompetition = false, date = 2 * day)
+        )
+        val r = RecordsEngine.build(anti, emptyList(), startResults = listOf(12.1 to 3 * day, 14.0 to 4 * day)).single()
+        assertEquals(12.1, r.best, 1e-9)
     }
 
     @Test

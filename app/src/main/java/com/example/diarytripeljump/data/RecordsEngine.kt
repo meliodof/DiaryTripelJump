@@ -136,16 +136,26 @@ object RecordsEngine {
     fun recordInventory(invName: String?, invUnit: ResultUnit?, invValue: Double?, resultUnit: ResultUnit): String? =
         if (isLoadedImplement(invUnit, resultUnit)) null else variantInventory(invName, invUnit, invValue, resultUnit)
 
-    /** Полное название со всеми свойствами: «Бросок ядра назад ядро 7,26 кг в шиповках»; на экране свойства выделяются цветом. */
+    /** Полное название со всеми свойствами по правилам языка: «Метание ядра 5 кг в шиповках» (см. [TitleGrammar]). */
     fun exerciseTitle(
         name: String, isSingleLeg: Boolean, legSide: String?, inSpikes: Boolean,
-        invName: String?, invUnit: ResultUnit?, invValue: Double?, resultUnit: ResultUnit
-    ): String =
-        titleOf(name.trim(), isSingleLeg, legSide, variantInventory(invName, invUnit, invValue, resultUnit), inSpikes)
+        invName: String?, invUnit: ResultUnit?, invValue: Double?, resultUnit: ResultUnit,
+        layout: String? = null
+    ): String = TitleGrammar.compose(
+        name, isSingleLeg, legSide, inSpikes, invName,
+        if (isLoadedImplement(invUnit, resultUnit)) "" else inventoryValueLabel(invUnit, invValue),
+        layout
+    )
 
-    private fun titleOf(name: String, isSingleLeg: Boolean, legSide: String?, inventory: String?, inSpikes: Boolean): String =
-        name + legSuffix(isSingleLeg, legSide) +
-            (inventory?.let { " " + it.replaceFirstChar { c -> c.lowercase() } } ?: "") + spikesSuffix(inSpikes)
+    private fun inventoryValueLabel(unit: ResultUnit?, value: Double?): String {
+        if (value == null || value <= 0) return ""
+        val unitText = when (unit) {
+            ResultUnit.CM -> "см"
+            ResultUnit.KG -> "кг"
+            else -> ""
+        }
+        return "${formatNumber(value)} $unitText".trim()
+    }
 
     /** Идентичность упражнения в справочнике: одно название с разными свойствами — разные упражнения. */
     fun variantKey(
@@ -165,12 +175,8 @@ object RecordsEngine {
 
     fun spikesSuffix(inSpikes: Boolean): String = if (inSpikes) " в шиповках" else ""
 
-    fun legSuffix(isSingleLeg: Boolean, legSide: String?): String = when {
-        !isSingleLeg -> ""
-        legSide == "LEFT" -> " левая нога"
-        legSide == "RIGHT" -> " правая нога"
-        else -> " одна нога"
-    }
+    fun legSuffix(isSingleLeg: Boolean, legSide: String?): String =
+        TitleGrammar.legPhrase(isSingleLeg, legSide)?.let { " $it" } ?: ""
 
     fun inventoryLabel(name: String?, unit: ResultUnit?, value: Double?): String? {
         if (name.isNullOrBlank()) return null
@@ -194,7 +200,9 @@ object RecordsEngine {
     fun build(
         tj: List<TripleJumpResult>,
         ex: List<ExerciseResult>,
-        overrides: List<RecordOverride> = emptyList()
+        overrides: List<RecordOverride> = emptyList(),
+        /** Лучшие результаты стартов в тройном прыжке (значение и дата): обновляют антирекорд дисциплины. */
+        startResults: List<Pair<Double, Long>> = emptyList()
     ): List<RecordSummary> {
         data class Group(
             val key: String,
@@ -207,6 +215,10 @@ object RecordsEngine {
             val inSpikes: Boolean,
             /** Снаряд в названии: «ядро 7,26 кг» или «штанга» (вес штанги = результат). */
             val inventory: String?,
+            val invName: String?,
+            val invUnit: ResultUnit?,
+            val invValue: Double?,
+            val layout: String? = null,
             val samples: MutableList<Sample> = mutableListOf()
         )
 
@@ -224,7 +236,10 @@ object RecordsEngine {
                 recordInventory(res.inventoryName, res.inventoryUnit, res.inventoryValue, res.resultUnit)
             )
             val g = groups.getOrPut(key) {
-                Group(key, name, res.resultUnit, res.isSingleLeg, res.legSide, false, false, res.inSpikes, inv)
+                Group(
+                    key, name, res.resultUnit, res.isSingleLeg, res.legSide, false, false, res.inSpikes, inv,
+                    res.inventoryName, res.inventoryUnit, res.inventoryValue, res.titleLayout
+                )
             }
             g.samples.add(
                 Sample(
@@ -244,9 +259,13 @@ object RecordsEngine {
             // «тренировочные» записи сливаются с тем же упражнением из тренировок (с тем же снарядом)
             val merged = !r.isCompetition && !r.isAntiRecord
             val key = if (merged) exerciseRecordKey(name, r.isSingleLeg, r.legSide, r.resultUnit, r.inSpikes, recInv)
-            else manualRecordKey(name, r.isAntiRecord, r.isCompetition, r.resultUnit, r.isSingleLeg, r.legSide, recInv ?: inv, r.inSpikes)
+            // антирекорд один на упражнение: откуда бы ни был результат, он сравнивается с прежним худшим
+            else manualRecordKey(name, r.isAntiRecord, r.isCompetition && !r.isAntiRecord, r.resultUnit, r.isSingleLeg, r.legSide, recInv ?: inv, r.inSpikes)
             val g = groups.getOrPut(key) {
-                Group(key, name, r.resultUnit, r.isSingleLeg, r.legSide, r.isAntiRecord, r.isCompetition, r.inSpikes, inv)
+                Group(
+                    key, name, r.resultUnit, r.isSingleLeg, r.legSide, r.isAntiRecord, r.isCompetition && !r.isAntiRecord, r.inSpikes, inv,
+                    r.inventoryName, r.inventoryUnit, r.inventoryValue
+                )
             }
             g.samples.add(
                 Sample(
@@ -256,6 +275,24 @@ object RecordsEngine {
                     invName = r.inventoryName, invUnit = r.inventoryUnit, invValue = r.inventoryValue
                 )
             )
+        }
+
+        // Антирекорд обновляется сам: результаты тренировок и стартов сравниваются с ручной записью
+        groups.values.filter { it.isAnti }.forEach { g ->
+            val exerciseKey = exerciseRecordKey(
+                g.name, g.isSingleLeg, g.legSide, g.unit, g.inSpikes, recordInventory(g.invName, g.invUnit, g.invValue, g.unit)
+            )
+            groups[exerciseKey]?.samples?.let { g.samples.addAll(it) }
+            if (g.unit == ResultUnit.M && !g.isSingleLeg && g.name.contains("тройной", ignoreCase = true)) {
+                startResults.forEach { (value, date) ->
+                    g.samples.add(
+                        Sample(
+                            date = date, value = value, tjId = null, isIndoor = false, weather = null, inventory = g.inventory,
+                            level = null, category = "Прыжковые", isCompetition = true
+                        )
+                    )
+                }
+            }
         }
 
         return groups.values.mapNotNull { g ->
@@ -279,13 +316,13 @@ object RecordsEngine {
             val base = RecordSummary(
                 key = g.key,
                 name = g.name,
-                displayName = titleOf(g.name, g.isSingleLeg, g.legSide, g.inventory, g.inSpikes),
+                displayName = exerciseTitle(g.name, g.isSingleLeg, g.legSide, g.inSpikes, g.invName, g.invUnit, g.invValue, g.unit, g.layout),
                 inSpikes = g.inSpikes,
                 unit = g.unit,
                 isSingleLeg = g.isSingleLeg,
                 legSide = g.legSide,
                 isAnti = g.isAnti,
-                isCompetition = g.isCompetition,
+                isCompetition = if (g.isAnti) best.isCompetition else g.isCompetition,
                 category = best.category,
                 isIndoor = best.isIndoor,
                 weather = best.weather,
@@ -333,7 +370,7 @@ object RecordsEngine {
         val inventory = variantInventory(o.inventoryName, o.inventoryUnit, o.inventoryValue, unit)
         return record.copy(
             name = name,
-            displayName = titleOf(name, single, o.legSide, inventory, spikes),
+            displayName = exerciseTitle(name, single, o.legSide, spikes, o.inventoryName, o.inventoryUnit, o.inventoryValue, unit),
             unit = unit,
             category = o.category ?: record.category,
             levelLabel = o.recordLevel ?: record.levelLabel,

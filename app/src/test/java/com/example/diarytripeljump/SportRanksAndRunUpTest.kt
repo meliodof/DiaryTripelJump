@@ -7,7 +7,9 @@ import com.example.diarytripeljump.data.RunUpAttempt
 import com.example.diarytripeljump.data.RunUpLength
 import com.example.diarytripeljump.data.RunUpMeasurement
 import com.example.diarytripeljump.data.RunUpMove
+import com.example.diarytripeljump.data.SetResults
 import com.example.diarytripeljump.data.SportRanks
+import com.example.diarytripeljump.data.TitleGrammar
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.Calendar
@@ -121,20 +123,84 @@ class SportRanksAndRunUpTest {
         assertEquals(18.0, history.first().lengthFeet!!, 1e-9)
     }
 
+    @Test
+    fun setResults_detectsHowTheyWereEntered() {
+        assertEquals(SetResults.ALL, SetResults.sameValueMode(List(15) { 100.0 }, List(3) { 5 }))
+        assertEquals(SetResults.PER_SET, SetResults.sameValueMode(List(5) { 100.0 } + List(3) { 110.0 }, listOf(5, 3)))
+        assertEquals(SetResults.EACH, SetResults.sameValueMode(listOf(100.0, 110.0, 120.0, 130.0), listOf(2, 2)))
+        assertEquals(SetResults.EACH, SetResults.sameValueMode(listOf(100.0, 100.0), List(3) { 5 }))
+        assertEquals(SetResults.EACH, SetResults.sameValueMode(listOf(0.0, 0.0), listOf(2)))
+    }
+
+    @Test
+    fun setResults_summaryIsShort_withEqualAndDifferentReps() {
+        val text: (Double) -> String = { it.toInt().toString() }
+        assertEquals("3 × 2 по 100", SetResults.summary(List(6) { 100.0 }, List(3) { 2 }, text))
+        assertEquals("2 × 2: 100, 110", SetResults.summary(listOf(100.0, 100.0, 110.0, 110.0), listOf(2, 2), text))
+        assertEquals("3 + 1: 100, 110", SetResults.summary(listOf(100.0, 100.0, 100.0, 110.0), listOf(3, 1), text))
+        assertEquals("100 · 110", SetResults.summary(listOf(100.0, 110.0), emptyList(), text))
+    }
+
+    @Test
+    fun setResults_planComesFromStoredRepsOrFromCommonValue() {
+        assertEquals(listOf(5, 5, 3), SetResults.repsBySet(3, 5, "5,5,3"))
+        assertEquals(listOf(5, 5), SetResults.repsBySet(2, 5, null))
+        assertTrue(SetResults.repsBySet(null, 5, null).isEmpty())
+        assertEquals("5 + 5 + 3", SetResults.label(listOf(5, 5, 3)))
+    }
+
+    private fun title(
+        name: String, leg: String? = null, spikes: Boolean = false, inventory: String? = null, value: String = "", layout: String? = null
+    ) = TitleGrammar.compose(name, leg != null, leg, spikes, inventory, value, layout)
+
+    @Test
+    fun title_declinesInventoryAndAddsPrepositions() {
+        assertEquals("Метание ядра", title("Метание", inventory = "Ядро"))
+        assertEquals("Метание ядра 5 кг лицом вперёд", title("Метание лицом вперёд", inventory = "Ядро", value = "5 кг"))
+        assertEquals("Присед со штангой", title("Присед", inventory = "Штанга"))
+        assertEquals("Махи с утяжелителем", title("Махи", inventory = "Утяжелитель"))
+        assertEquals("Прыжки через барьер 91 см", title("Прыжки", inventory = "Барьер", value = "91 см"))
+        assertEquals("Прыжки на тумбу 60 см", title("Прыжки", inventory = "Тумба", value = "60 см"))
+        assertEquals("Бег с набивным мячом", title("Бег", inventory = "Набивной мяч"))
+        assertEquals("Выпады с гантелями", title("Выпады", inventory = "Гантели"))
+    }
+
+    @Test
+    fun title_doesNotRepeatWhatNameAlreadySays() {
+        assertEquals("Метание ядра лицом вперёд", title("Метание ядра лицом вперёд", inventory = "Ядро"))
+        assertEquals("Через барьеры в шаге 91 см", title("Через барьеры в шаге", inventory = "Барьер", value = "91 см"))
+        assertEquals("Махи левой ногой", title("Махи левой ногой", leg = "LEFT"))
+        assertEquals("Махи левой ногой на правой ноге", title("Махи левой ногой", leg = "RIGHT"))
+        assertEquals("Махи левой ногой поочерёдно на обеих ногах", title("Махи левой ногой", leg = TitleGrammar.ALTERNATE))
+    }
+
+    @Test
+    fun title_spikesReadAsPhrase_evenWhenNameIsCut() {
+        assertEquals("Тройной в шиповках", title("Тройной", spikes = true))
+        assertEquals("Бег 30 м в шиповках", title("Бег 30 м в", spikes = true))
+        assertEquals("Бег 30 м в шиповках", title("Бег 30 м в шиповках", spikes = true))
+    }
+
+    @Test
+    fun title_legs_includingAlternate() {
+        assertEquals("Прыжки на левой ноге", title("Прыжки", leg = "LEFT"))
+        assertEquals("Прыжки поочерёдно на обеих ногах", title("Прыжки", leg = TitleGrammar.ALTERNATE))
+    }
+
+    @Test
+    fun title_partsGoToChosenPosition() {
+        assertEquals("В шиповках бег 30 м", title("Бег 30 м", spikes = true, layout = "AAS"))
+        assertEquals("Бег в шиповках 30 м", title("Бег 30 м", spikes = true, layout = "AAM"))
+        assertEquals("Бег 30 м в шиповках", title("Бег 30 м", spikes = true, layout = "AAE"))
+        assertEquals("На левой ноге прыжки с утяжелителем", title("Прыжки", leg = "LEFT", inventory = "Утяжелитель", layout = "SEA"))
+    }
+
     private fun shown(full: String, name: String) =
         titleWithColors(full, name, Color.Blue, Color.Red, Color.Green).text
 
     @Test
-    fun title_spikesAreShownByColorOnly_evenWhenNameHasThem() {
-        assertEquals("Бег 30 м", shown("Бег 30 м в шиповках", "Бег 30 м"))
-        assertEquals("Бег 30 м", shown("Бег 30 м в в шиповках", "Бег 30 м в"))
-        assertEquals("Бег 30 м", shown("Бег 30 м в шиповках в шиповках", "Бег 30 м в шиповках"))
-        assertEquals("Бег 30 м", shown("Бег 30 м в шиповках", "Бег 30 м в шиповках"))
-    }
-
-    @Test
     fun title_inventoryAndLegStayAsWords_legacyDotsAreRemoved() {
-        assertEquals("Бросок ядро 5 кг", shown("Бросок ядро 5 кг", "Бросок"))
+        assertEquals("Бросок ядра 5 кг", shown("Бросок ядра 5 кг", "Бросок"))
         assertEquals("Махи левая нога", shown("Махи · левая нога", "Махи"))
     }
 }
