@@ -59,6 +59,7 @@ fun ProfileScreen(
     onBack: () -> Unit = {}
 ) {
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
+    val customPalette by viewModel.customPalette.collectAsState()
     val athleteProfile by viewModel.athleteProfile.collectAsState()
     val rawResultsList by viewModel.rawTripleJumpResults.collectAsState()
 
@@ -136,6 +137,7 @@ fun ProfileScreen(
     val runUpHistory by viewModel.runUpHistory.collectAsState()
     var showRanksDialog by remember { mutableStateOf(false) }
     var showRunUpDialog by remember { mutableStateOf(false) }
+    var showPaletteDialog by remember { mutableStateOf(false) }
     val sportRank = autoRank?.rank
 
     val fullName = remember(athleteProfile) {
@@ -381,6 +383,13 @@ fun ProfileScreen(
                     )
                     HorizontalDivider(modifier = Modifier.padding(start = 70.dp), color = cs.outlineVariant)
                     ProfileOptionRow(
+                        icon = Icons.Default.Palette,
+                        title = "Своя расцветка",
+                        subtitle = if (customPalette == null) "Стандартные цвета" else "Свои цвета",
+                        onClick = { showPaletteDialog = true }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(start = 70.dp), color = cs.outlineVariant)
+                    ProfileOptionRow(
                         icon = Icons.Default.RecordVoiceOver,
                         title = "Обращение в приложении",
                         subtitle = if (athleteProfile?.greetingPreference == "NICKNAME") "По никнейму · ${nicknameText.ifBlank { "не задан" }}"
@@ -499,6 +508,21 @@ fun ProfileScreen(
 
     if (showRanksDialog) {
         RanksDialog(autoRank = autoRank, gender = athleteProfile?.gender, onDismiss = { showRanksDialog = false })
+    }
+
+    if (showPaletteDialog) {
+        PaletteEditorDialog(
+            initial = customPalette,
+            onDismiss = { showPaletteDialog = false },
+            onSave = {
+                viewModel.setCustomPalette(it)
+                showPaletteDialog = false
+            },
+            onReset = {
+                viewModel.setCustomPalette(null)
+                showPaletteDialog = false
+            }
+        )
     }
 
     if (showRunUpDialog) {

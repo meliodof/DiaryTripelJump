@@ -232,15 +232,29 @@ abstract class TripleJumpDatabase : RoomDatabase() {
             }
         }
 
+        /** 22 → 23: единица инвентаря необязательна, подход можно измерять временем. Данные сохраняются. */
+        internal val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE exercise_results ADD COLUMN isTimed INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "CREATE TABLE inventory_items_new (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name TEXT NOT NULL, unit TEXT)"
+                )
+                db.execSQL("INSERT INTO inventory_items_new (id, name, unit) SELECT id, name, unit FROM inventory_items")
+                db.execSQL("DROP TABLE inventory_items")
+                db.execSQL("ALTER TABLE inventory_items_new RENAME TO inventory_items")
+            }
+        }
+
         internal val ALL_MIGRATIONS = arrayOf(
             MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17,
-            MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22
+            MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23
         )
 
         const val DATABASE_NAME = "triple_jump_database"
 
         // Уже выпущенную версию не меняем: любое изменение схемы — новая версия и новая миграция
-        const val CURRENT_VERSION = 22
+        const val CURRENT_VERSION = 23
 
         /** Самая старая версия, которую можно перенести без потери данных. */
         const val MIN_MIGRATABLE_VERSION = 11

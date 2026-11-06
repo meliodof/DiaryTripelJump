@@ -4,9 +4,13 @@ import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.Typeface
 import androidx.compose.ui.unit.sp
 
 private val Base = FontFamily.SansSerif
+
+/** Узкий шрифт для результатов: крупная цифра помещается в строку и читается издалека. */
+private val Condensed = FontFamily(Typeface(android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD)))
 
 /**
  * Полная шкала Material 3 с более выразительными заголовками.
@@ -31,20 +35,30 @@ val Typography = Typography(
     labelSmall = TextStyle(fontFamily = Base, fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 0.3.sp)
 )
 
+/** Главное число экрана: рекорд. */
+val NumberHero = TextStyle(
+    fontFamily = Condensed,
+    fontWeight = FontWeight.Bold,
+    fontSize = 60.sp,
+    lineHeight = 64.sp,
+    letterSpacing = (-1).sp,
+    fontFeatureSettings = "tnum"
+)
+
 /** Крупные числа на карточках статистики и рекордов. */
 val NumberLarge = TextStyle(
-    fontFamily = Base,
-    fontWeight = FontWeight.ExtraBold,
-    fontSize = 26.sp,
-    lineHeight = 30.sp,
+    fontFamily = Condensed,
+    fontWeight = FontWeight.Bold,
+    fontSize = 28.sp,
+    lineHeight = 32.sp,
     letterSpacing = (-0.5).sp,
     fontFeatureSettings = "tnum"
 )
 
 val NumberMedium = TextStyle(
-    fontFamily = Base,
+    fontFamily = Condensed,
     fontWeight = FontWeight.Bold,
-    fontSize = 18.sp,
+    fontSize = 19.sp,
     lineHeight = 22.sp,
     fontFeatureSettings = "tnum"
 )

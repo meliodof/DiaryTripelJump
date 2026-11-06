@@ -87,6 +87,11 @@ import com.example.diarytripeljump.data.ExerciseGoal
 import com.example.diarytripeljump.data.RecordSummary
 import com.example.diarytripeljump.data.RecordsEngine
 import com.example.diarytripeljump.data.computeGoalProgress
+import com.example.diarytripeljump.data.RecordInsights
+import com.example.diarytripeljump.ui.theme.NumberLarge
+import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.Add
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -97,7 +102,8 @@ fun DiaryScreen(
     modifier: Modifier = Modifier,
     viewModel: DiaryViewModel,
     onNavigate: (String) -> Unit = {},
-    onOpenProfile: () -> Unit = {}
+    onOpenProfile: () -> Unit = {},
+    onNewTraining: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val athleteProfile by viewModel.athleteProfile.collectAsState()
@@ -109,6 +115,8 @@ fun DiaryScreen(
     val records by viewModel.records.collectAsState()
     val goals by viewModel.goals.collectAsState()
     var showFavoritesPicker by remember { mutableStateOf(false) }
+    var detailKey by remember { mutableStateOf<String?>(null) }
+    val mainJump = remember(records) { records.filter { it.isMainJump() }.maxByOrNull { it.best } }
     val todayStart = com.example.diarytripeljump.ui.components.rememberTodayStart()
 
     val dateText = remember {
@@ -164,6 +172,24 @@ fun DiaryScreen(
 
             if (isBirthday) {
                 item { BirthdayBanner() }
+            }
+
+            item {
+                Button(
+                    onClick = onNewTraining,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+                    shape = MaterialTheme.shapes.large
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Новая тренировка", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+
+            if (mainJump != null) {
+                item { MainJumpCard(record = mainJump, onClick = { detailKey = mainJump.key }) }
             }
 
             item {
@@ -278,12 +304,56 @@ fun DiaryScreen(
         }
     }
 
+    detailKey?.let { key ->
+        records.find { it.key == key }?.let { record ->
+            RecordDetailScreen(
+                record = record,
+                goal = goals.firstOrNull { it.recordKey == key },
+                onDismiss = { detailKey = null }
+            )
+        }
+    }
+
     if (showFavoritesPicker) {
         FavoritesPickerDialog(
             exercises = remember(allExercises) { allExercises.distinctBy { it.variantKey() }.sortedBy { it.title().lowercase() } },
             onToggle = { ex, fav -> viewModel.setExerciseFavorite(ex, fav) },
             onDismiss = { showFavoritesPicker = false }
         )
+    }
+}
+
+/** Главная карточка: рекорд в тройном, сезон и динамика одним взглядом. */
+@Composable
+private fun MainJumpCard(record: RecordSummary, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val season = RecordInsights.seasonBest(record.points, record.lowerIsBetter)
+    AppCard(onClick = onClick) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(text = "Тройной прыжок", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                Text(text = formatRecordValue(record.best, record.unit), style = NumberLarge, color = cs.onSurface, maxLines = 1)
+                Text(
+                    text = season?.let { "Сезон: ${formatRecordValue(it, record.unit)}" } ?: "В этом сезоне результатов нет",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant
+                )
+            }
+            Sparkline(
+                values = record.points.takeLast(12).map { it.value },
+                lowerIsBetter = record.lowerIsBetter,
+                color = cs.primary,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp)
+            )
+        }
     }
 }
 

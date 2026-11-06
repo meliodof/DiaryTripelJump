@@ -24,7 +24,7 @@ private val WordRegex = Regex("\\S+")
 private const val START_MARK = "(старт)"
 
 /**
- * Название с цветовым выделением свойств: шиповки — синим, снаряд — оранжевым, нога — зелёным.
+ * Название с цветовым выделением свойств: шиповки — бирюзовым, снаряд — оранжевым, нога — синим.
  * Свойства могут стоять в любом месте названия, поэтому текст разбирается по словам:
  * всё, чего нет в исходном названии [name] и что не нога и не шиповки, относится к снаряду.
  * Подходит и для целей, сохранённых в старом формате через точку.
@@ -123,6 +123,20 @@ fun ExerciseConfig.toInput(exerciseId: Long = 0): ExerciseResultInput = Exercise
     inventoryValue = if (isLoadedImplement) null else inventoryValue,
     inSpikes = inSpikes,
     runUp = if (isRunUp) emptyList() else null,
+    titleLayout = titleLayout
+)
+
+/** Упражнение справочника как конфигурация конструктора. */
+fun Exercise.toConfig(): ExerciseConfig = ExerciseConfig(
+    name = name,
+    category = categoryName ?: "Силовое упражнение",
+    isSingleLeg = isSingleLeg,
+    legSide = legSide,
+    inventoryName = inventoryName,
+    inventoryUnit = inventoryUnit,
+    inventoryValue = inventoryValue,
+    inSpikes = inSpikes,
+    unit = defaultUnit,
     titleLayout = titleLayout
 )
 

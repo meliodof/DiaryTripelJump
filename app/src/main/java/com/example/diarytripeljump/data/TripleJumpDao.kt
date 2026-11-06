@@ -316,6 +316,9 @@ interface InventoryDao {
     @Insert
     suspend fun insert(item: InventoryItem): Long
 
+    @Update
+    suspend fun update(item: InventoryItem)
+
     @Delete
     suspend fun delete(item: InventoryItem)
 }

@@ -230,6 +230,7 @@ fun CatalogScreen(
                             onSelect = { categoryFilter = it }
                         )
                         ToggleChip(label = "Избранное", selected = onlyFavorites, onClick = { onlyFavorites = !onlyFavorites })
+                        ToggleChip(label = "Инвентарь", selected = false, onClick = { showInventoryDialog = true })
                     }
                 }
             }
@@ -244,11 +245,11 @@ fun CatalogScreen(
                         )
                         Text(
                             text = buildAnnotatedString {
-                                withStyle(SpanStyle(color = cs.tertiary)) { append("синим") }
+                                withStyle(SpanStyle(color = cs.tertiary)) { append("бирюзовым") }
                                 append(" шиповки, ")
                                 withStyle(SpanStyle(color = cs.secondary)) { append("оранжевым") }
                                 append(" снаряд, ")
-                                withStyle(SpanStyle(color = cs.primary)) { append("зелёным") }
+                                withStyle(SpanStyle(color = cs.primary)) { append("синим") }
                                 append(" нога")
                             },
                             style = MaterialTheme.typography.bodySmall,
@@ -311,7 +312,7 @@ fun CatalogScreen(
         ExerciseEditorDialog(
             initial = target,
             inventoryItems = inventoryItems,
-            onCreateInventory = { showInventoryDialog = true },
+            inventoryActions = viewModel.inventoryActions,
             onDismiss = { showExerciseEditor = false },
             onConfirm = { cfg ->
                 when {
@@ -375,12 +376,10 @@ fun CatalogScreen(
     }
 
     if (showInventoryDialog) {
-        CreateInventoryDialog(
-            onDismiss = { showInventoryDialog = false },
-            onConfirm = { name, unit ->
-                viewModel.addInventory(name, unit)
-                showInventoryDialog = false
-            }
+        InventoryManagerDialog(
+            items = inventoryItems,
+            actions = viewModel.inventoryActions,
+            onDismiss = { showInventoryDialog = false }
         )
     }
 

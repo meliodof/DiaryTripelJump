@@ -66,6 +66,31 @@ class MigrationTest {
     }
 
     @Test
+    fun migrate22To23_keepsInventoryAndResults() {
+        helper.createDatabase(dbName, 22).apply {
+            execSQL("INSERT INTO inventory_items (id, name, unit) VALUES (1, 'Барьер', 'CM')")
+            execSQL("INSERT INTO training_sessions (id, date, trainingType, isSkipped) VALUES (1, 1000, 'HYBRID', 0)")
+            execSQL(
+                "INSERT INTO exercise_results (id, exerciseId, exerciseName, trainingSessionId, date, result, resultUnit, stage, isSingleLeg, inSpikes) " +
+                    "VALUES (1, 1, 'Присед', 1, 1000, 120.0, 'KG', 'MAIN', 0, 0)"
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 23, true, *TripleJumpDatabase.ALL_MIGRATIONS)
+        db.query("SELECT name, unit FROM inventory_items WHERE id = 1").use { c ->
+            c.moveToFirst()
+            assertEquals("Барьер", c.getString(0))
+            assertEquals("CM", c.getString(1))
+        }
+        db.query("SELECT result, isTimed FROM exercise_results WHERE id = 1").use { c ->
+            c.moveToFirst()
+            assertEquals(120.0, c.getDouble(0), 1e-9)
+            assertEquals(0, c.getInt(1))
+        }
+    }
+
+    @Test
     fun migrate21To22_keepsExerciseResults() {
         helper.createDatabase(dbName, 21).apply {
             execSQL("INSERT INTO training_sessions (id, date, trainingType, isSkipped) VALUES (1, 1000, 'HYBRID', 0)")

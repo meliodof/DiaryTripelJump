@@ -133,6 +133,46 @@ class SportRanksAndRunUpTest {
     }
 
     @Test
+    fun setResults_sameBySet_marksEachSetOnItsOwn() {
+        val results = listOf(100.0, 100.0, 100.0, 105.0, 110.0, 120.0)
+        assertEquals(listOf(true, false, false), SetResults.sameBySet(results, listOf(3, 2, 1)))
+        assertEquals(listOf(false, false), SetResults.sameBySet(listOf(0.0, 0.0, 5.0), listOf(2, 1)))
+        assertEquals(listOf(false, false), SetResults.sameBySet(listOf(100.0), listOf(2, 2)))
+    }
+
+    @Test
+    fun setResults_timedSetsHaveOneResultEach() {
+        val text: (Double) -> String = { it.toInt().toString() }
+        assertEquals("3 × 30 сек", SetResults.label(List(3) { 30 }, timed = true))
+        assertEquals("30 + 20 сек", SetResults.label(listOf(30, 20), timed = true))
+        assertEquals("2 × 30 сек по 100", SetResults.summary(listOf(100.0, 100.0), listOf(30, 30), text, timed = true))
+        assertEquals("2 × 30 сек: 100, 110", SetResults.summary(listOf(100.0, 110.0), listOf(30, 30), text, timed = true))
+    }
+
+    @Test
+    fun setResults_switchingTimedKeepsEnteredValues() {
+        assertEquals(listOf(100.0, 110.0), SetResults.toPerSet(listOf(0.0, 100.0, 110.0, 120.0), listOf(2, 2)))
+        assertEquals(listOf(100.0, 100.0, 110.0), SetResults.toPerRep(listOf(100.0, 110.0), listOf(2, 1)))
+    }
+
+    @Test
+    fun setResults_linesDescribeEverySet() {
+        val text: (Double) -> String = { "${it.toInt()} кг" }
+        assertEquals(
+            listOf("Подход 1: 2 × 80 кг", "Подход 2: 90 кг, 100 кг", "Подход 3: не заполнен"),
+            SetResults.setLines(listOf(80.0, 80.0, 90.0, 100.0, 0.0), listOf(2, 2, 1), text)
+        )
+        assertEquals(listOf("Подход 1: 30 сек, 100 кг"), SetResults.setLines(listOf(100.0), listOf(30), text, timed = true))
+        assertEquals(listOf("Подход 1: 5 раз"), SetResults.setLines(emptyList(), listOf(5), text))
+    }
+
+    @Test
+    fun setResults_summaryShowsMixedSets() {
+        val text: (Double) -> String = { it.toInt().toString() }
+        assertEquals("3 × 100, 105 · 110", SetResults.summary(listOf(100.0, 100.0, 100.0, 105.0, 110.0), listOf(3, 2), text))
+    }
+
+    @Test
     fun setResults_summaryIsShort_withEqualAndDifferentReps() {
         val text: (Double) -> String = { it.toInt().toString() }
         assertEquals("3 × 2 по 100", SetResults.summary(List(6) { 100.0 }, List(3) { 2 }, text))

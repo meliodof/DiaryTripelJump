@@ -210,7 +210,9 @@ data class ExerciseResult(
     // Положение свойств в названии, как у упражнения в справочнике
     val titleLayout: String? = null,
     // Повторения по подходам, если их было разное число: «5,5,3»; null — во всех подходах по [reps]
-    val repsPerSetJson: String? = null
+    val repsPerSetJson: String? = null,
+    // Подход измеряется временем: в reps и repsPerSetJson тогда секунды, а результат один на подход
+    val isTimed: Boolean = false
 )
 
 /** Цель по результату. Ключ совпадает с ключом рекорда ([RecordSummary.key]), поэтому прогресс считается автоматически. */
@@ -304,12 +306,12 @@ data class RunUpMeasurement(
     val lengthFeet: Double? = null
 )
 
-/** Инвентарь пользователя: название и единица, в которой он измеряется (см или кг). */
+/** Инвентарь пользователя: название и единица, в которой он измеряется (см, кг или без единицы). */
 @Entity(tableName = "inventory_items")
 data class InventoryItem(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
-    val unit: ResultUnit = ResultUnit.CM
+    val unit: ResultUnit? = null
 )
 
 enum class ResultUnit { KG, CM, M, REPS, SECONDS }

@@ -2,7 +2,19 @@ package com.example.diarytripeljump
 
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -38,10 +50,21 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import com.example.diarytripeljump.data.RecordInsights
+import com.example.diarytripeljump.data.RecordSummary
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -100,6 +123,20 @@ fun MainScreen(
     modifier: Modifier = Modifier
 ) {
     val navController = rememberNavController()
+    // кнопка «Новая тренировка» на главной сразу открывает окно на вкладке тренировок
+    var openNewTraining by remember { mutableStateOf(false) }
+
+    // Новый рекорд празднуется один раз; первое обновление только запоминает текущие значения
+    val records by viewModel.records.collectAsState()
+    var knownBest by remember(viewModel) { mutableStateOf<Map<String, Double>?>(null) }
+    var celebrated by remember { mutableStateOf<RecordSummary?>(null) }
+    LaunchedEffect(records) {
+        if (records.isNotEmpty()) {
+            RecordInsights.newRecord(knownBest, records)?.let { celebrated = it }
+            knownBest = records.associate { it.key to it.best }
+        }
+    }
+
     val backStackEntry by navController.currentBackStackEntryAsState()
     val destination = backStackEntry?.destination
 
@@ -165,11 +202,20 @@ fun MainScreen(
                         DiaryScreen(
                             viewModel = viewModel,
                             onNavigate = onNavigate,
-                            onOpenProfile = onOpenProfile
+                            onOpenProfile = onOpenProfile,
+                            onNewTraining = {
+                                openNewTraining = true
+                                navController.navigateTopLevel(Routes.TRAININGS)
+                            }
                         )
                     }
                     composable(Routes.TRAININGS) {
-                        TrainingsScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
+                        TrainingsScreen(
+                            viewModel = viewModel,
+                            onOpenProfile = onOpenProfile,
+                            openNewTraining = openNewTraining,
+                            onNewTrainingOpened = { openNewTraining = false }
+                        )
                     }
                     composable(Routes.COMPETITIONS) {
                         CompetitionsScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
@@ -209,6 +255,10 @@ fun MainScreen(
             }
         }
     }
+
+    celebrated?.let { record ->
+        RecordCelebration(record = record, onDismiss = { celebrated = null })
+    }
 }
 
 /** Тонкая полоса над навигацией: открыт демо-дневник, одно нажатие — вернуться к своим данным. */
@@ -235,41 +285,77 @@ private fun DemoModeBar(onExit: () -> Unit) {
     }
 }
 
+/** Плавающая панель: цветная подложка перетекает к выбранной вкладке, нажатие отдаётся лёгкой вибрацией. */
 @Composable
 private fun AppNavigationBar(
     current: TopLevelDestination?,
     onSelect: (TopLevelDestination) -> Unit
 ) {
-    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-        TopLevelDestination.entries.forEach { item ->
-            val selected = item == current
-            NavigationBarItem(
-                selected = selected,
-                onClick = { onSelect(item) },
-                icon = {
-                    Icon(
-                        imageVector = if (selected) item.selectedIcon else item.icon,
-                        contentDescription = item.label
-                    )
-                },
-                label = {
-                    Text(
-                        text = item.label,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Clip
-                    )
-                },
-                alwaysShowLabel = true,
-                colors = NavigationBarItemDefaults.colors(
-                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                    selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+    val cs = MaterialTheme.colorScheme
+    val haptics = LocalHapticFeedback.current
+    val items = TopLevelDestination.entries
+    val shape = RoundedCornerShape(26.dp)
+    Surface(
+        modifier = Modifier
+            .navigationBarsPadding()
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+            .fillMaxWidth()
+            .height(66.dp),
+        shape = shape,
+        color = cs.surface,
+        shadowElevation = 10.dp
+    ) {
+        BoxWithConstraints(modifier = Modifier.padding(5.dp)) {
+            val itemWidth = maxWidth / items.size
+            val indicatorX by animateDpAsState(
+                targetValue = itemWidth * items.indexOf(current).coerceAtLeast(0),
+                animationSpec = spring(dampingRatio = 0.72f, stiffness = 500f),
+                label = "navIndicator"
             )
+            Box(
+                modifier = Modifier
+                    .offset(x = indicatorX)
+                    .width(itemWidth)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(21.dp))
+                    .background(cs.primary)
+            )
+            Row(modifier = Modifier.fillMaxSize()) {
+                items.forEach { item ->
+                    val selected = item == current
+                    val color by animateColorAsState(
+                        targetValue = if (selected) cs.onPrimary else cs.onSurfaceVariant,
+                        label = "navColor"
+                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(21.dp))
+                            .selectable(selected = selected, role = Role.Tab, onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelect(item)
+                            }),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = if (selected) item.selectedIcon else item.icon,
+                            contentDescription = item.label,
+                            tint = color,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            text = item.label,
+                            color = color,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Clip
+                        )
+                    }
+                }
+            }
         }
     }
 }

@@ -25,6 +25,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             // Отдельный поток только для темы: изменения статистики не перерисовывают всё дерево
             val darkTheme by viewModel.isDarkTheme.collectAsState()
+            val customPalette by viewModel.customPalette.collectAsState()
 
             // Иконки системных панелей подстраиваются под тему приложения, а не системы
             DisposableEffect(darkTheme) {
@@ -43,7 +44,7 @@ class MainActivity : ComponentActivity() {
                 onDispose { }
             }
 
-            DiaryTripelJumpTheme(darkTheme = darkTheme) {
+            DiaryTripelJumpTheme(darkTheme = darkTheme, customPalette = customPalette) {
                 MainScreen(
                     viewModel = viewModel,
                     isDemo = app.isDemo,

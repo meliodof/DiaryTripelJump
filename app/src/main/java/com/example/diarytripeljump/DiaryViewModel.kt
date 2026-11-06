@@ -30,7 +30,9 @@ data class ExerciseResultInput(
     /** Положение свойств в названии, см. [TitleGrammar.compose]. */
     val titleLayout: String? = null,
     /** Повторения по подходам, если их было разное число; null — во всех подходах по [reps]. */
-    val repsPerSet: List<Int>? = null
+    val repsPerSet: List<Int>? = null,
+    /** Подход измеряется в секундах: [reps] и [repsPerSet] — секунды, результат один на подход. */
+    val isTimed: Boolean = false
 )
 
 /** Результат старта в тройном прыжке для главного экрана. */
@@ -103,6 +105,9 @@ class DiaryViewModel(
 
     private val _isDarkTheme = MutableStateFlow(preferences.isDarkTheme)
     val isDarkTheme: StateFlow<Boolean> = _isDarkTheme.asStateFlow()
+
+    private val _customPalette = MutableStateFlow(preferences.customPalette)
+    val customPalette: StateFlow<CustomPalette?> = _customPalette.asStateFlow()
 
     val athleteProfile: StateFlow<AthleteProfile?> = repository.getProfile()
         .stateIn(viewModelScope, AppSharing, null)
@@ -246,6 +251,12 @@ class DiaryViewModel(
         _isDarkTheme.value = dark
     }
 
+    /** Своя расцветка сохраняется; null возвращает стандартные цвета. */
+    fun setCustomPalette(palette: CustomPalette?) {
+        preferences.customPalette = palette
+        _customPalette.value = palette
+    }
+
     fun updateAthleteProfile(
         firstName: String,
         lastName: String,
@@ -350,6 +361,7 @@ class DiaryViewModel(
      * поэтому для него хранится правка, которая действует, пока рекорд не обновится новым результатом.
      */
     fun updateRecord(record: RecordSummary, input: NewRecordInput) {
+        if (EntryRules.resultError(input.result, input.unit) != null) return
         viewModelScope.launch {
             val hasInventory = !input.inventoryName.isNullOrBlank()
             val weather = if (input.isIndoor) null else input.weather?.takeIf { it.isNotBlank() }
@@ -357,7 +369,7 @@ class DiaryViewModel(
             val legSide = if (input.isSingleLeg) input.legSide else null
             val inventoryName = if (hasInventory) input.inventoryName else null
             val inventoryUnit = if (hasInventory) input.inventoryUnit else null
-            val inventoryValue = if (hasInventory) input.inventoryValue else null
+            val inventoryValue = input.storedInventoryValue()
             val id = record.deletableResultId
             if (id != null) {
                 val row = repository.getAllResults().first().find { it.id == id } ?: return@launch
@@ -484,7 +496,7 @@ class DiaryViewModel(
     }
 
     // --- Inventory ---
-    fun addInventory(name: String, unit: ResultUnit) {
+    fun addInventory(name: String, unit: ResultUnit?) {
         val clean = name.trim()
         if (clean.isBlank()) return
         viewModelScope.launch {
@@ -493,9 +505,35 @@ class DiaryViewModel(
         }
     }
 
+    /** Меняет инвентарь и упражнения справочника с ним. Прошлые тренировки и рекорды не меняются. */
+    fun updateInventory(item: InventoryItem, name: String, unit: ResultUnit?) {
+        val clean = name.trim()
+        if (clean.isBlank()) return
+        viewModelScope.launch {
+            repository.inTransaction {
+                repository.updateInventory(item.copy(name = clean, unit = unit))
+                repository.getAllExercises().first()
+                    .filter { it.inventoryName.equals(item.name, ignoreCase = true) && it.inventoryUnit == item.unit }
+                    .forEach { ex ->
+                        repository.updateExercise(
+                            ex.copy(
+                                inventoryName = clean,
+                                inventoryUnit = unit,
+                                // 91 см не становятся 91 кг: значение в другой единице вводится заново
+                                inventoryValue = if (unit == item.unit) ex.inventoryValue else null
+                            )
+                        )
+                    }
+            }
+        }
+    }
+
+    /** Из списка инвентарь исчезает, упражнения и результаты с ним сохраняются. */
     fun deleteInventory(item: InventoryItem) {
         viewModelScope.launch { repository.deleteInventory(item) }
     }
+
+    val inventoryActions = InventoryActions(add = ::addInventory, update = ::updateInventory, delete = ::deleteInventory)
 
     /** Новое упражнение в справочнике, если такого варианта (название + свойства) ещё нет. */
     fun saveExerciseToDatabase(cfg: ExerciseConfig) {
@@ -726,7 +764,8 @@ class DiaryViewModel(
                     inSpikes = input.inSpikes,
                     runUpJson = input.runUp?.let { RunUp.encode(it) },
                     titleLayout = input.titleLayout,
-                    repsPerSetJson = input.repsPerSet?.joinToString(",")
+                    repsPerSetJson = input.repsPerSet?.joinToString(","),
+                    isTimed = input.isTimed
                 )
             )
         }
@@ -763,9 +802,9 @@ class DiaryViewModel(
         isAntiRecord: Boolean = false,
         date: Long = input.date
     ) {
+        if (EntryRules.resultError(input.result, input.unit) != null) return
         viewModelScope.launch {
             val hasInventory = !input.inventoryName.isNullOrBlank()
-            val loaded = hasInventory && RecordsEngine.isLoadedImplement(input.inventoryUnit, input.unit)
             repository.insertTripleJumpResult(
                 TripleJumpResult(
                     eventName = input.eventName.trim(),
@@ -783,16 +822,18 @@ class DiaryViewModel(
                     legSide = if (input.isSingleLeg) input.legSide else null,
                     inventoryName = if (hasInventory) input.inventoryName else null,
                     inventoryUnit = if (hasInventory) input.inventoryUnit else null,
-                    // вес штанги равен самому результату — рекорд и вес снаряда не могут расходиться
-                    inventoryValue = when {
-                        !hasInventory -> null
-                        loaded -> input.result
-                        else -> input.inventoryValue
-                    },
+                    inventoryValue = input.storedInventoryValue(),
                     inSpikes = input.inSpikes
                 )
             )
         }
+    }
+
+    /** Вес штанги равен самому результату — рекорд и вес снаряда не могут расходиться. */
+    private fun NewRecordInput.storedInventoryValue(): Double? = when {
+        inventoryName.isNullOrBlank() -> null
+        RecordsEngine.isLoadedImplement(inventoryUnit, unit) -> result
+        else -> inventoryValue
     }
 
     /** Удаляет ручную запись рекорда по id (раньше искалась только среди 100 последних и старые не удалялись). */

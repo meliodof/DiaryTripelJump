@@ -14,10 +14,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import com.example.diarytripeljump.data.CustomPalette
 
 private val DarkColorScheme = darkColorScheme(
     primary = DarkPrimary,
@@ -128,9 +130,11 @@ val MaterialTheme.extraColors: ExtraColors
 fun DiaryTripelJumpTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = false,
+    /** Цвета пользователя; null — стандартная схема. */
+    customPalette: CustomPalette? = null,
     content: @Composable () -> Unit
 ) {
-    val colorScheme: ColorScheme = when {
+    val baseScheme: ColorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
@@ -138,9 +142,16 @@ fun DiaryTripelJumpTheme(
         darkTheme -> DarkColorScheme
         else -> LightColorScheme
     }
+    val baseExtra = if (darkTheme) DarkExtraColors else LightExtraColors
+    val colorScheme = remember(baseScheme, customPalette, darkTheme) {
+        customPalette?.let { baseScheme.withPalette(it, darkTheme) } ?: baseScheme
+    }
+    val extraColors = remember(baseExtra, customPalette) {
+        customPalette?.let { baseExtra.withPalette(it) } ?: baseExtra
+    }
 
     CompositionLocalProvider(
-        LocalExtraColors provides if (darkTheme) DarkExtraColors else LightExtraColors
+        LocalExtraColors provides extraColors
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

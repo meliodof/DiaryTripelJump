@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragIndicator
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -44,6 +45,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -72,6 +74,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.diarytripeljump.data.EntryRules
 import com.example.diarytripeljump.data.Exercise
 import com.example.diarytripeljump.data.InventoryItem
 import com.example.diarytripeljump.data.RecordsEngine
@@ -105,7 +108,7 @@ private val EXERCISE_CATEGORIES = listOf(
 fun ExerciseEditorDialog(
     initial: Exercise?,
     inventoryItems: List<InventoryItem>,
-    onCreateInventory: () -> Unit,
+    inventoryActions: InventoryActions,
     onDismiss: () -> Unit,
     onConfirm: (ExerciseConfig) -> Unit,
     /** Параметры выполнения из тренировки — открыть конструктор для правки упражнения прямо в тренировке. */
@@ -135,6 +138,9 @@ fun ExerciseEditorDialog(
     var inventoryUnit by remember { mutableStateOf(start?.inventoryUnit) }
     var inventoryValueText by remember { mutableStateOf(start?.inventoryValue?.let { formatNumber(it).replace(',', '.') } ?: "") }
     var showErrors by remember { mutableStateOf(false) }
+    var showCreateInventory by remember { mutableStateOf(false) }
+    var showInventoryManager by remember { mutableStateOf(false) }
+    var showTitleLayout by remember { mutableStateOf(false) }
     // только что созданный снаряд сразу выбирается, чтобы можно было указать его вес или размер
     var knownInventory by remember { mutableStateOf(inventoryItems.map { it.id }.toSet()) }
     LaunchedEffect(inventoryItems) {
@@ -142,6 +148,7 @@ fun ExerciseEditorDialog(
             hasInventory = true
             inventoryName = fresh.name
             inventoryUnit = fresh.unit
+            inventoryValueText = ""
         }
         knownInventory = inventoryItems.map { it.id }.toSet()
     }
@@ -187,7 +194,10 @@ fun ExerciseEditorDialog(
     }
 
     val inventoryMissing = hasInventory && inventoryName.isNullOrBlank()
-    val canSave = name.isNotBlank() && !inventoryMissing
+    val inventoryValueError = if (hasInventory && !inventoryName.isNullOrBlank() && inventoryUnit != null) {
+        EntryRules.inventoryValueError(inventoryValueText, inventoryUnit)
+    } else null
+    val canSave = name.isNotBlank() && !inventoryMissing && inventoryValueError == null
     val inventoryText = if (hasInventory) RecordsEngine.variantInventory(inventoryName, inventoryUnit, inventoryValueText.toDoubleOrNull(), unit) else null
     val preview = RecordsEngine.exerciseTitle(
         name.ifBlank { "Название" }, singleLeg, legSide, inSpikes,
@@ -391,24 +401,34 @@ fun ExerciseEditorDialog(
                                     inventoryItems.forEach { item ->
                                         FilterChip(
                                             selected = inventoryName.equals(item.name, ignoreCase = true) && inventoryUnit == item.unit,
-                                            onClick = { inventoryName = item.name; inventoryUnit = item.unit },
+                                            onClick = {
+                                                inventoryName = item.name
+                                                inventoryUnit = item.unit
+                                                // у инвентаря без единицы нет веса или размера
+                                                if (item.unit == null) inventoryValueText = ""
+                                            },
                                             label = { Text(item.name) }
                                         )
                                     }
                                     AssistChip(
-                                        onClick = onCreateInventory,
+                                        onClick = { showCreateInventory = true },
                                         label = { Text("Новый") },
                                         leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) }
+                                    )
+                                    AssistChip(
+                                        onClick = { showInventoryManager = true },
+                                        label = { Text("Изменить") },
+                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) }
                                     )
                                 }
                                 if (showErrors && inventoryMissing) {
                                     Text("Выберите инвентарь или уберите блок", style = MaterialTheme.typography.bodySmall, color = cs.error)
                                 }
-                                if (!inventoryName.isNullOrBlank()) {
+                                if (!inventoryName.isNullOrBlank() && inventoryUnit != null) {
                                     OutlinedTextField(
                                         value = inventoryValueText,
                                         onValueChange = { v ->
-                                            inventoryValueText = v.replace(',', '.').filter { it.isDigit() || it == '.' }
+                                            inventoryValueText = EntryRules.cleanNumber(v)
                                             // постоянный вес: снаряд не штанга, и результат считается не в кг
                                             if (loadedImplement && inventoryValueText.isNotEmpty()) {
                                                 val low = name.lowercase()
@@ -419,9 +439,16 @@ fun ExerciseEditorDialog(
                                         },
                                         label = { Text("Вес или размер снаряда") },
                                         suffix = { Text(getUnitTitle(inventoryUnit ?: ResultUnit.CM)) },
-                                        supportingText = if (loadedImplement) {
-                                            { Text("Для штанги оставьте пустым: её вес вводится в попытках как результат") }
-                                        } else null,
+                                        isError = showErrors && inventoryValueError != null,
+                                        supportingText = when {
+                                            showErrors && inventoryValueError != null -> {
+                                                { Text(inventoryValueError) }
+                                            }
+                                            loadedImplement -> {
+                                                { Text("Для штанги оставьте пустым: её вес вводится в попытках как результат") }
+                                            }
+                                            else -> null
+                                        },
                                         singleLine = true,
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         shape = RoundedCornerShape(12.dp),
@@ -431,32 +458,37 @@ fun ExerciseEditorDialog(
                             }
                         }
 
-                        // --- Где в названии стоят свойства ---
+                        // --- Где в названии стоят свойства: редкая настройка, по умолчанию скрыта ---
                         if (BuilderBlock.entries.any { isAdded(it) }) {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                BuilderLabel("Место в названии")
-                                listOf(
-                                    Triple(0, "Нога", BuilderBlock.SINGLE_LEG),
-                                    Triple(1, "Снаряд", BuilderBlock.INVENTORY),
-                                    Triple(2, "Шиповки", BuilderBlock.SPIKES)
-                                ).filter { isAdded(it.third) }.forEach { (index, label, _) ->
-                                    Text(label, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                                    FlowRow(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                                    ) {
-                                        listOf(
-                                            TitleGrammar.AUTO to "Авто", TitleGrammar.START to "В начале",
-                                            TitleGrammar.MIDDLE to "В середине", TitleGrammar.END to "В конце"
-                                        ).forEach { (code, text) ->
-                                            FilterChip(
-                                                selected = layout.getOrElse(index) { TitleGrammar.AUTO } == code,
-                                                onClick = {
-                                                    layout = layout.padEnd(3, TitleGrammar.AUTO).toCharArray()
-                                                        .also { it[index] = code }.concatToString()
-                                                },
-                                                label = { Text(text) }
-                                            )
+                            TextButton(onClick = { showTitleLayout = !showTitleLayout }) {
+                                Text(if (showTitleLayout) "Скрыть порядок слов" else "Порядок слов в названии")
+                            }
+                            if (showTitleLayout) {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    BuilderLabel("Место в названии")
+                                    listOf(
+                                        Triple(0, "Нога", BuilderBlock.SINGLE_LEG),
+                                        Triple(1, "Снаряд", BuilderBlock.INVENTORY),
+                                        Triple(2, "Шиповки", BuilderBlock.SPIKES)
+                                    ).filter { isAdded(it.third) }.forEach { (index, label, _) ->
+                                        Text(label, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                                        FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            listOf(
+                                                TitleGrammar.AUTO to "Авто", TitleGrammar.START to "В начале",
+                                                TitleGrammar.MIDDLE to "В середине", TitleGrammar.END to "В конце"
+                                            ).forEach { (code, text) ->
+                                                FilterChip(
+                                                    selected = layout.getOrElse(index) { TitleGrammar.AUTO } == code,
+                                                    onClick = {
+                                                        layout = layout.padEnd(3, TitleGrammar.AUTO).toCharArray()
+                                                            .also { it[index] = code }.concatToString()
+                                                    },
+                                                    label = { Text(text) }
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -516,11 +548,6 @@ fun ExerciseEditorDialog(
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             BuilderLabel("В тренировках и рекордах")
                             Text(styledTitle(preview, name.trim().ifBlank { "Название" }), style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
-                            Text(
-                                text = "Шиповки, инвентарь и одна нога ведут отдельные рекорды — результаты с ними не смешиваются с обычными.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = cs.onSurfaceVariant
-                            )
                         }
                         Spacer(Modifier.size(24.dp))
                     }
@@ -545,6 +572,33 @@ fun ExerciseEditorDialog(
                 }
             }
         }
+    }
+
+    if (showCreateInventory) {
+        CreateInventoryDialog(
+            existing = inventoryItems,
+            onDismiss = { showCreateInventory = false },
+            onConfirm = { newName, newUnit ->
+                inventoryActions.add(newName, newUnit)
+                showCreateInventory = false
+            }
+        )
+    }
+
+    if (showInventoryManager) {
+        InventoryManagerDialog(
+            items = inventoryItems,
+            actions = inventoryActions,
+            onDismiss = { showInventoryManager = false },
+            onChanged = { old, newName, newUnit ->
+                // изменён выбранный снаряд: форма показывает его новые параметры
+                if (inventoryName.equals(old.name, ignoreCase = true) && inventoryUnit == old.unit) {
+                    inventoryName = newName
+                    inventoryUnit = newUnit
+                    if (newUnit != old.unit) inventoryValueText = ""
+                }
+            }
+        )
     }
 }
 

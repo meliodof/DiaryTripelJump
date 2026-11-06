@@ -12,6 +12,9 @@ data class RecordHistoryEntry(
     val inventoryLabel: String? = null
 )
 
+/** Один результат упражнения для графика. */
+data class RecordPoint(val date: Long, val value: Double, val isCompetition: Boolean)
+
 /** Текущий рекорд по упражнению/виду вместе с полной историей его обновлений. */
 data class RecordSummary(
     val key: String,
@@ -43,7 +46,9 @@ data class RecordSummary(
     /** Снаряд отдельными полями — для формы редактирования. */
     val inventoryName: String? = null,
     val inventoryUnit: ResultUnit? = null,
-    val inventoryValue: Double? = null
+    val inventoryValue: Double? = null,
+    /** Все результаты упражнения по дате, а не только обновления рекорда. */
+    val points: List<RecordPoint> = emptyList()
 )
 
 /** Событие «рекорд обновлён» для ленты на главном экране. */
@@ -339,7 +344,8 @@ object RecordsEngine {
                 notes = best.notes,
                 inventoryName = best.invName,
                 inventoryUnit = best.invUnit,
-                inventoryValue = best.invValue
+                inventoryValue = best.invValue,
+                points = sorted.map { RecordPoint(it.date, it.value, it.isCompetition || g.isCompetition) }
             )
 
             // Ручная правка рекорда из тренировок действует, пока рекорд не обновился новым результатом

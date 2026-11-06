@@ -152,6 +152,7 @@ class TripleJumpRepository(
     // Inventory
     fun getAllInventory(): Flow<List<InventoryItem>> = inventoryDao.getAll()
     suspend fun insertInventory(item: InventoryItem): Long = inventoryDao.insert(item)
+    suspend fun updateInventory(item: InventoryItem) = inventoryDao.update(item)
     suspend fun deleteInventory(item: InventoryItem) = inventoryDao.delete(item)
 
     // Training periods (calendar)
