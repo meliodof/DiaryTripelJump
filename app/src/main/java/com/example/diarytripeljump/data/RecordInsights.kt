@@ -7,6 +7,7 @@ import kotlin.math.ceil
 
 /** Период графика на экране рекорда. */
 enum class ChartRange(val label: String, val days: Int?) {
+    MONTH("Месяц", 31),
     QUARTER("3 месяца", 92),
     YEAR("Год", 365),
     ALL("Всё время", null)
@@ -63,6 +64,16 @@ object RecordInsights {
         ResultUnit.SECONDS -> String.format(Locale.getDefault(), "%.2f сек", pace.coerceAtLeast(0.01))
         ResultUnit.KG -> String.format(Locale.getDefault(), "%.1f кг", pace.coerceAtLeast(0.1))
         ResultUnit.REPS -> "${ceil(pace).toInt().coerceAtLeast(1)} раз"
+    }
+
+    /** Рекорд в самом тройном прыжке: без снаряда, на двух ногах. */
+    fun isMainJump(r: RecordSummary): Boolean =
+        !r.isAnti && r.unit == ResultUnit.M && !r.isSingleLeg && r.inventoryName.isNullOrBlank() && r.name.contains("тройной", ignoreCase = true)
+
+    /** Лучшие рекорды в тройном отдельно на соревнованиях и на тренировках. */
+    fun mainJumpSplit(records: List<RecordSummary>): Pair<RecordSummary?, RecordSummary?> {
+        val jumps = records.filter { isMainJump(it) }
+        return jumps.filter { it.isCompetition }.maxByOrNull { it.best } to jumps.filter { !it.isCompetition }.maxByOrNull { it.best }
     }
 
     /** Рекорд, улучшенный с прошлого обновления; без прошлого состояния праздновать нечего. */

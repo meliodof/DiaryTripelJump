@@ -92,6 +92,10 @@ import com.example.diarytripeljump.ui.theme.NumberLarge
 import androidx.compose.material3.Button
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.filled.Add
+import com.example.diarytripeljump.data.RecordPoint
+import com.example.diarytripeljump.data.ResultUnit
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.material3.VerticalDivider
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -103,7 +107,8 @@ fun DiaryScreen(
     viewModel: DiaryViewModel,
     onNavigate: (String) -> Unit = {},
     onOpenProfile: () -> Unit = {},
-    onNewTraining: () -> Unit = {}
+    onNewTraining: () -> Unit = {},
+    onOpenAnalytics: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val athleteProfile by viewModel.athleteProfile.collectAsState()
@@ -116,7 +121,11 @@ fun DiaryScreen(
     val goals by viewModel.goals.collectAsState()
     var showFavoritesPicker by remember { mutableStateOf(false) }
     var detailKey by remember { mutableStateOf<String?>(null) }
-    val mainJump = remember(records) { records.filter { it.isMainJump() }.maxByOrNull { it.best } }
+    // тройной отдельно на соревнованиях (рекорды стартов и попытки) и на тренировках
+    val jumpSplit = remember(records) { RecordInsights.mainJumpSplit(records) }
+    val competitionPoints = remember(jumpSplit, startResults) {
+        (startResults.map { RecordPoint(it.competition.date, it.best, true) } + jumpSplit.first?.points.orEmpty()).sortedBy { it.date }
+    }
     val todayStart = com.example.diarytripeljump.ui.components.rememberTodayStart()
 
     val dateText = remember {
@@ -188,8 +197,15 @@ fun DiaryScreen(
                 }
             }
 
-            if (mainJump != null) {
-                item { MainJumpCard(record = mainJump, onClick = { detailKey = mainJump.key }) }
+            if (competitionPoints.isNotEmpty() || jumpSplit.second != null) {
+                item {
+                    MainJumpCard(
+                        competitionPoints = competitionPoints,
+                        training = jumpSplit.second,
+                        onCompetition = { jumpSplit.first?.let { detailKey = it.key } ?: onNavigate(Routes.COMPETITIONS) },
+                        onTraining = { jumpSplit.second?.let { detailKey = it.key } }
+                    )
+                }
             }
 
             item {
@@ -323,37 +339,71 @@ fun DiaryScreen(
     }
 }
 
-/** Главная карточка: рекорд в тройном, сезон и динамика одним взглядом. */
+/** Главная карточка: тройной на соревнованиях и на тренировках — две половины с динамикой. */
 @Composable
-private fun MainJumpCard(record: RecordSummary, onClick: () -> Unit) {
+private fun MainJumpCard(
+    competitionPoints: List<RecordPoint>,
+    training: RecordSummary?,
+    onCompetition: () -> Unit,
+    onTraining: () -> Unit
+) {
     val cs = MaterialTheme.colorScheme
-    val season = RecordInsights.seasonBest(record.points, record.lowerIsBetter)
-    AppCard(onClick = onClick) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(text = "Тройной прыжок", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-                Text(text = formatRecordValue(record.best, record.unit), style = NumberLarge, color = cs.onSurface, maxLines = 1)
-                Text(
-                    text = season?.let { "Сезон: ${formatRecordValue(it, record.unit)}" } ?: "В этом сезоне результатов нет",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = cs.onSurfaceVariant
+    AppCard {
+        Column(modifier = Modifier.padding(top = 12.dp)) {
+            Text(
+                text = "Тройной прыжок",
+                style = MaterialTheme.typography.labelLarge,
+                color = cs.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+            Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                JumpHalf(
+                    title = "На соревнованиях",
+                    points = competitionPoints,
+                    color = MaterialTheme.extraColors.gold,
+                    onClick = onCompetition,
+                    modifier = Modifier.weight(1f)
+                )
+                VerticalDivider(color = cs.outlineVariant, modifier = Modifier.padding(vertical = 12.dp))
+                JumpHalf(
+                    title = "На тренировках",
+                    points = training?.points.orEmpty(),
+                    color = cs.primary,
+                    onClick = onTraining,
+                    modifier = Modifier.weight(1f)
                 )
             }
-            Sparkline(
-                values = record.points.takeLast(12).map { it.value },
-                lowerIsBetter = record.lowerIsBetter,
-                color = cs.primary,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(56.dp)
-            )
         }
+    }
+}
+
+@Composable
+private fun JumpHalf(title: String, points: List<RecordPoint>, color: Color, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val cs = MaterialTheme.colorScheme
+    val best = points.maxOfOrNull { it.value }
+    val season = RecordInsights.seasonBest(points, lowerIsBetter = false)
+    Column(
+        modifier = modifier
+            .clickable(enabled = best != null, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(text = title, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        Text(text = best?.let { formatRecordValue(it, ResultUnit.M) } ?: "—", style = NumberLarge, color = cs.onSurface, maxLines = 1)
+        Text(
+            text = season?.let { "Сезон: ${formatRecordValue(it, ResultUnit.M)}" } ?: "В сезоне нет",
+            style = MaterialTheme.typography.bodySmall,
+            color = cs.onSurfaceVariant
+        )
+        Sparkline(
+            values = points.takeLast(12).map { it.value },
+            lowerIsBetter = false,
+            color = color,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(32.dp)
+                .padding(top = 4.dp)
+        )
     }
 }
 

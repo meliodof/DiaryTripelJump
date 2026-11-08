@@ -25,7 +25,8 @@ class TripleJumpRepository(
     private val recordOverrideDao: RecordOverrideDao,
     private val exerciseComplexDao: ExerciseComplexDao,
     private val exerciseGoalDao: ExerciseGoalDao,
-    private val runUpMeasurementDao: RunUpMeasurementDao
+    private val runUpMeasurementDao: RunUpMeasurementDao,
+    private val bodyMeasurementDao: BodyMeasurementDao
 ) {
     /** Несколько изменений как одно целое: при сбое посередине база остаётся в прежнем состоянии. */
     suspend fun <R> inTransaction(block: suspend () -> R): R = database.withTransaction(block)
@@ -90,6 +91,10 @@ class TripleJumpRepository(
     // Goals
     fun getRunUpMeasurements(): Flow<List<RunUpMeasurement>> = runUpMeasurementDao.getAll()
     suspend fun insertRunUpMeasurement(measurement: RunUpMeasurement) = runUpMeasurementDao.insert(measurement)
+
+    fun getBodyMeasurements(): Flow<List<BodyMeasurement>> = bodyMeasurementDao.getAll()
+    suspend fun insertBodyMeasurement(measurement: BodyMeasurement): Long = bodyMeasurementDao.insert(measurement)
+    suspend fun deleteBodyMeasurement(measurement: BodyMeasurement) = bodyMeasurementDao.delete(measurement)
 
     fun getAllGoals(): Flow<List<ExerciseGoal>> = exerciseGoalDao.getAll()
     suspend fun upsertGoal(goal: ExerciseGoal) = exerciseGoalDao.upsert(goal)

@@ -580,5 +580,4 @@ fun RecordCelebration(record: RecordSummary, onDismiss: () -> Unit) {
 }
 
 /** Единицы для подсказки на главной: тройной прыжок считается в метрах. */
-fun RecordSummary.isMainJump(): Boolean =
-    !isAnti && unit == ResultUnit.M && !isSingleLeg && inventoryName.isNullOrBlank() && name.contains("тройной", ignoreCase = true)
+fun RecordSummary.isMainJump(): Boolean = RecordInsights.isMainJump(this)

@@ -392,3 +392,15 @@ interface RunUpMeasurementDao {
     @Insert
     suspend fun insert(measurement: RunUpMeasurement)
 }
+
+@Dao
+interface BodyMeasurementDao {
+    @Query("SELECT * FROM body_measurements ORDER BY date ASC")
+    fun getAll(): Flow<List<BodyMeasurement>>
+
+    @Insert
+    suspend fun insert(measurement: BodyMeasurement): Long
+
+    @Delete
+    suspend fun delete(measurement: BodyMeasurement)
+}

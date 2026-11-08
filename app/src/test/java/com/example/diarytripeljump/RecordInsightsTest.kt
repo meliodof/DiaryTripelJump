@@ -61,6 +61,16 @@ class RecordInsightsTest {
     }
 
     @Test
+    fun mainJump_splitsCompetitionAndTraining() {
+        val competition = record(14.11).copy(key = "c", isCompetition = true)
+        val training = record(14.21).copy(key = "t")
+        val withBar = record(15.0).copy(key = "b", inventoryName = "Утяжелитель")
+        val (c, t) = RecordInsights.mainJumpSplit(listOf(competition, training, withBar))
+        assertEquals("c", c?.key)
+        assertEquals("t", t?.key)
+    }
+
+    @Test
     fun newRecord_onlyForRealImprovement() {
         assertNull(RecordInsights.newRecord(null, listOf(record(15.0))))
         assertNull(RecordInsights.newRecord(emptyMap(), listOf(record(15.0))))

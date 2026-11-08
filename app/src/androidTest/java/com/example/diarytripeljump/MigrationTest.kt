@@ -66,6 +66,21 @@ class MigrationTest {
     }
 
     @Test
+    fun migrate23To24_profileBecomesFirstMeasurement() {
+        helper.createDatabase(dbName, 23).apply {
+            execSQL("INSERT INTO athlete_profile (id, firstName, lastName, height, weight) VALUES (1, 'Антон', 'Ларин', 187.0, 77.0)")
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 24, true, *TripleJumpDatabase.ALL_MIGRATIONS)
+        db.query("SELECT heightCm, weightKg FROM body_measurements").use { c ->
+            c.moveToFirst()
+            assertEquals(187.0, c.getDouble(0), 1e-9)
+            assertEquals(77.0, c.getDouble(1), 1e-9)
+        }
+    }
+
+    @Test
     fun migrate22To23_keepsInventoryAndResults() {
         helper.createDatabase(dbName, 22).apply {
             execSQL("INSERT INTO inventory_items (id, name, unit) VALUES (1, 'Барьер', 'CM')")

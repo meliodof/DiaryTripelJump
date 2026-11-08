@@ -223,6 +223,76 @@ class DiaryViewModel(
             rows.map { it.copy(isPersonalBest = overall != null && it.best >= overall) }
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, emptyList())
 
+    /** Замеры веса и роста по датам. */
+    val bodyMeasurements: StateFlow<List<BodyMeasurement>> = repository.getBodyMeasurements()
+        .stateIn(viewModelScope, AppSharing, emptyList())
+
+    /** Все показатели, которые можно вывести на график в аналитике. */
+    val analyticsSeries: StateFlow<List<AnalyticsSeries>> =
+        combine(allExerciseResults, rawTripleJumpResults, allCompetitions, bodyMeasurements, runUpHistory) { exercises, manual, comps, body, runUp ->
+            val today = startOfDay(System.currentTimeMillis())
+            // все попытки прошедших стартов, включая квалификацию
+            val starts = comps
+                .filter { it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED && startOfDay(it.date) <= today }
+                .map { c -> SeriesSample(c.date, ChartData.attemptsOf(c.attemptsJson) + ChartData.attemptsOf(c.qualificationAttemptsJson)) }
+                .filter { it.values.isNotEmpty() }
+            ChartData.buildSeries(exercises, manual, starts, body, runUp)
+        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, emptyList())
+
+    private val _visualization = MutableStateFlow(preferences.visualization)
+    val visualization: StateFlow<VisualizationConfig> = _visualization.asStateFlow()
+
+    fun saveVisualization(config: VisualizationConfig) {
+        // один показатель на графике — один раз: повторный ключ в списке роняет экран
+        val clean = config.copy(charts = config.charts.map { c -> c.copy(series = c.series.distinctBy { it.id }) })
+        preferences.visualization = clean
+        _visualization.value = clean
+    }
+
+    /** Изменение от текущих настроек, а не от их копии на экране: быстрые нажатия не теряются и не дублируются. */
+    fun updateVisualization(change: (VisualizationConfig) -> VisualizationConfig) {
+        saveVisualization(change(_visualization.value))
+    }
+
+    /** Новый замер; в профиль попадает самый поздний. */
+    fun addBodyMeasurement(kind: BodyKind, value: Double, date: Long) {
+        if (EntryRules.resultError(value, kind.resultUnit) != null) return
+        viewModelScope.launch {
+            repository.inTransaction {
+                repository.insertBodyMeasurement(
+                    BodyMeasurement(
+                        date = date,
+                        weightKg = value.takeIf { kind == BodyKind.WEIGHT },
+                        heightCm = value.takeIf { kind == BodyKind.HEIGHT }
+                    )
+                )
+                syncProfileBody()
+            }
+        }
+    }
+
+    fun deleteBodyMeasurement(measurement: BodyMeasurement) {
+        viewModelScope.launch {
+            repository.inTransaction {
+                repository.deleteBodyMeasurement(measurement)
+                syncProfileBody()
+            }
+        }
+    }
+
+    /** Вес и рост в профиле — последние замеры; без замеров остаются прежние значения. */
+    private suspend fun syncProfileBody() {
+        val all = repository.getBodyMeasurements().first()
+        val current = repository.getProfile().first() ?: AthleteProfile()
+        repository.insertProfile(
+            current.copy(
+                id = 1,
+                weight = all.filter { it.weightKg != null }.maxByOrNull { it.date }?.weightKg ?: current.weight,
+                height = all.filter { it.heightCm != null }.maxByOrNull { it.date }?.heightCm ?: current.height
+            )
+        )
+    }
+
     init {
         loadData()
     }
@@ -288,6 +358,10 @@ class DiaryViewModel(
                     leadingLeg = leadingLeg
                 )
             )
+            // изменение в профиле тоже попадает в историю замеров
+            val now = System.currentTimeMillis()
+            if (weight != null && weight != current.weight) repository.insertBodyMeasurement(BodyMeasurement(date = now, weightKg = weight))
+            if (height != null && height != current.height) repository.insertBodyMeasurement(BodyMeasurement(date = now, heightCm = height))
         }
     }
 

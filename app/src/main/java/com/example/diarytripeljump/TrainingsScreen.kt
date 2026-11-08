@@ -905,7 +905,7 @@ fun CompactTrainingCalendarWidget(
     val monthFormat = remember { SimpleDateFormat("LLLL yyyy", Locale("ru")) }
 
     // перетаскивание дня: границы ячеек в координатах окна, откуда тянем и где сейчас палец
-    val cellBounds = remember { mutableStateMapOf<Long, GeoRect>() }
+    val cellBounds = remember { HashMap<Long, GeoRect>() }
     var dragFrom by remember { mutableStateOf<Long?>(null) }
     var dragPos by remember { mutableStateOf(Offset.Zero) }
     val dropTarget = dragFrom?.let { cellBounds.entries.firstOrNull { (_, r) -> r.contains(dragPos) }?.key }
@@ -1237,6 +1237,43 @@ fun CompactTrainingCalendarWidget(
     }
 }
 
+/** Строка упражнения в карточке тренировки, посчитанная заранее. */
+private class ExerciseRowUi(
+    val result: ExerciseResult,
+    val name: String,
+    val title: String,
+    val best: Double?,
+    val detail: String?,
+    val runUpLines: List<String>?
+)
+
+private fun exerciseRowUi(exRes: ExerciseResult, exercisesList: List<Exercise>): ExerciseRowUi {
+    val exName = if (exRes.exerciseName.isNotBlank()) exRes.exerciseName
+    else exercisesList.find { it.id == exRes.exerciseId }?.name ?: "Упражнение"
+    // справа — лучший результат крупно, под названием — все попытки мелко
+    val attempts = exRes.setResultsJson?.split(",")?.mapNotNull { it.trim().toDoubleOrNull() }?.filter { it > 0 } ?: emptyList()
+    val lowerBetter = RecordsEngine.isLowerBetter(exName, exRes.resultUnit)
+    val candidates = attempts + listOfNotNull(exRes.result.takeIf { it > 0 })
+    val repsPlan = SetResults.repsBySet(exRes.sets, exRes.reps, exRes.repsPerSetJson)
+    val runUpLines = exRes.runUpJson?.let { RunUp.decode(it) }?.map { RunUp.describe(it) }
+    return ExerciseRowUi(
+        result = exRes,
+        name = exName,
+        title = RecordsEngine.exerciseTitle(
+            exName, exRes.isSingleLeg, exRes.legSide, exRes.inSpikes,
+            exRes.inventoryName, exRes.inventoryUnit, exRes.inventoryValue, exRes.resultUnit, exRes.titleLayout
+        ),
+        best = if (lowerBetter) candidates.minOrNull() else candidates.maxOrNull(),
+        detail = when {
+            runUpLines != null -> runUpLines.mapIndexed { i, line -> "${i + 1}. $line" }.joinToString("\n").ifBlank { "Попытки не заполнены" }
+            attempts.size > 1 -> SetResults.summary(attempts, repsPlan, { plainAttempt(it) }, exRes.isTimed)
+            repsPlan.isNotEmpty() -> SetResults.label(repsPlan, exRes.isTimed)
+            else -> null
+        },
+        runUpLines = runUpLines
+    )
+}
+
 /** Ключ рекорда, к которому относится упражнение из тренировки. */
 private fun ExerciseResult.recordKey(): String = RecordsEngine.exerciseRecordKey(
     exerciseName.trim(), isSingleLeg, legSide, resultUnit, inSpikes,
@@ -1332,7 +1369,12 @@ fun TrainingSessionCard(
     val exerciseCount = trainingItem.exerciseResults.size
 
     var isExpanded by remember { mutableStateOf(false) }
-    val exercisesToRender = if (isExpanded) trainingItem.exerciseResults else trainingItem.exerciseResults.take(1)
+    // названия, лучшие результаты и подписи считаются один раз, а не при каждом появлении карточки на экране
+    val rowsUi = remember(trainingItem.exerciseResults, exercisesList) {
+        trainingItem.exerciseResults.map { exerciseRowUi(it, exercisesList) }
+    }
+    val exercisesToRender = if (isExpanded) rowsUi else rowsUi.take(1)
+    val timeText = remember(session.date) { SimpleDateFormat("HH:mm", Locale("ru")).format(Date(session.date)) }
 
     AppCard(
         containerColor = if (isSkipped) cs.errorContainer.copy(alpha = 0.25f) else cs.surface
@@ -1353,12 +1395,7 @@ fun TrainingSessionCard(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     // Заголовок по содержанию: первые упражнения вместо одинакового «Тренировка»
-                    val names = trainingItem.exerciseResults.filter { it.exerciseName.isNotBlank() }.map { r ->
-                        RecordsEngine.exerciseTitle(
-                            r.exerciseName, r.isSingleLeg, r.legSide, r.inSpikes,
-                            r.inventoryName, r.inventoryUnit, r.inventoryValue, r.resultUnit, r.titleLayout
-                        )
-                    }.distinct()
+                    val names = remember(rowsUi) { rowsUi.filter { it.result.exerciseName.isNotBlank() }.map { it.title }.distinct() }
                     Text(
                         text = when {
                             isSkipped -> "Пропуск тренировки"
@@ -1373,7 +1410,7 @@ fun TrainingSessionCard(
                     )
                     Text(
                         text = if (isSkipped) "Причина: ${session.skipReason ?: "не указана"}"
-                        else SimpleDateFormat("HH:mm", Locale("ru")).format(Date(session.date)) +
+                        else timeText +
                             ", $exerciseCount ${pluralRu(exerciseCount, "упражнение", "упражнения", "упражнений")}",
                         style = MaterialTheme.typography.bodySmall,
                         color = cs.onSurfaceVariant,
@@ -1396,29 +1433,13 @@ fun TrainingSessionCard(
                 ) {
                     HorizontalDivider(color = cs.outlineVariant)
 
-                    exercisesToRender.forEach { exRes ->
-                        val exName = if (exRes.exerciseName.isNotBlank()) exRes.exerciseName
-                        else exercisesList.find { it.id == exRes.exerciseId }?.name ?: "Упражнение"
-
-                        // Справа — лучший результат крупно, под названием — все попытки мелко
-                        val attempts = exRes.setResultsJson?.split(",")?.mapNotNull { it.trim().toDoubleOrNull() }?.filter { it > 0 }
-                            ?: emptyList()
-                        val lowerBetter = RecordsEngine.isLowerBetter(exName, exRes.resultUnit)
-                        val candidates = attempts + listOfNotNull(exRes.result.takeIf { it > 0 })
-                        val best = if (lowerBetter) candidates.minOrNull() else candidates.maxOrNull()
-                        val repsPlan = SetResults.repsBySet(exRes.sets, exRes.reps, exRes.repsPerSetJson)
-                        val runUpLines = exRes.runUpJson?.let { RunUp.decode(it) }?.map { RunUp.describe(it) }
-                        val detail = when {
-                            runUpLines != null -> runUpLines.mapIndexed { i, line -> "${i + 1}. $line" }
-                                .joinToString("\n").ifBlank { "Попытки не заполнены" }
-                            attempts.size > 1 -> SetResults.summary(attempts, repsPlan, { plainAttempt(it) }, exRes.isTimed)
-                            repsPlan.isNotEmpty() -> SetResults.label(repsPlan, exRes.isTimed)
-                            else -> null
-                        }
-                        val fullTitle = RecordsEngine.exerciseTitle(
-                            exName, exRes.isSingleLeg, exRes.legSide, exRes.inSpikes,
-                            exRes.inventoryName, exRes.inventoryUnit, exRes.inventoryValue, exRes.resultUnit, exRes.titleLayout
-                        )
+                    exercisesToRender.forEach { row ->
+                        val exRes = row.result
+                        val exName = row.name
+                        val best = row.best
+                        val runUpLines = row.runUpLines
+                        val detail = row.detail
+                        val fullTitle = row.title
 
                         Row(
                             modifier = Modifier
@@ -2202,6 +2223,7 @@ private fun RunUpAttempt.toRow(): RunUpRow {
  * Окно попыток с разбега: попал или нет, сколько стоп, на сколько отнёс или поднёс отметку.
  * [fixedCount] — у старта число попыток задано, и номер попытки сохраняется вместе с пустыми.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RunUpResultsDialog(
     exerciseName: String,
@@ -2253,9 +2275,9 @@ fun RunUpResultsDialog(
                                     }
                                 }
                             }
-                            Row(
-                                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
                                 listOf(1 to "Заступил", 2 to "Не доступил", 3 to "Попал").forEach { (code, label) ->
                                     ToggleChip(
@@ -2290,8 +2312,7 @@ fun RunUpResultsDialog(
                                     OutlinedTextField(
                                         value = row.moveCm,
                                         onValueChange = { rows[i] = row.copy(moveCm = numeric(it)) },
-                                        label = { Text("Сантиметры") },
-                                        suffix = { Text("см") },
+                                        label = { Text("В см") },
                                         singleLine = true,
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         modifier = Modifier.weight(1f)
@@ -2299,8 +2320,7 @@ fun RunUpResultsDialog(
                                     OutlinedTextField(
                                         value = row.moveFeet,
                                         onValueChange = { rows[i] = row.copy(moveFeet = numeric(it)) },
-                                        label = { Text("Стопы") },
-                                        suffix = { Text("ст.") },
+                                        label = { Text("В стопах") },
                                         singleLine = true,
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         modifier = Modifier.weight(1f)

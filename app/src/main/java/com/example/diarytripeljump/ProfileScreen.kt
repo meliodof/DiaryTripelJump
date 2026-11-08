@@ -138,6 +138,8 @@ fun ProfileScreen(
     var showRanksDialog by remember { mutableStateOf(false) }
     var showRunUpDialog by remember { mutableStateOf(false) }
     var showPaletteDialog by remember { mutableStateOf(false) }
+    var bodyKind by remember { mutableStateOf<BodyKind?>(null) }
+    val bodyMeasurements by viewModel.bodyMeasurements.collectAsState()
     val sportRank = autoRank?.rank
 
     val fullName = remember(athleteProfile) {
@@ -300,17 +302,20 @@ fun ProfileScreen(
                     label = "Рост, см",
                     icon = Icons.Default.Height,
                     tint = cs.tertiary,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    onClick = { bodyKind = BodyKind.HEIGHT }
                 )
                 StatTile(
                     value = if (athleteProfile?.weight != null && athleteProfile!!.weight!! > 0) "${athleteProfile!!.weight!!.toInt()}" else "—",
                     label = "Вес, кг",
                     icon = Icons.Default.MonitorWeight,
                     tint = cs.secondary,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    onClick = { bodyKind = BodyKind.WEIGHT }
                 )
                 StatTile(
-                    value = calculatedPbMeters.removeSuffix(" м"),
+                    // тот же лучший результат, по которому считается разряд
+                    value = autoRank?.bestResult?.let { String.format(Locale.getDefault(), "%.2f", it) } ?: calculatedPbMeters.removeSuffix(" м"),
                     label = "Рекорд, м",
                     icon = Icons.Default.EmojiEvents,
                     tint = MaterialTheme.extraColors.gold,
@@ -508,6 +513,16 @@ fun ProfileScreen(
 
     if (showRanksDialog) {
         RanksDialog(autoRank = autoRank, gender = athleteProfile?.gender, onDismiss = { showRanksDialog = false })
+    }
+
+    bodyKind?.let { kind ->
+        BodyHistoryDialog(
+            kind = kind,
+            history = bodyMeasurements,
+            onAdd = { value, date -> viewModel.addBodyMeasurement(kind, value, date) },
+            onDelete = { viewModel.deleteBodyMeasurement(it) },
+            onDismiss = { bodyKind = null }
+        )
     }
 
     if (showPaletteDialog) {

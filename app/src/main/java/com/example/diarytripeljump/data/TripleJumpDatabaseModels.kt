@@ -306,6 +306,15 @@ data class RunUpMeasurement(
     val lengthFeet: Double? = null
 )
 
+/** Замер веса или роста: история показывает, как они менялись. */
+@Entity(tableName = "body_measurements")
+data class BodyMeasurement(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val date: Long,
+    val heightCm: Double? = null,
+    val weightKg: Double? = null
+)
+
 /** Инвентарь пользователя: название и единица, в которой он измеряется (см, кг или без единицы). */
 @Entity(tableName = "inventory_items")
 data class InventoryItem(

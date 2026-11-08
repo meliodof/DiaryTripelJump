@@ -3,6 +3,8 @@ package com.example.diarytripeljump
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.graphics.Color
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -85,6 +87,8 @@ object Routes {
     const val RECORDS = "records"
     const val CATALOG = "catalog"
     const val PROFILE = "profile"
+    const val ANALYTICS = "analytics"
+    const val VISUALIZATION = "analytics/visualization"
 }
 
 /** Пункты нижней навигации (вкладки верхнего уровня). */
@@ -98,6 +102,7 @@ enum class TopLevelDestination(
     TRAININGS(Routes.TRAININGS, "Тренировки", Icons.Outlined.FitnessCenter, Icons.Filled.FitnessCenter),
     COMPETITIONS(Routes.COMPETITIONS, "Старты", Icons.Outlined.EmojiEvents, Icons.Filled.EmojiEvents),
     RECORDS(Routes.RECORDS, "Рекорды", Icons.Outlined.MilitaryTech, Icons.Filled.MilitaryTech),
+    ANALYTICS(Routes.ANALYTICS, "Аналитика", Icons.Outlined.Insights, Icons.Filled.Insights),
     CATALOG(Routes.CATALOG, "Каталог", Icons.Outlined.Category, Icons.Filled.Category)
 }
 
@@ -226,6 +231,22 @@ fun MainScreen(
                     composable(Routes.CATALOG) {
                         CatalogScreen(viewModel = viewModel, onOpenProfile = onOpenProfile)
                     }
+                    composable(Routes.ANALYTICS) {
+                        AnalyticsScreen(
+                            viewModel = viewModel,
+                            onOpenProfile = onOpenProfile,
+                            onOpenVisualization = { navController.navigate(Routes.VISUALIZATION) { launchSingleTop = true } }
+                        )
+                    }
+                    composable(
+                        route = Routes.VISUALIZATION,
+                        enterTransition = { slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(250)) + fadeIn(tween(250)) },
+                        exitTransition = { fadeOut(tween(TAB_EXIT_MS)) },
+                        popEnterTransition = { fadeIn(tween(TAB_ENTER_MS)) },
+                        popExitTransition = { slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(250)) + fadeOut(tween(250)) }
+                    ) {
+                        VisualizationScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+                    }
                     composable(
                         route = Routes.PROFILE,
                         // Профиль — «push»-экран: въезжает справа, назад — уезжает вправо
@@ -305,53 +326,45 @@ private fun AppNavigationBar(
         color = cs.surface,
         shadowElevation = 10.dp
     ) {
-        BoxWithConstraints(modifier = Modifier.padding(5.dp)) {
-            val itemWidth = maxWidth / items.size
-            val indicatorX by animateDpAsState(
-                targetValue = itemWidth * items.indexOf(current).coerceAtLeast(0),
-                animationSpec = spring(dampingRatio = 0.72f, stiffness = 500f),
-                label = "navIndicator"
-            )
-            Box(
-                modifier = Modifier
-                    .offset(x = indicatorX)
-                    .width(itemWidth)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(21.dp))
-                    .background(cs.primary)
-            )
-            Row(modifier = Modifier.fillMaxSize()) {
-                items.forEach { item ->
-                    val selected = item == current
-                    val color by animateColorAsState(
-                        targetValue = if (selected) cs.onPrimary else cs.onSurfaceVariant,
-                        label = "navColor"
+        // выбранная вкладка шире остальных и показывает подпись: шесть вкладок помещаются без мелкого текста
+        Row(modifier = Modifier.fillMaxSize().padding(5.dp)) {
+            items.forEach { item ->
+                val selected = item == current
+                val weight by animateFloatAsState(
+                    targetValue = if (selected) 2.4f else 1f,
+                    animationSpec = spring(dampingRatio = 0.8f, stiffness = 500f),
+                    label = "navWeight"
+                )
+                val background by animateColorAsState(if (selected) cs.primary else Color.Transparent, label = "navBackground")
+                val color by animateColorAsState(if (selected) cs.onPrimary else cs.onSurfaceVariant, label = "navColor")
+                Row(
+                    modifier = Modifier
+                        .weight(weight)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(21.dp))
+                        .background(background)
+                        .selectable(selected = selected, role = Role.Tab, onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelect(item)
+                        }),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = if (selected) item.selectedIcon else item.icon,
+                        contentDescription = item.label,
+                        tint = color,
+                        modifier = Modifier.size(22.dp)
                     )
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(21.dp))
-                            .selectable(selected = selected, role = Role.Tab, onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onSelect(item)
-                            }),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = if (selected) item.selectedIcon else item.icon,
-                            contentDescription = item.label,
-                            tint = color,
-                            modifier = Modifier.size(22.dp)
-                        )
+                    AnimatedVisibility(visible = selected) {
                         Text(
                             text = item.label,
                             color = color,
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             maxLines = 1,
                             softWrap = false,
-                            overflow = TextOverflow.Clip
+                            overflow = TextOverflow.Clip,
+                            modifier = Modifier.padding(start = 6.dp)
                         )
                     }
                 }

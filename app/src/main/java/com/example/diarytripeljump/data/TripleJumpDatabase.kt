@@ -31,7 +31,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ExerciseComplex::class,
         ComplexExercise::class,
         ExerciseGoal::class,
-        RunUpMeasurement::class
+        RunUpMeasurement::class,
+        BodyMeasurement::class
     ],
     version = TripleJumpDatabase.CURRENT_VERSION,
     exportSchema = true
@@ -59,6 +60,7 @@ abstract class TripleJumpDatabase : RoomDatabase() {
     abstract fun exerciseComplexDao(): ExerciseComplexDao
     abstract fun exerciseGoalDao(): ExerciseGoalDao
     abstract fun runUpMeasurementDao(): RunUpMeasurementDao
+    abstract fun bodyMeasurementDao(): BodyMeasurementDao
 
     companion object {
         /** 11 → 12: одна нога и инвентарь в результатах упражнений + таблица инвентаря. Данные сохраняются. */
@@ -246,15 +248,30 @@ abstract class TripleJumpDatabase : RoomDatabase() {
             }
         }
 
+        /** 23 → 24: история веса и роста; текущие значения из профиля становятся первым замером. */
+        internal val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS body_measurements (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, date INTEGER NOT NULL, heightCm REAL, weightKg REAL)"
+                )
+                db.execSQL(
+                    "INSERT INTO body_measurements (date, heightCm, weightKg) " +
+                        "SELECT CAST(strftime('%s','now') AS INTEGER) * 1000, height, weight FROM athlete_profile " +
+                        "WHERE height IS NOT NULL OR weight IS NOT NULL"
+                )
+            }
+        }
+
         internal val ALL_MIGRATIONS = arrayOf(
             MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17,
-            MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23
+            MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24
         )
 
         const val DATABASE_NAME = "triple_jump_database"
 
         // Уже выпущенную версию не меняем: любое изменение схемы — новая версия и новая миграция
-        const val CURRENT_VERSION = 23
+        const val CURRENT_VERSION = 24
 
         /** Самая старая версия, которую можно перенести без потери данных. */
         const val MIN_MIGRATABLE_VERSION = 11
