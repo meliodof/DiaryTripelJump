@@ -1,5 +1,6 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.data.HelpTopic
 import com.example.diarytripeljump.data.RunUp
 import com.example.diarytripeljump.data.RunUpAttempt
 
@@ -41,6 +42,7 @@ fun CompetitionsScreen(
     viewModel: DiaryViewModel,
     onOpenProfile: () -> Unit = {}
 ) {
+    val confirm = LocalConfirm.current
     val competitionsList by viewModel.allCompetitions.collectAsState()
     val athleteProfile by viewModel.athleteProfile.collectAsState()
 
@@ -68,6 +70,7 @@ fun CompetitionsScreen(
     AppScreenScaffold(
         modifier = modifier,
         title = "Старты",
+        onHelp = rememberHelp(HelpTopic.STARTS),
         avatarUri = athleteProfile?.avatarUriString,
         onOpenProfile = onOpenProfile,
         floatingActionButton = {
@@ -89,6 +92,7 @@ fun CompetitionsScreen(
         ) {
             item {
                 SegmentedControl(
+                    modifier = Modifier.coachTarget("starts.tabs"),
                     options = listOf(
                         "Предстоящие (${upcomingList.size})",
                         "Текущие (${currentList.size})",
@@ -193,8 +197,10 @@ fun CompetitionsScreen(
                     qualificationRunUpJson = qualification.runUpJson,
                     qualifiedForFinal = qualification.qualified
                 )
-                viewModel.updateCompetition(updated)
-                editingCompetition = null
+                confirm.save("Соревнование «${updated.name}»") {
+                    viewModel.updateCompetition(updated)
+                    editingCompetition = null
+                }
             }
         )
     }
@@ -209,8 +215,10 @@ fun CompetitionsScreen(
                     status = CompetitionStatus.SKIPPED,
                     skipReason = reason
                 )
-                viewModel.updateCompetition(skippedComp)
-                skippingCompetition = null
+                confirm.ask("Отметить пропуск?", "Старт «${skippedComp.name}» будет отмечен как пропущенный.", "Отметить", false) {
+                    viewModel.updateCompetition(skippedComp)
+                    skippingCompetition = null
+                }
             }
         )
     }
@@ -571,12 +579,12 @@ fun AddOrEditCompetitionDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
+        title = { FormHelpRow(HelpTopic.F_COMPETITION) {
             Text(
                 text = if (competitionToEdit != null) "Соревнование" else "Новое соревнование",
                 style = MaterialTheme.typography.titleLarge
             )
-        },
+        } },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -943,7 +951,7 @@ fun SkipCompetitionReasonDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = "Пропуск соревнования", fontWeight = FontWeight.Bold) },
+        title = { FormHelpRow(HelpTopic.F_SKIP_START) { Text(text = "Пропуск соревнования", fontWeight = FontWeight.Bold) } },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(text = "Укажите причину пропуска соревнования '${competition.name}':", style = MaterialTheme.typography.bodySmall)

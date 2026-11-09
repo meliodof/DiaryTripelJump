@@ -1,5 +1,8 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.ui.components.coachTarget
+import com.example.diarytripeljump.ui.components.LocalConfirm
+import com.example.diarytripeljump.data.HelpTopic
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -134,14 +137,19 @@ private class Plot(val series: AnalyticsSeries, val style: SeriesStyle, val poin
 fun AnalyticsScreen(viewModel: DiaryViewModel, onOpenProfile: () -> Unit, onOpenVisualization: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val athleteProfile by viewModel.athleteProfile.collectAsState()
-    AppScreenScaffold(title = "Аналитика", avatarUri = athleteProfile?.avatarUriString, onOpenProfile = onOpenProfile) { inner ->
+    AppScreenScaffold(
+        title = "Аналитика",
+        avatarUri = athleteProfile?.avatarUriString,
+        onOpenProfile = onOpenProfile,
+        onHelp = rememberHelp(HelpTopic.ANALYTICS)
+    ) { inner ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = screenContentPadding(inner),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                AppCard(onClick = onOpenVisualization) {
+                AppCard(modifier = Modifier.coachTarget("analytics.visualization"), onClick = onOpenVisualization) {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -166,6 +174,7 @@ fun AnalyticsScreen(viewModel: DiaryViewModel, onOpenProfile: () -> Unit, onOpen
 /** Визуализация: графики с одним показателем по умолчанию, у каждого свой масштаб и способ подсчёта. */
 @Composable
 fun VisualizationScreen(viewModel: DiaryViewModel, onBack: () -> Unit) {
+    val confirm = LocalConfirm.current
     val allSeries by viewModel.analyticsSeries.collectAsState()
     val config by viewModel.visualization.collectAsState()
     val favoriteExercises by viewModel.favoriteExercises.collectAsState()
@@ -195,6 +204,7 @@ fun VisualizationScreen(viewModel: DiaryViewModel, onBack: () -> Unit) {
         ) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад") }
             Text(text = "Визуализация", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            HelpIconButton(onClick = rememberHelp(HelpTopic.F_VISUALIZATION), id = "viz.help")
         }
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -203,6 +213,7 @@ fun VisualizationScreen(viewModel: DiaryViewModel, onBack: () -> Unit) {
         ) {
             item {
                 SegmentedControl(
+                    modifier = Modifier.coachTarget("viz.range"),
                     options = ChartRange.entries.map { it.label },
                     selectedIndex = config.range.ordinal,
                     onSelect = { i -> update { copy(range = ChartRange.entries[i]) } }
@@ -221,7 +232,7 @@ fun VisualizationScreen(viewModel: DiaryViewModel, onBack: () -> Unit) {
                 )
             }
             item {
-                OutlinedButton(onClick = { pickerFor = NEW_CHART }, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { pickerFor = NEW_CHART }, modifier = Modifier.fillMaxWidth().coachTarget("viz.add")) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Добавить график")
@@ -278,8 +289,10 @@ fun VisualizationScreen(viewModel: DiaryViewModel, onBack: () -> Unit) {
                 editingStyle = null
             },
             onRemove = {
-                updateChart(chartId) { copy(series = series.filterNot { it.id == style.id }) }
-                editingStyle = null
+                confirm.delete("показатель с графика", "«${byId[style.id]?.title ?: ""}» исчезнет с этого графика. Данные не изменятся.") {
+                    updateChart(chartId) { copy(series = series.filterNot { it.id == style.id }) }
+                    editingStyle = null
+                }
             }
         )
     }
@@ -294,8 +307,10 @@ fun VisualizationScreen(viewModel: DiaryViewModel, onBack: () -> Unit) {
                 editingChart = null
             },
             onDelete = {
-                update { copy(charts = charts.filterNot { it.id == chart.id }) }
-                editingChart = null
+                confirm.delete("график", "График «${chart.title}» будет удалён. Данные не изменятся.") {
+                    update { copy(charts = charts.filterNot { it.id == chart.id }) }
+                    editingChart = null
+                }
             }
         )
     }
@@ -329,7 +344,7 @@ private fun ChartCard(
     }
     val unitOverride = if (chart.aggregation == Aggregation.WEEK_COUNT) "попыток" else null
 
-    AppCard {
+    AppCard(modifier = Modifier.coachTarget("viz.chart")) {
         Column(modifier = Modifier.padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
@@ -376,7 +391,7 @@ private fun ChartCard(
                                 Text(series.title, style = MaterialTheme.typography.bodyMedium, color = cs.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                             Text(
-                                listOfNotNull(series.last?.let { "последний ${formatNumber(it)} ${series.unit}" }, "${series.attempts} попыток").joinToString(" · "),
+                                listOfNotNull(series.last?.let { "последний ${ChartData.formatTrim(it, ChartData.maxDecimals(series.unit))} ${series.unit}" }, "${series.attempts} попыток").joinToString(" · "),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = cs.onSurfaceVariant
                             )
@@ -430,11 +445,14 @@ private fun MultiSeriesChart(
     val (low, high) = ChartData.yBounds(inWindow.map { it.value }, mode, fromZero)
     val span = high - low
     val pad = 0.08
+    // цена деления растёт с приближением: до сотых секунды, граммов и сотых сантиметра
+    val unitDecimals = if (unitOverride != null) 0 else plots.maxOf { ChartData.maxDecimals(it.series.unit) }
+    val decimals = ChartData.axisDecimals(span, if (mode == ChartMode.ABSOLUTE) unitDecimals else 1)
 
     fun valueLabel(v: Double): String = when (mode) {
-        ChartMode.ABSOLUTE -> formatNumber(v)
-        ChartMode.NORMALIZED -> "${v.toInt()} %"
-        ChartMode.CHANGE -> (if (v > 0) "+" else "") + "${formatNumber(v)} %"
+        ChartMode.ABSOLUTE -> ChartData.formatFixed(v, decimals)
+        ChartMode.NORMALIZED -> "${ChartData.formatFixed(v, decimals)} %"
+        ChartMode.CHANGE -> (if (v > 0) "+" else "") + "${ChartData.formatFixed(v, decimals)} %"
     }
     fun nearest(points: List<ChartPoint>, screen: Float): ChartPoint? = points.minByOrNull { abs(screenOf(it.date) - screen) }
 
@@ -450,7 +468,7 @@ private fun MultiSeriesChart(
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         picked.forEach { (plot, point) ->
                             Text(
-                                "${formatNumber(point.raw)} ${unitOverride ?: plot.series.unit}",
+                                "${ChartData.formatTrim(point.raw, if (unitOverride != null) 0 else ChartData.maxDecimals(plot.series.unit))} ${unitOverride ?: plot.series.unit}",
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = plot.color
@@ -469,9 +487,11 @@ private fun MultiSeriesChart(
         }
         Row {
             Column(modifier = Modifier.height(200.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                Text(valueLabel(high), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-                Text(valueLabel(low + span / 2), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-                Text(valueLabel(low), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                // подписи на уровне линий сетки
+                listOf(1.0, 0.75, 0.5, 0.25, 0.0).forEach { share ->
+                    val v = low + span * (share - pad) / (1 - 2 * pad)
+                    Text(valueLabel(v), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                }
             }
             Spacer(modifier = Modifier.width(6.dp))
             Canvas(
@@ -574,7 +594,7 @@ private fun ChartSettingsDialog(
     var chart by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Настройки графика") },
+        title = { FormHelpRow(HelpTopic.F_CHART_SETTINGS) { Text("Настройки графика") } },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
@@ -724,7 +744,7 @@ private fun SeriesStyleDialog(
     var style by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title, style = MaterialTheme.typography.titleMedium) },
+        title = { FormHelpRow(HelpTopic.F_CHART_SETTINGS) { Text(title, style = MaterialTheme.typography.titleMedium) } },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Цвет", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)

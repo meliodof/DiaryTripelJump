@@ -1,5 +1,8 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.ui.components.LocalOpenSettings
+import com.example.diarytripeljump.ui.components.coachTarget
+import com.example.diarytripeljump.data.HelpTopic
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -175,7 +178,8 @@ fun DiaryScreen(
                     dateText = dateText,
                     greeting = displayGreeting,
                     avatarUri = athleteProfile?.avatarUriString,
-                    onOpenProfile = onOpenProfile
+                    onOpenProfile = onOpenProfile,
+                    onHelp = rememberHelp(HelpTopic.HOME)
                 )
             }
 
@@ -188,6 +192,7 @@ fun DiaryScreen(
                     onClick = onNewTraining,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .coachTarget("home.newTraining")
                         .height(54.dp),
                     shape = MaterialTheme.shapes.large
                 ) {
@@ -203,7 +208,8 @@ fun DiaryScreen(
                         competitionPoints = competitionPoints,
                         training = jumpSplit.second,
                         onCompetition = { jumpSplit.first?.let { detailKey = it.key } ?: onNavigate(Routes.COMPETITIONS) },
-                        onTraining = { jumpSplit.second?.let { detailKey = it.key } }
+                        onTraining = { jumpSplit.second?.let { detailKey = it.key } },
+                        modifier = Modifier.coachTarget("home.jump")
                     )
                 }
             }
@@ -226,11 +232,13 @@ fun DiaryScreen(
             }
 
             item {
-                WeekOverviewCard(
-                    trainings = trainings,
-                    competitions = competitions,
-                    onClick = { onNavigate(Routes.TRAININGS) }
-                )
+                Box(modifier = Modifier.coachTarget("home.week")) {
+                    WeekOverviewCard(
+                        trainings = trainings,
+                        competitions = competitions,
+                        onClick = { onNavigate(Routes.TRAININGS) }
+                    )
+                }
             }
 
             item {
@@ -345,10 +353,11 @@ private fun MainJumpCard(
     competitionPoints: List<RecordPoint>,
     training: RecordSummary?,
     onCompetition: () -> Unit,
-    onTraining: () -> Unit
+    onTraining: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val cs = MaterialTheme.colorScheme
-    AppCard {
+    AppCard(modifier = modifier) {
         Column(modifier = Modifier.padding(top = 12.dp)) {
             Text(
                 text = "Тройной прыжок",
@@ -412,7 +421,8 @@ private fun HomeHeader(
     dateText: String,
     greeting: String,
     avatarUri: String?,
-    onOpenProfile: () -> Unit
+    onOpenProfile: () -> Unit,
+    onHelp: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -433,6 +443,8 @@ private fun HomeHeader(
                 overflow = TextOverflow.Ellipsis
             )
         }
+        HelpIconButton(onClick = onHelp)
+        LocalOpenSettings.current?.let { SettingsIconButton(onClick = it) }
         ProfileAvatarButton(avatarUri = avatarUri, onClick = onOpenProfile, size = 44.dp)
     }
 }
@@ -862,7 +874,7 @@ private fun FavoritesPickerDialog(
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Упражнения на главной", fontWeight = FontWeight.Bold) },
+        title = { FormHelpRow(HelpTopic.F_FAVORITES) { Text("Упражнения на главной", fontWeight = FontWeight.Bold) } },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 androidx.compose.material3.OutlinedTextField(

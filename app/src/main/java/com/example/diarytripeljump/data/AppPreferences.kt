@@ -20,6 +20,33 @@ class AppPreferences(context: Context) {
         get() = VisualizationConfig.decode(prefs.getString(KEY_VISUALIZATION, null))
         set(value) = prefs.edit().putString(KEY_VISUALIZATION, value.encode()).apply()
 
+    /** Обучение пройдено или пропущено: при следующем входе не показывается. */
+    var tutorialSeen: Boolean
+        get() = prefs.getBoolean(KEY_TUTORIAL, false)
+        set(value) = prefs.edit().putBoolean(KEY_TUTORIAL, value).apply()
+
+    /** Идёт обучение на демо-дневнике: переживает перезапуск экрана при переключении дневника. */
+    var tutorialActive: Boolean
+        get() = prefs.getBoolean(KEY_TUTORIAL_ACTIVE, false)
+        set(value) { prefs.edit().putBoolean(KEY_TUTORIAL_ACTIVE, value).commit() }
+
+    var tutorialStep: Int
+        get() = prefs.getInt(KEY_TUTORIAL_STEP, 0)
+        set(value) = prefs.edit().putInt(KEY_TUTORIAL_STEP, value).apply()
+
+    /** После обучения вернуться к своему дневнику: обучение запускали из него. */
+    var tutorialReturnToOwn: Boolean
+        get() = prefs.getBoolean(KEY_TUTORIAL_RETURN, false)
+        set(value) { prefs.edit().putBoolean(KEY_TUTORIAL_RETURN, value).commit() }
+
+    /** Удалённые рекорды из тренировок: ключ и значение на момент удаления. */
+    var hiddenRecords: Map<String, Double>
+        get() = prefs.getString(KEY_HIDDEN, null).orEmpty().split("\u001E").mapNotNull { part ->
+            val (key, value) = part.split("\u001F").takeIf { it.size == 2 } ?: return@mapNotNull null
+            value.toDoubleOrNull()?.let { key to it }
+        }.toMap()
+        set(value) = prefs.edit().putString(KEY_HIDDEN, value.entries.joinToString("\u001E") { "${it.key}\u001F${it.value}" }).apply()
+
     /** true — открыт демо-дневник (отдельная база), false — дневник пользователя. */
     var useDemoData: Boolean
         get() = prefs.getBoolean(KEY_DEMO, false)
@@ -32,5 +59,10 @@ class AppPreferences(context: Context) {
         private const val KEY_DEMO = "use_demo_data"
         private const val KEY_PALETTE = "custom_palette"
         private const val KEY_VISUALIZATION = "visualization"
+        private const val KEY_TUTORIAL = "tutorial_seen"
+        private const val KEY_TUTORIAL_ACTIVE = "tutorial_active"
+        private const val KEY_TUTORIAL_STEP = "tutorial_step"
+        private const val KEY_TUTORIAL_RETURN = "tutorial_return"
+        private const val KEY_HIDDEN = "hidden_records"
     }
 }

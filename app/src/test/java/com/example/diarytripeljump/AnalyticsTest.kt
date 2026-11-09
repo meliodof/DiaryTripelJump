@@ -44,6 +44,19 @@ class AnalyticsTest {
     }
 
     @Test
+    fun axisPrecision_growsWithZoom() {
+        assertEquals(0, ChartData.axisDecimals(20.0, 2))
+        assertEquals(1, ChartData.axisDecimals(1.0, 2))
+        assertEquals(2, ChartData.axisDecimals(0.1, 2))
+        // килограммы — до граммов, секунды — до сотых, не мельче
+        assertEquals(3, ChartData.axisDecimals(0.004, ChartData.maxDecimals("кг")))
+        assertEquals(2, ChartData.axisDecimals(0.004, ChartData.maxDecimals("сек")))
+        assertEquals("8.8", ChartData.formatTrim(8.80, 2).replace(',', '.'))
+        assertEquals("102.505", ChartData.formatTrim(102.505, 3).replace(',', '.'))
+        assertEquals("14", ChartData.formatTrim(14.0, 2).replace(',', '.'))
+    }
+
+    @Test
     fun smoothing_averagesNeighbours() {
         assertEquals(listOf(1.5, 2.0, 2.5), ChartData.smooth(listOf(1.0, 2.0, 3.0)))
     }

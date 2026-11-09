@@ -1,5 +1,13 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.ui.components.CoachLayer
+import androidx.compose.runtime.CompositionLocalProvider
+import com.example.diarytripeljump.ui.components.coachTarget
+import com.example.diarytripeljump.ui.components.LocalOpenSettings
+import com.example.diarytripeljump.ui.components.LocalCoach
+import com.example.diarytripeljump.ui.components.CoachOverlay
+import com.example.diarytripeljump.ui.components.CoachController
+import com.example.diarytripeljump.data.HelpTopic
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -87,6 +95,7 @@ object Routes {
     const val RECORDS = "records"
     const val CATALOG = "catalog"
     const val PROFILE = "profile"
+    const val SETTINGS = "settings"
     const val ANALYTICS = "analytics"
     const val VISUALIZATION = "analytics/visualization"
 }
@@ -156,7 +165,31 @@ fun MainScreen(
     val onOpenProfile: () -> Unit = {
         navController.navigate(Routes.PROFILE) { launchSingleTop = true }
     }
+    val onOpenSettings: () -> Unit = {
+        navController.navigate(Routes.SETTINGS) { launchSingleTop = true }
+    }
 
+    // подсказки: подсветка элементов; обучение идёт по разделам и само открывает нужный экран
+    val coach = remember { CoachController() }
+    val currentRoute = destination?.route
+    LaunchedEffect(coach.current, coach.navigates) {
+        val step = coach.current ?: return@LaunchedEffect
+        if (coach.navigates && currentRoute != step.route) {
+            if (TopLevelDestination.entries.any { it.route == step.route }) navController.navigateTopLevel(step.route)
+            else navController.navigate(step.route) { launchSingleTop = true }
+        }
+    }
+    val finishTour: () -> Unit = { if (viewModel.finishTutorial()) onSwitchDiary(false) }
+    val showTour: (Int) -> Unit = { start ->
+        coach.show(HelpTopic.tour, start, navigates = true, onStep = { viewModel.saveTutorialStep(it) }, onFinish = finishTour)
+    }
+    // обучение идёт на демо-дневнике: если открыт свой, сначала переключаемся, и обучение продолжится после перезапуска экрана
+    val startTour: () -> Unit = { if (viewModel.beginTutorial(isDemo)) onSwitchDiary(true) else showTour(0) }
+    LaunchedEffect(Unit) { if (viewModel.tutorialActive) showTour(viewModel.tutorialStep) }
+    var showWelcome by remember { mutableStateOf(!viewModel.tutorialSeen && !viewModel.tutorialActive) }
+
+    CompositionLocalProvider(LocalCoach provides coach, LocalOpenSettings provides onOpenSettings) {
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -164,7 +197,7 @@ fun MainScreen(
         bottomBar = {
             Column {
                 // Полоса демо-режима всегда на виду, чтобы демо-записи не путали с настоящими
-                if (isDemo) DemoModeBar(onExit = { onSwitchDiary(false) })
+                if (isDemo && coach.current == null) DemoModeBar(onExit = { onSwitchDiary(false) })
                 AnimatedVisibility(
                     visible = showNavigation && !isWide,
                     enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -272,13 +305,46 @@ fun MainScreen(
                             onBack = { navController.popBackStack() }
                         )
                     }
+                    composable(
+                        route = Routes.SETTINGS,
+                        enterTransition = { slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(250)) + fadeIn(tween(250)) },
+                        exitTransition = { fadeOut(tween(TAB_EXIT_MS)) },
+                        popEnterTransition = { fadeIn(tween(TAB_ENTER_MS)) },
+                        popExitTransition = { slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(250)) + fadeOut(tween(250)) }
+                    ) {
+                        SettingsScreen(
+                            viewModel = viewModel,
+                            isDemo = isDemo,
+                            onBack = { navController.popBackStack() },
+                            onStartTutorial = startTour,
+                            onOpenTopic = { topic -> coach.show(topic.tourSteps, navigates = true) },
+                            onLeaveDemo = { onSwitchDiary(false) }
+                        )
+                    }
                 }
             }
         }
     }
+    CoachLayer(coach)
+    }
+    }
 
     celebrated?.let { record ->
         RecordCelebration(record = record, onDismiss = { celebrated = null })
+    }
+
+    // при первом входе предлагаем обучение; отказаться можно, пройти — позже в настройках
+    if (showWelcome) {
+        WelcomeDialog(
+            onStart = {
+                showWelcome = false
+                startTour()
+            },
+            onSkip = {
+                showWelcome = false
+                viewModel.skipTutorial()
+            }
+        )
     }
 }
 
@@ -319,6 +385,7 @@ private fun AppNavigationBar(
     Surface(
         modifier = Modifier
             .navigationBarsPadding()
+            .coachTarget("nav")
             .padding(horizontal = 10.dp, vertical = 8.dp)
             .fillMaxWidth()
             .height(66.dp),

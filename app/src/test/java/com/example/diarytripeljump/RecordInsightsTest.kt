@@ -71,6 +71,15 @@ class RecordInsightsTest {
     }
 
     @Test
+    fun hiddenRecord_returnsOnlyAfterImprovement() {
+        val hidden = mapOf("k" to 14.0)
+        assertEquals(false, RecordInsights.isVisible(record(14.0), hidden))
+        assertEquals(true, RecordInsights.isVisible(record(14.2), hidden))
+        assertEquals(true, RecordInsights.isVisible(record(10.0), emptyMap()))
+        assertEquals(true, RecordInsights.isVisible(record(10.7, lower = true), mapOf("k" to 10.8)))
+    }
+
+    @Test
     fun newRecord_onlyForRealImprovement() {
         assertNull(RecordInsights.newRecord(null, listOf(record(15.0))))
         assertNull(RecordInsights.newRecord(emptyMap(), listOf(record(15.0))))

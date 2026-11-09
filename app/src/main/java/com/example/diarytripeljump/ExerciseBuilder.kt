@@ -1,5 +1,7 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.ui.components.coachTarget
+import com.example.diarytripeljump.data.HelpTopic
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -225,6 +227,7 @@ fun ExerciseEditorDialog(
                             style = MaterialTheme.typography.titleLarge,
                             modifier = Modifier.weight(1f)
                         )
+                        HelpIconButton(onClick = rememberHelp(HelpTopic.F_BUILDER), id = "builder.help")
                         Button(
                             onClick = {
                                 if (!canSave) {
@@ -274,7 +277,7 @@ fun ExerciseEditorDialog(
                             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                             textStyle = MaterialTheme.typography.titleMedium,
                             shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth().coachTarget("builder.name")
                         )
 
                         // --- Поле упражнения: сюда перетаскиваются блоки ---
@@ -295,6 +298,7 @@ fun ExerciseEditorDialog(
                             FlowRow(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .coachTarget("builder.zone")
                                     .heightIn(min = 76.dp)
                                     .onGloballyPositioned { dropZone = it.boundsInRoot() }
                                     .drawBehind {
@@ -353,7 +357,7 @@ fun ExerciseEditorDialog(
                         }
 
                         // --- Палитра блоков ---
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(modifier = Modifier.coachTarget("builder.blocks"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             BuilderLabel("Блоки — перетащите или нажмите")
                             FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),

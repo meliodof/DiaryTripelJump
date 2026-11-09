@@ -76,6 +76,12 @@ object RecordInsights {
         return jumps.filter { it.isCompetition }.maxByOrNull { it.best } to jumps.filter { !it.isCompetition }.maxByOrNull { it.best }
     }
 
+    /** Удалённый рекорд из тренировок снова виден, только если его улучшили новым результатом. */
+    fun isVisible(r: RecordSummary, hidden: Map<String, Double>): Boolean {
+        val removedAt = hidden[r.key] ?: return true
+        return if (r.lowerIsBetter) r.best < removedAt - 1e-9 else r.best > removedAt + 1e-9
+    }
+
     /** Рекорд, улучшенный с прошлого обновления; без прошлого состояния праздновать нечего. */
     fun newRecord(known: Map<String, Double>?, records: List<RecordSummary>): RecordSummary? {
         if (known == null) return null

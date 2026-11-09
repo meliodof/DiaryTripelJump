@@ -154,13 +154,66 @@ class DiaryViewModel(
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, emptyList())
 
     // Тяжёлые вычисления — в фоновом потоке, чтобы не задерживать отрисовку при переключении вкладок
-    val records: StateFlow<List<RecordSummary>> = combine(rawTripleJumpResults, allExerciseResults, recordOverrides, allCompetitions) { tj, ex, ov, comps ->
+    private val allRecords: StateFlow<List<RecordSummary>> = combine(rawTripleJumpResults, allExerciseResults, recordOverrides, allCompetitions) { tj, ex, ov, comps ->
         val today = startOfDay(System.currentTimeMillis())
         val starts = comps
             .filter { it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED && startOfDay(it.date) <= today }
             .mapNotNull { c -> bestOfCompetition(c)?.let { it to c.date } }
         RecordsEngine.build(tj, ex, ov, starts)
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, emptyList())
+
+    private val _hiddenRecords = MutableStateFlow(preferences.hiddenRecords)
+
+    /** Рекорды без удалённых; удалённый появится снова, если его улучшить. */
+    val records: StateFlow<List<RecordSummary>> = combine(allRecords, _hiddenRecords) { list, hidden ->
+        list.filter { RecordInsights.isVisible(it, hidden) }
+    }.stateIn(viewModelScope, AppSharing, emptyList())
+
+    val hiddenRecordsCount: StateFlow<Int> = combine(allRecords, _hiddenRecords) { list, hidden ->
+        list.count { !RecordInsights.isVisible(it, hidden) }
+    }.stateIn(viewModelScope, AppSharing, 0)
+
+    /** Рекорд из тренировок удаляется из списка; сами тренировки не меняются. */
+    fun hideRecord(record: RecordSummary) {
+        val changed = _hiddenRecords.value + (record.key to record.best)
+        preferences.hiddenRecords = changed
+        _hiddenRecords.value = changed
+    }
+
+    fun unhideRecords() {
+        preferences.hiddenRecords = emptyMap()
+        _hiddenRecords.value = emptyMap()
+    }
+
+    // --- Обучение на демо-дневнике ---
+    val tutorialSeen: Boolean get() = preferences.tutorialSeen
+    val tutorialActive: Boolean get() = preferences.tutorialActive
+    val tutorialStep: Int get() = preferences.tutorialStep
+
+    /** Начать обучение; true — сначала нужно открыть демо-дневник. */
+    fun beginTutorial(isDemo: Boolean): Boolean {
+        preferences.tutorialStep = 0
+        preferences.tutorialReturnToOwn = !isDemo
+        preferences.tutorialActive = true
+        return !isDemo
+    }
+
+    fun saveTutorialStep(step: Int) {
+        preferences.tutorialStep = step
+    }
+
+    /** Обучение пройдено или пропущено; true — нужно вернуться к своему дневнику. */
+    fun finishTutorial(): Boolean {
+        val back = preferences.tutorialReturnToOwn
+        preferences.tutorialSeen = true
+        preferences.tutorialActive = false
+        preferences.tutorialReturnToOwn = false
+        return back
+    }
+
+    fun skipTutorial() {
+        preferences.tutorialSeen = true
+    }
 
     /** Цели по результатам; ключ совпадает с ключом рекорда. */
     val goals: StateFlow<List<ExerciseGoal>> = repository.getAllGoals()

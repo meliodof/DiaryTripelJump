@@ -1,5 +1,6 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.data.HelpTopic
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -85,6 +86,7 @@ fun TrainingsScreen(
     openNewTraining: Boolean = false,
     onNewTrainingOpened: () -> Unit = {}
 ) {
+    val confirm = LocalConfirm.current
     val complexes by viewModel.complexes.collectAsState()
     val trainingsList by viewModel.allTrainingsWithExercises.collectAsState()
     val rawExercisesList by viewModel.allExercises.collectAsState()
@@ -151,6 +153,7 @@ fun TrainingsScreen(
     AppScreenScaffold(
         modifier = modifier,
         title = "Тренировки",
+        onHelp = rememberHelp(HelpTopic.TRAININGS),
         avatarUri = athleteProfile?.avatarUriString,
         onOpenProfile = onOpenProfile,
         floatingActionButton = {
@@ -171,6 +174,7 @@ fun TrainingsScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
+                Box(modifier = Modifier.coachTarget("trainings.calendar")) {
                 CompactTrainingCalendarWidget(
                     currentMonth = calendarMonth,
                     onMonthChange = { newMonth -> calendarMonth = newMonth },
@@ -181,6 +185,7 @@ fun TrainingsScreen(
                     periods = trainingPeriods,
                     onMoveDay = { from, to -> pendingMove = from to to }
                 )
+                }
             }
 
             item {
@@ -211,7 +216,11 @@ fun TrainingsScreen(
                                         editingPeriod = period
                                         showPeriodDialog = true
                                     },
-                                    onDelete = { viewModel.deleteTrainingPeriod(period) }
+                                    onDelete = {
+                                        confirm.delete("период", "Период «${period.name}» будет удалён. Тренировки не изменятся.") {
+                                            viewModel.deleteTrainingPeriod(period)
+                                        }
+                                    }
                                 )
                             }
                         }
@@ -305,10 +314,14 @@ fun TrainingsScreen(
             existingPeriods = trainingPeriods,
             onDismiss = { showPeriodDialog = false },
             onSave = { name, start, end, color ->
-                viewModel.saveTrainingPeriod(editingPeriod?.id, name, start, end, color) { ok ->
-                    if (ok) showPeriodDialog = false
-                    else warningMessage = "Период с такой датой начала уже есть. Выберите другую дату начала."
+                val save = {
+                    viewModel.saveTrainingPeriod(editingPeriod?.id, name, start, end, color) { ok ->
+                        if (ok) showPeriodDialog = false
+                        else warningMessage = "Период с такой датой начала уже есть. Выберите другую дату начала."
+                    }
                 }
+                val editing = editingPeriod
+                if (editing != null) confirm.save("Период «${editing.name}»") { save() } else save()
             }
         )
     }
@@ -538,9 +551,11 @@ fun TrainingsScreen(
             initialReason = session.skipReason ?: "",
             onDismiss = { editingSkippedTrainingItem = null },
             onConfirm = { date, reason ->
-                viewModel.deleteTrainingSession(session)
-                viewModel.addSkippedDaySession(date, reason)
-                editingSkippedTrainingItem = null
+                confirm.save("Отметка о пропуске") {
+                    viewModel.deleteTrainingSession(session)
+                    viewModel.addSkippedDaySession(date, reason)
+                    editingSkippedTrainingItem = null
+                }
             }
         )
     }
@@ -667,12 +682,12 @@ fun PeriodEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
+        title = { FormHelpRow(HelpTopic.F_PERIOD) {
             Text(
                 text = if (initial == null) "Подготовительный период" else "Редактировать период",
                 fontWeight = FontWeight.Bold
             )
-        },
+        } },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -1303,7 +1318,7 @@ private fun ExerciseResultDetailsDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = styledTitle(title, result.exerciseName), style = MaterialTheme.typography.titleLarge) },
+        title = { FormHelpRow(HelpTopic.F_DETAILS) { Text(text = styledTitle(title, result.exerciseName), style = MaterialTheme.typography.titleLarge) } },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -1533,6 +1548,7 @@ fun AddTrainingDialog(
     onSaveComplex: (id: Long?, name: String, description: String?, exerciseIds: List<Long>) -> Unit = { _, _, _, _ -> },
     onDeleteExercise: (Exercise) -> Unit = {}
 ) {
+    val confirm = LocalConfirm.current
     // дату и время можно поменять и у новой, и у сохранённой тренировки; за день тренировок может быть несколько
     var trainingDate by remember {
         mutableLongStateOf(
@@ -1563,15 +1579,15 @@ fun AddTrainingDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
+        title = { FormHelpRow(HelpTopic.F_TRAINING) {
             Text(text = dialogTitle, style = MaterialTheme.typography.titleLarge)
-        },
+        } },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(modifier = Modifier.coachTarget("training.date"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     DateField(label = "Дата тренировки", millis = trainingDate, onClick = { pickingDate = true }, modifier = Modifier.weight(1f))
                     TimeField(label = "Время", millis = trainingDate, onClick = { pickingTime = true })
                 }
@@ -1581,7 +1597,7 @@ fun AddTrainingDialog(
 
                 FilledTonalButton(
                     onClick = { showExercisePicker = true },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().coachTarget("training.add"),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -1643,6 +1659,7 @@ fun AddTrainingDialog(
         ExercisePickerScreen(
             title = "Упражнения",
             doneLabel = if (addedExerciseInputs.isEmpty()) "Готово" else "Готово · ${addedExerciseInputs.size}",
+            helpTopic = HelpTopic.F_PICKER,
             onDismiss = { showExercisePicker = false }
         ) {
             CatalogExercisePicker(
@@ -1928,13 +1945,15 @@ fun AddTrainingDialog(
             inventoryActions = inventoryActions,
             onDismiss = { editingExercise = null },
             onConfirm = { cfg ->
-                onUpdateExercise(target, cfg)
-                // Уже добавленные в эту тренировку выполнения этого упражнения получают новые параметры
-                val targetKey = target.variantKey()
-                addedExerciseInputs = addedExerciseInputs.map { item ->
-                    if (item.variantKey() == targetKey) item.withConfig(cfg) else item
+                confirm.save("Упражнение «${target.name}»") {
+                    onUpdateExercise(target, cfg)
+                    // Уже добавленные в эту тренировку выполнения этого упражнения получают новые параметры
+                    val targetKey = target.variantKey()
+                    addedExerciseInputs = addedExerciseInputs.map { item ->
+                        if (item.variantKey() == targetKey) item.withConfig(cfg) else item
+                    }
+                    editingExercise = null
                 }
-                editingExercise = null
             }
         )
     }
@@ -2064,7 +2083,7 @@ fun ExerciseResultEditorCard(
                 }
             } else {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().coachTarget("card.sets"),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -2132,7 +2151,7 @@ fun ExerciseResultEditorCard(
 
             OutlinedButton(
                 onClick = { showPerSetDialog = true },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().coachTarget("card.results")
             ) {
                 Icon(imageVector = Icons.Default.FormatListNumbered, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
@@ -2248,12 +2267,12 @@ fun RunUpResultsDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
+        title = { FormHelpRow(HelpTopic.F_RUNUP) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(text = "Разбег", style = MaterialTheme.typography.titleLarge)
                 Text(text = exerciseName, style = MaterialTheme.typography.bodyMedium, color = cs.primary)
             }
-        },
+        } },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -2276,6 +2295,7 @@ fun RunUpResultsDialog(
                                 }
                             }
                             FlowRow(
+                                modifier = Modifier.coachTarget("runup.board"),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
@@ -2382,7 +2402,7 @@ fun CatalogExercisePicker(
         placeholder = { Text("Поиск упражнения") },
         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
         singleLine = true,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth().coachTarget("picker.search")
     )
 
     // Фильтр справочника по виду: короткие подписи, обычный размер шрифта
@@ -2482,6 +2502,8 @@ fun ExercisePickerScreen(
     title: String,
     doneLabel: String,
     onDismiss: () -> Unit,
+    /** Подсказки по этому экрану выбора; null — без кнопки «?». */
+    helpTopic: HelpTopic? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -2495,7 +2517,8 @@ fun ExercisePickerScreen(
                 ) {
                     IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Закрыть") }
                     Text(text = title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    Button(onClick = onDismiss, modifier = Modifier.padding(end = 8.dp)) { Text(doneLabel) }
+                    if (helpTopic != null) HelpIconButton(onClick = rememberHelp(helpTopic), id = "picker.help")
+                    Button(onClick = onDismiss, modifier = Modifier.padding(end = 8.dp).coachTarget("picker.done")) { Text(doneLabel) }
                 }
                 Column(
                     modifier = Modifier
@@ -2623,12 +2646,12 @@ fun PerSetResultsModalDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
+        title = { FormHelpRow(HelpTopic.F_RESULTS) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(text = "Результаты попыток", style = MaterialTheme.typography.titleLarge)
                 Text(text = exerciseName, style = MaterialTheme.typography.bodyMedium, color = cs.primary)
             }
-        },
+        } },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -2659,6 +2682,7 @@ fun PerSetResultsModalDialog(
 
                 if (total > 1) {
                     FlowRow(
+                        modifier = Modifier.coachTarget("results.modes"),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -2861,7 +2885,7 @@ fun MarkSkippedDayDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = "Пропуск Тренировочного Дня", fontWeight = FontWeight.Bold) },
+        title = { FormHelpRow(HelpTopic.F_SKIP) { Text(text = "Пропуск Тренировочного Дня", fontWeight = FontWeight.Bold) } },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(text = "Укажите причину пропуска:", style = MaterialTheme.typography.labelMedium)

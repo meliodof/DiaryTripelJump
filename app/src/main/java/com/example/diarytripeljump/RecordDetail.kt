@@ -1,5 +1,7 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.ui.components.coachTarget
+import com.example.diarytripeljump.data.HelpTopic
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -121,6 +123,7 @@ fun RecordDetailScreen(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
+                    HelpIconButton(onClick = rememberHelp(HelpTopic.F_RECORD_DETAIL), id = "detail.help")
                     if (onEdit != null) {
                         IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, contentDescription = "Редактировать") }
                     }
@@ -132,9 +135,9 @@ fun RecordDetailScreen(
                         .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 32.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    RecordHero(record, goal)
-                    ChartCard(record, goal)
-                    if (!record.isAnti) GoalCard(record, goal, onSetGoal)
+                    Box(modifier = Modifier.coachTarget("detail.hero")) { RecordHero(record, goal) }
+                    Box(modifier = Modifier.coachTarget("detail.chart")) { ChartCard(record, goal) }
+                    if (!record.isAnti) Box(modifier = Modifier.coachTarget("detail.goal")) { GoalCard(record, goal, onSetGoal) }
                     FactsRow(record)
                     HistoryCard(record)
                 }

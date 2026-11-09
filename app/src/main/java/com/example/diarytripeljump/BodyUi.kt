@@ -1,5 +1,7 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.ui.components.coachTarget
+import com.example.diarytripeljump.data.HelpTopic
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -69,7 +71,7 @@ fun BodyHistoryDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(kind.title) },
+        title = { FormHelpRow(HelpTopic.F_BODY) { Text(kind.title) } },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -94,7 +96,7 @@ fun BodyHistoryDialog(
                     } else null,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().coachTarget("body.value")
                 )
                 DateField(label = "Дата замера", millis = date, onClick = { pickingDate = true }, modifier = Modifier.fillMaxWidth())
                 if (dateError != null) Text(dateError, style = MaterialTheme.typography.bodySmall, color = cs.error)

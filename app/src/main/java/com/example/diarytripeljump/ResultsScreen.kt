@@ -1,5 +1,6 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.data.HelpTopic
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -59,12 +60,30 @@ fun ResultsScreen(
     viewModel: DiaryViewModel,
     onOpenProfile: () -> Unit = {}
 ) {
+    val confirm = LocalConfirm.current
     // Рекорды вычисляются автоматически из тренировок и ручных записей
     val records by viewModel.records.collectAsState()
     val athleteProfile by viewModel.athleteProfile.collectAsState()
     val goals by viewModel.goals.collectAsState()
     val inventoryItems by viewModel.inventoryItems.collectAsState()
     val catalogExercises by viewModel.allExercises.collectAsState()
+    val hiddenCount by viewModel.hiddenRecordsCount.collectAsState()
+    // своя запись удаляется, рекорд из тренировок скрывается: тренировки при этом не меняются
+    fun requestDelete(target: RecordSummary) {
+        val value = formatRecordValue(target.best, target.unit)
+        if (target.deletableResultId != null) {
+            confirm.delete("запись", "«${target.displayName}» — $value будет удалена. Предыдущий результат станет рекордом.") {
+                viewModel.deleteTripleJumpResult(target.deletableResultId)
+            }
+        } else {
+            confirm.delete(
+                "рекорд",
+                "«${target.displayName}» — $value исчезнет из списка. Тренировки и результаты не изменятся. Если покажете результат лучше, рекорд появится снова."
+            ) { viewModel.hideRecord(target) }
+        }
+    
+    }
+
 
     // Цели: ключ цели = ключ рекорда
     var goalEditorOpen by remember { mutableStateOf(false) }
@@ -136,6 +155,7 @@ fun ResultsScreen(
     AppScreenScaffold(
         modifier = modifier,
         title = "Рекорды",
+        onHelp = rememberHelp(HelpTopic.RECORDS),
         avatarUri = athleteProfile?.avatarUriString,
         onOpenProfile = onOpenProfile,
         floatingActionButton = {
@@ -166,6 +186,7 @@ fun ResultsScreen(
         ) {
             item {
                 SegmentedControl(
+                    modifier = Modifier.coachTarget("records.tabs"),
                     options = listOf("Рекорды", "Анти-рекорды", "Цели"),
                     selectedIndex = selectedRecordTypeFilter,
                     onSelect = { selectedRecordTypeFilter = it }
@@ -188,7 +209,9 @@ fun ResultsScreen(
                         GoalCard(
                             progress = computeGoalProgress(g, recordByKey[g.recordKey]?.best),
                             onEdit = { goalFixed = null; goalExistingKey = g.recordKey; goalEditorOpen = true },
-                            onDelete = { viewModel.deleteGoal(g.recordKey) }
+                            onDelete = {
+                                confirm.delete("цель", "Цель «${g.displayName}» будет удалена. Рекорды не изменятся.") { viewModel.deleteGoal(g.recordKey) }
+                            }
                         )
                     }
                 }
@@ -203,6 +226,7 @@ fun ResultsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .coachTarget("records.filters")
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -262,8 +286,17 @@ fun ResultsScreen(
                         }),
                         onClick = { historyKey = record.key },
                         onEdit = { editingKey = record.key },
-                        onDelete = { recordToDelete = record }
+                        onDelete = { requestDelete(record) }
                     )
+                }
+                if (hiddenCount > 0 && !isAntiMode) {
+                    item {
+                        TextButton(onClick = {
+                            confirm.ask("Вернуть удалённые рекорды?", "Рекорды из тренировок, удалённые из списка, появятся снова.", "Вернуть", false) {
+                                viewModel.unhideRecords()
+                            }
+                        }) { Text("Удалённые рекорды: $hiddenCount · вернуть") }
+                    }
                 }
             } else {
                 item {
@@ -310,37 +343,20 @@ fun ResultsScreen(
             initial = editingRecord.toRecordInput(),
             onDismiss = { editingKey = null },
             onConfirm = { input ->
-                viewModel.updateRecord(editingRecord, input)
-                editingKey = null
+                confirm.save("Рекорд «${editingRecord.displayName}»") {
+                    viewModel.updateRecord(editingRecord, input)
+                    editingKey = null
+                }
             },
             onResetManual = if (editingRecord.isManuallyEdited) ({
-                viewModel.clearRecordOverride(editingRecord.key)
-                editingKey = null
+                confirm.ask("Вернуть автоматическое значение?", "Ручная правка рекорда будет отменена, значение снова посчитается по тренировкам.", "Вернуть", false) {
+                    viewModel.clearRecordOverride(editingRecord.key)
+                    editingKey = null
+                }
             }) else null,
             manualHint = if (!editingRecord.isManuallyEdited && editingRecord.deletableResultId == null) {
                 "Запись создана из тренировки. Ручная правка действует до тех пор, пока рекорд не будет улучшен новым результатом."
             } else null
-        )
-    }
-
-    if (recordToDelete != null) {
-        val target = recordToDelete!!
-        AlertDialog(
-            onDismissRequest = { recordToDelete = null },
-            title = { Text(text = "Удалить запись?", fontWeight = FontWeight.Bold) },
-            text = { Text(text = "«${target.displayName}» — ${formatRecordValue(target.best, target.unit)} будет удалена. Предыдущий результат станет рекордом.") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        target.deletableResultId?.let { viewModel.deleteTripleJumpResult(it) }
-                        recordToDelete = null
-                    },
-                    colors = destructiveButtonColors()
-                ) { Text("Удалить") }
-            },
-            dismissButton = {
-                TextButton(onClick = { recordToDelete = null }) { Text("Отмена") }
-            }
         )
     }
 
@@ -370,10 +386,20 @@ fun ResultsScreen(
             currentBestFor = { key -> recordByKey[key]?.best },
             onDismiss = { goalEditorOpen = false },
             onSave = { cand, target, deadline ->
-                viewModel.saveGoal(cand.key, cand.name, cand.displayName, cand.unit, target, cand.lowerIsBetter, deadline)
-                goalEditorOpen = false
+                val save = {
+                    viewModel.saveGoal(cand.key, cand.name, cand.displayName, cand.unit, target, cand.lowerIsBetter, deadline)
+                    goalEditorOpen = false
+                }
+                if (existing != null) confirm.save("Цель «${existing.displayName}»") { save() } else save()
             },
-            onDelete = existing?.let { g -> { viewModel.deleteGoal(g.recordKey); goalEditorOpen = false } }
+            onDelete = existing?.let { g ->
+                {
+                    confirm.delete("цель", "Цель «${g.displayName}» будет удалена. Рекорды не изменятся.") {
+                        viewModel.deleteGoal(g.recordKey)
+                        goalEditorOpen = false
+                    }
+                }
+            }
         )
     }
 }
@@ -564,9 +590,7 @@ fun RecordCard(
                             if (onSetGoal != null) {
                                 add(MenuAction(if (goalProgress == null) "Поставить цель" else "Изменить цель", Icons.Default.Flag, onClick = onSetGoal))
                             }
-                            if (record.deletableResultId != null) {
-                                add(MenuAction("Удалить", Icons.Default.DeleteOutline, destructive = true, onClick = onDelete))
-                            }
+                            add(MenuAction("Удалить", Icons.Default.DeleteOutline, destructive = true, onClick = onDelete))
                         }
                     )
                 }
@@ -621,6 +645,7 @@ fun AddRecordDialog(
     onResetManual: (() -> Unit)? = null,
     manualHint: String? = null
 ) {
+    val confirm = LocalConfirm.current
     val cs = MaterialTheme.colorScheme
     // упражнение выбирается и меняется так же, как в тренировке
     var config by remember { mutableStateOf(initial?.toConfig() ?: defaultRecordConfig()) }
@@ -651,7 +676,7 @@ fun AddRecordDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
+        title = { FormHelpRow(HelpTopic.F_RECORD) {
             Text(
                 text = when {
                     initial != null && isAntiRecord -> "Редактировать анти-рекорд"
@@ -662,14 +687,14 @@ fun AddRecordDialog(
                 fontWeight = FontWeight.Bold,
                 color = if (isAntiRecord) cs.error else cs.primary
             )
-        },
+        } },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // Выбранное упражнение: нажатие открывает список, карандаш — конструктор, как в тренировке
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(modifier = Modifier.fillMaxWidth().coachTarget("record.exercise"), verticalAlignment = Alignment.CenterVertically) {
                     Column(
                         modifier = Modifier
                             .weight(1f)
@@ -722,7 +747,7 @@ fun AddRecordDialog(
                 }
 
                 // Уровень, место и заметки нужны не всегда: по умолчанию скрыты
-                TextButton(onClick = { showDetails = !showDetails }) {
+                TextButton(onClick = { showDetails = !showDetails }, modifier = Modifier.coachTarget("record.details")) {
                     Text(
                         if (showDetails) "Скрыть подробности"
                         else "Подробности: " + listOfNotNull(
@@ -912,9 +937,11 @@ fun AddRecordDialog(
             inventoryActions = inventoryActions,
             onDismiss = { editingExercise = null },
             onConfirm = { cfg ->
-                onUpdateExercise(target, cfg)
-                if (target.variantKey() == config.variantKey()) config = cfg
-                editingExercise = null
+                confirm.save("Упражнение «${target.name}»") {
+                    onUpdateExercise(target, cfg)
+                    if (target.variantKey() == config.variantKey()) config = cfg
+                    editingExercise = null
+                }
             }
         )
     }

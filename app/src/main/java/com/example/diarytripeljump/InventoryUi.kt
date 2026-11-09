@@ -1,5 +1,7 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.data.HelpTopic
+import com.example.diarytripeljump.ui.components.LocalConfirm
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -64,7 +66,7 @@ fun CreateInventoryDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = if (initial == null) "Новый инвентарь" else "Изменить инвентарь", fontWeight = FontWeight.Bold) },
+        title = { FormHelpRow(HelpTopic.F_INVENTORY) { Text(text = if (initial == null) "Новый инвентарь" else "Изменить инвентарь", fontWeight = FontWeight.Bold) } },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
@@ -116,6 +118,7 @@ fun InventoryManagerDialog(
     /** Инвентарь изменён: открытая форма может подхватить новое название. */
     onChanged: (old: InventoryItem, name: String, unit: ResultUnit?) -> Unit = { _, _, _ -> }
 ) {
+    val confirm = LocalConfirm.current
     val cs = MaterialTheme.colorScheme
     var creating by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<InventoryItem?>(null) }
@@ -123,7 +126,7 @@ fun InventoryManagerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = "Инвентарь", fontWeight = FontWeight.Bold) },
+        title = { FormHelpRow(HelpTopic.F_INVENTORY) { Text(text = "Инвентарь", fontWeight = FontWeight.Bold) } },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -174,9 +177,11 @@ fun InventoryManagerDialog(
             initial = item,
             onDismiss = { editing = null },
             onConfirm = { name, unit ->
-                actions.update(item, name, unit)
-                onChanged(item, name, unit)
-                editing = null
+                confirm.save("Инвентарь «${item.name}»") {
+                    actions.update(item, name, unit)
+                    onChanged(item, name, unit)
+                    editing = null
+                }
             }
         )
     }

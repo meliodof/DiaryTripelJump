@@ -1,5 +1,8 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.ui.components.coachTarget
+import com.example.diarytripeljump.ui.components.LocalConfirm
+import com.example.diarytripeljump.data.HelpTopic
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -98,6 +101,7 @@ fun CatalogScreen(
     viewModel: DiaryViewModel,
     onOpenProfile: () -> Unit = {}
 ) {
+    val confirm = LocalConfirm.current
     val cs = MaterialTheme.colorScheme
     val rawExercises by viewModel.allExercises.collectAsState()
     val complexes by viewModel.complexes.collectAsState()
@@ -157,6 +161,7 @@ fun CatalogScreen(
     AppScreenScaffold(
         modifier = modifier,
         title = "Каталог",
+        onHelp = rememberHelp(HelpTopic.CATALOG),
         avatarUri = athleteProfile?.avatarUriString,
         onOpenProfile = onOpenProfile,
         floatingActionButton = {
@@ -205,13 +210,16 @@ fun CatalogScreen(
                     } else null,
                     singleLine = true,
                     shape = CircleShape,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .coachTarget("catalog.search")
                 )
             }
             item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .coachTarget("catalog.filters")
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -316,13 +324,20 @@ fun CatalogScreen(
             onDismiss = { showExerciseEditor = false },
             onConfirm = { cfg ->
                 when {
-                    target == null -> viewModel.saveExerciseToDatabase(cfg)
+                    target == null -> {
+                        viewModel.saveExerciseToDatabase(cfg)
+                        showExerciseEditor = false
+                    }
                     // изменилось то, что отличает упражнение (снаряд, шиповки, нога, название) — спросить, заменить или создать
-                    cfg.variantKey() != target.variantKey() || cfg.name.trim() != target.name.trim() ->
+                    cfg.variantKey() != target.variantKey() || cfg.name.trim() != target.name.trim() -> {
                         pendingCatalogVariant = target to cfg
-                    else -> viewModel.updateExercise(target, cfg)
+                        showExerciseEditor = false
+                    }
+                    else -> confirm.save("Упражнение «${target.name}»") {
+                        viewModel.updateExercise(target, cfg)
+                        showExerciseEditor = false
+                    }
                 }
-                showExerciseEditor = false
             }
         )
     }
@@ -368,10 +383,20 @@ fun CatalogScreen(
             currentBestFor = { key -> bestByKey[key] },
             onDismiss = { goalExercise = null },
             onSave = { c, target, deadline ->
-                viewModel.saveGoal(c.key, c.name, c.displayName, c.unit, target, c.lowerIsBetter, deadline)
-                goalExercise = null
+                val save = {
+                    viewModel.saveGoal(c.key, c.name, c.displayName, c.unit, target, c.lowerIsBetter, deadline)
+                    goalExercise = null
+                }
+                if (existing != null) confirm.save("Цель «${existing.displayName}»") { save() } else save()
             },
-            onDelete = existing?.let { g -> { viewModel.deleteGoal(g.recordKey); goalExercise = null } }
+            onDelete = existing?.let { g ->
+                {
+                    confirm.delete("цель", "Цель «${g.displayName}» будет удалена. Рекорды не изменятся.") {
+                        viewModel.deleteGoal(g.recordKey)
+                        goalExercise = null
+                    }
+                }
+            }
         )
     }
 
@@ -400,8 +425,12 @@ fun CatalogScreen(
             allExercises = exercises,
             onDismiss = { showComplexEditor = false },
             onSave = { name, description, ids ->
-                viewModel.saveComplex(editingComplex?.complex?.id, name, description, ids)
-                showComplexEditor = false
+                val save = {
+                    viewModel.saveComplex(editingComplex?.complex?.id, name, description, ids)
+                    showComplexEditor = false
+                }
+                val editing = editingComplex
+                if (editing != null) confirm.save("Комплекс «${editing.complex.name}»") { save() } else save()
             }
         )
     }
@@ -587,7 +616,7 @@ fun ComplexEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Новый комплекс" else "Редактировать комплекс", fontWeight = FontWeight.Bold) },
+        title = { FormHelpRow(HelpTopic.F_COMPLEX) { Text(if (initial == null) "Новый комплекс" else "Редактировать комплекс", fontWeight = FontWeight.Bold) } },
         text = {
             Column(
                 modifier = Modifier

@@ -1,5 +1,6 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.data.HelpTopic
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -58,8 +59,7 @@ fun ProfileScreen(
     onSwitchDiary: (demo: Boolean) -> Unit = {},
     onBack: () -> Unit = {}
 ) {
-    val isDarkTheme by viewModel.isDarkTheme.collectAsState()
-    val customPalette by viewModel.customPalette.collectAsState()
+    val confirm = LocalConfirm.current
     val athleteProfile by viewModel.athleteProfile.collectAsState()
     val rawResultsList by viewModel.rawTripleJumpResults.collectAsState()
 
@@ -79,41 +79,6 @@ fun ProfileScreen(
             }
         }
     )
-
-    var showRestoreConfirm by remember { mutableStateOf(false) }
-    var backupMessage by remember { mutableStateOf<String?>(null) }
-    var showCleanupConfirm by remember { mutableStateOf(false) }
-    val demoLeftovers by viewModel.demoLeftovers.collectAsState()
-    LaunchedEffect(isDemo) { if (!isDemo) viewModel.scanDemoLeftovers() }
-
-    val exportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
-    ) { uri ->
-        if (uri != null) {
-            scope.launch {
-                val app = context.applicationContext as TripleJumpApplication
-                val ok = DiaryBackup.export(context, app.database, uri)
-                backupMessage = if (ok) "Копия сохранена. Храните файл в облаке или на компьютере." else "Не удалось сохранить копию."
-            }
-        }
-    }
-
-    val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            scope.launch {
-                when (val result = DiaryBackup.import(context, uri)) {
-                    DiaryBackup.ImportResult.Success -> {
-                        // после восстановления открываем свой дневник, а не демо
-                        (context.applicationContext as TripleJumpApplication).preferences.useDemoData = false
-                        restartApp(context)
-                    }
-                    is DiaryBackup.ImportResult.Error -> backupMessage = result.message
-                }
-            }
-        }
-    }
 
     val calculatedPbMeters = remember(rawResultsList, athleteProfile) {
         val customPb = athleteProfile?.customPbMeters
@@ -137,7 +102,6 @@ fun ProfileScreen(
     val runUpHistory by viewModel.runUpHistory.collectAsState()
     var showRanksDialog by remember { mutableStateOf(false) }
     var showRunUpDialog by remember { mutableStateOf(false) }
-    var showPaletteDialog by remember { mutableStateOf(false) }
     var bodyKind by remember { mutableStateOf<BodyKind?>(null) }
     val bodyMeasurements by viewModel.bodyMeasurements.collectAsState()
     val sportRank = autoRank?.rank
@@ -169,6 +133,7 @@ fun ProfileScreen(
                     }
                 },
                 actions = {
+                    LocalOpenSettings.current?.let { SettingsIconButton(onClick = it) }
                     IconButton(onClick = { showEditDialog = true }) {
                         Icon(imageVector = Icons.Default.Edit, contentDescription = "Редактировать профиль")
                     }
@@ -296,7 +261,7 @@ fun ProfileScreen(
             }
 
             // Показатели
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(modifier = Modifier.coachTarget("profile.stats"), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatTile(
                     value = if (athleteProfile?.height != null && athleteProfile!!.height!! > 0) "${athleteProfile!!.height!!.toInt()}" else "—",
                     label = "Рост, см",
@@ -346,7 +311,7 @@ fun ProfileScreen(
                 }
             }
 
-            AppCard {
+            AppCard(modifier = Modifier.coachTarget("profile.rank")) {
                 ProfileOptionRow(
                     icon = Icons.Default.MilitaryTech,
                     title = sportRank?.title ?: "Разряд пока не выполнен",
@@ -372,144 +337,18 @@ fun ProfileScreen(
                     subtitle = if (currentRunUp == null) "Нажмите, чтобы указать" else "Меняется, когда отнёс или поднёс отметку",
                     onClick = { showRunUpDialog = true }
                 )
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SectionHeader(title = "Настройки")
-                AppCard {
-                    ProfileOptionRow(
-                        icon = if (isDarkTheme) Icons.Default.DarkMode else Icons.Default.LightMode,
-                        title = "Тёмная тема",
-                        subtitle = if (isDarkTheme) "Включена" else "Выключена",
-                        onClick = { viewModel.toggleTheme() },
-                        trailing = {
-                            Switch(checked = isDarkTheme, onCheckedChange = { viewModel.toggleTheme() })
-                        }
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(start = 70.dp), color = cs.outlineVariant)
-                    ProfileOptionRow(
-                        icon = Icons.Default.Palette,
-                        title = "Своя расцветка",
-                        subtitle = if (customPalette == null) "Стандартные цвета" else "Свои цвета",
-                        onClick = { showPaletteDialog = true }
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(start = 70.dp), color = cs.outlineVariant)
-                    ProfileOptionRow(
-                        icon = Icons.Default.RecordVoiceOver,
-                        title = "Обращение в приложении",
-                        subtitle = if (athleteProfile?.greetingPreference == "NICKNAME") "По никнейму · ${nicknameText.ifBlank { "не задан" }}"
-                        else "По имени · $fullName",
-                        onClick = { showEditDialog = true }
-                    )
-                }
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SectionHeader(title = "Дневник", subtitle = "Демо-данные хранятся отдельно и не смешиваются с вашими")
-                // В «Моих данных» могли остаться записи старой автозагрузки демо — предлагаем убрать их
-                demoLeftovers?.let { found ->
-                    Surface(shape = MaterialTheme.shapes.large, color = cs.tertiaryContainer) {
-                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("В вашем дневнике есть демо-записи", style = MaterialTheme.typography.titleSmall, color = cs.onTertiaryContainer)
-                            Text(
-                                text = "Их добавила прежняя версия приложения: ${found.describe()}. Ваши собственные записи не затрагиваются.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = cs.onTertiaryContainer
-                            )
-                            Button(onClick = { showCleanupConfirm = true }) { Text("Убрать демо-записи") }
-                        }
-                    }
-                }
-                AppCard {
-                    ProfileOptionRow(
-                        icon = Icons.Default.Science,
-                        title = "Демо-режим",
-                        subtitle = if (isDemo) "Открыт пример дневника за 3 месяца" else "Посмотреть приложение на примере",
-                        onClick = { onSwitchDiary(!isDemo) },
-                        trailing = {
-                            Switch(checked = isDemo, onCheckedChange = { onSwitchDiary(it) })
-                        }
-                    )
-                }
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SectionHeader(
-                    title = "Резервная копия",
-                    subtitle = if (isDemo) "Доступна в режиме «Мои данные»" else "Дневник также сохраняется в облачный бэкап Google"
+                HorizontalDivider(modifier = Modifier.padding(start = 70.dp), color = cs.outlineVariant)
+                ProfileOptionRow(
+                    icon = Icons.Default.RecordVoiceOver,
+                    title = "Обращение в приложении",
+                    subtitle = if (athleteProfile?.greetingPreference == "NICKNAME") "По никнейму · ${nicknameText.ifBlank { "не задан" }}"
+                    else "По имени · $fullName",
+                    onClick = { showEditDialog = true }
                 )
-                if (!isDemo) AppCard {
-                    ProfileOptionRow(
-                        icon = Icons.Default.Upload,
-                        title = "Сохранить копию",
-                        subtitle = "Файл со всеми тренировками, стартами и рекордами",
-                        onClick = { exportLauncher.launch(DiaryBackup.suggestedFileName()) }
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(start = 70.dp), color = cs.outlineVariant)
-                    ProfileOptionRow(
-                        icon = Icons.Default.Download,
-                        title = "Восстановить из копии",
-                        subtitle = "Текущие данные будут заменены",
-                        onClick = { showRestoreConfirm = true }
-                    )
-                }
             }
+
         }
     }
-
-    if (showCleanupConfirm) {
-        AlertDialog(
-            onDismissRequest = { showCleanupConfirm = false },
-            title = { Text("Убрать демо-записи?") },
-            text = {
-                Text(
-                    "Будут удалены только записи демо-набора: ${demoLeftovers?.describe().orEmpty()}. " +
-                        "Тренировки с вашими упражнениями и всё, что вы вводили сами, останутся. " +
-                        "Перед удалением можно сохранить резервную копию."
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showCleanupConfirm = false
-                        viewModel.removeDemoLeftovers { backupMessage = "Демо-записи удалены: ${it.describe()}." }
-                    },
-                    colors = destructiveButtonColors()
-                ) { Text("Убрать") }
-            },
-            dismissButton = { TextButton(onClick = { showCleanupConfirm = false }) { Text("Отмена") } }
-        )
-    }
-
-    if (showRestoreConfirm) {
-        AlertDialog(
-            onDismissRequest = { showRestoreConfirm = false },
-            title = { Text("Восстановить дневник?", fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    "Все текущие записи будут заменены данными из файла, после чего приложение перезапустится. " +
-                        "Перед восстановлением рекомендуем сохранить копию текущих данных."
-                )
-            },
-            confirmButton = {
-                Button(onClick = {
-                    showRestoreConfirm = false
-                    importLauncher.launch(arrayOf("*/*"))
-                }) { Text("Выбрать файл") }
-            },
-            dismissButton = { TextButton(onClick = { showRestoreConfirm = false }) { Text("Отмена") } }
-        )
-    }
-
-    backupMessage?.let { message ->
-        AlertDialog(
-            onDismissRequest = { backupMessage = null },
-            title = { Text("Резервная копия", fontWeight = FontWeight.Bold) },
-            text = { Text(message) },
-            confirmButton = { TextButton(onClick = { backupMessage = null }) { Text("OK") } }
-        )
-    }
-
 
     if (showRanksDialog) {
         RanksDialog(autoRank = autoRank, gender = athleteProfile?.gender, onDismiss = { showRanksDialog = false })
@@ -520,23 +359,10 @@ fun ProfileScreen(
             kind = kind,
             history = bodyMeasurements,
             onAdd = { value, date -> viewModel.addBodyMeasurement(kind, value, date) },
-            onDelete = { viewModel.deleteBodyMeasurement(it) },
-            onDismiss = { bodyKind = null }
-        )
-    }
-
-    if (showPaletteDialog) {
-        PaletteEditorDialog(
-            initial = customPalette,
-            onDismiss = { showPaletteDialog = false },
-            onSave = {
-                viewModel.setCustomPalette(it)
-                showPaletteDialog = false
+            onDelete = { m ->
+                confirm.delete("замер", "Замер «${formatNumber(kind.of(m) ?: 0.0)} ${kind.unit}» будет удалён.") { viewModel.deleteBodyMeasurement(m) }
             },
-            onReset = {
-                viewModel.setCustomPalette(null)
-                showPaletteDialog = false
-            }
+            onDismiss = { bodyKind = null }
         )
     }
 
@@ -556,20 +382,22 @@ fun ProfileScreen(
             currentProfile = athleteProfile,
             onDismiss = { showEditDialog = false },
             onConfirm = { firstName, lastName, nickname, greetingPref, birthDateMillis, height, weight, customPb, gender, leadingLeg ->
-                viewModel.updateAthleteProfile(
-                    gender = gender,
-                    leadingLeg = leadingLeg,
-                    firstName = firstName,
-                    lastName = lastName,
-                    nickname = nickname,
-                    avatarUriString = athleteProfile?.avatarUriString,
-                    greetingPreference = greetingPref,
-                    birthDate = birthDateMillis,
-                    height = height,
-                    weight = weight,
-                    customPbMeters = customPb
-                )
-                showEditDialog = false
+                confirm.save("Профиль") {
+                    viewModel.updateAthleteProfile(
+                        gender = gender,
+                        leadingLeg = leadingLeg,
+                        firstName = firstName,
+                        lastName = lastName,
+                        nickname = nickname,
+                        avatarUriString = athleteProfile?.avatarUriString,
+                        greetingPreference = greetingPref,
+                        birthDate = birthDateMillis,
+                        height = height,
+                        weight = weight,
+                        customPbMeters = customPb
+                    )
+                    showEditDialog = false
+                }
             }
         )
     }
@@ -600,7 +428,7 @@ private fun RanksDialog(autoRank: AutoRank?, gender: String?, onDismiss: () -> U
     val cs = MaterialTheme.colorScheme
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Разряды в тройном прыжке") },
+        title = { FormHelpRow(HelpTopic.F_RANKS) { Text("Разряды в тройном прыжке") } },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -657,7 +485,7 @@ private fun RunUpLengthDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Размер разбега") },
+        title = { FormHelpRow(HelpTopic.F_RUNUP_LENGTH) { Text("Размер разбега") } },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -720,7 +548,7 @@ private fun signedAmount(value: Double, unit: String): String =
     (if (value > 0) "+" else "−") + formatNumber(Math.abs(value)) + " " + unit
 
 /** Перезапуск процесса: восстановленная база подключается при следующем старте приложения. */
-private fun restartApp(context: Context) {
+internal fun restartApp(context: Context) {
     val intent = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
     context.startActivity(intent)
@@ -760,7 +588,7 @@ fun EditProfileDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = "Профиль", style = MaterialTheme.typography.titleLarge) },
+        title = { FormHelpRow(HelpTopic.F_PROFILE_EDIT) { Text(text = "Профиль", style = MaterialTheme.typography.titleLarge) } },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),

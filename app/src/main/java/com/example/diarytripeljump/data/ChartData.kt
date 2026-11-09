@@ -1,7 +1,10 @@
 package com.example.diarytripeljump.data
 
 import java.util.Calendar
+import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.log10
 
 /** Группа показателей в списке выбора. */
 enum class SeriesGroup(val label: String) {
@@ -291,6 +294,29 @@ object ChartData {
         val first = distinct.first()
         val span = (distinct.last() - first).toFloat()
         return distinct.associateWith { (it - first) / span }
+    }
+
+    /** Самая мелкая цена деления для единицы: сотые секунды, граммы, сотые сантиметра и метра. */
+    fun maxDecimals(unit: String): Int = when (unit) {
+        "сек" -> 2
+        "кг" -> 3
+        "см", "м" -> 2
+        "ст." -> 1
+        else -> 0
+    }
+
+    /** Сколько знаков нужно подписям шкалы: чем уже видимый диапазон, тем точнее, но не мельче [maxDecimals]. */
+    fun axisDecimals(span: Double, maxDecimals: Int): Int {
+        if (span <= 0) return maxDecimals
+        return ceil(-log10(span / 4)).toInt().coerceIn(0, maxDecimals)
+    }
+
+    fun formatFixed(value: Double, decimals: Int): String = String.format(Locale.getDefault(), "%.${decimals}f", value)
+
+    /** Значение с нужной точностью без лишних нулей: 8,8 сек, 102,5 кг, 13,62 м. */
+    fun formatTrim(value: Double, maxDecimals: Int): String {
+        val text = formatFixed(value, maxDecimals)
+        return if (maxDecimals > 0) text.trimEnd('0').trimEnd('.', ',') else text
     }
 
     /** Ближайшая по дате точка: для подсказки под пальцем. */

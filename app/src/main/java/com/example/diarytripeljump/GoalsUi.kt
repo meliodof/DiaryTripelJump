@@ -180,7 +180,7 @@ fun GoalEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (existing == null) "Новая цель" else "Изменить цель", fontWeight = FontWeight.Bold) },
+        title = { FormHelpRow(HelpTopic.F_GOAL) { Text(if (existing == null) "Новая цель" else "Изменить цель", fontWeight = FontWeight.Bold) } },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),

@@ -1,5 +1,6 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.ui.components.ConfirmHost
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -45,11 +46,14 @@ class MainActivity : ComponentActivity() {
             }
 
             DiaryTripelJumpTheme(darkTheme = darkTheme, customPalette = customPalette) {
-                MainScreen(
-                    viewModel = viewModel,
-                    isDemo = app.isDemo,
-                    onSwitchDiary = ::switchDiary
-                )
+                // одно окно подтверждения для всех удалений и изменений
+                ConfirmHost {
+                    MainScreen(
+                        viewModel = viewModel,
+                        isDemo = app.isDemo,
+                        onSwitchDiary = ::switchDiary
+                    )
+                }
             }
         }
     }

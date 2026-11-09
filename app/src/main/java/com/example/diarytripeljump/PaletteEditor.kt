@@ -1,5 +1,6 @@
 package com.example.diarytripeljump
 
+import com.example.diarytripeljump.data.HelpTopic
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -90,7 +91,7 @@ fun PaletteEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = "Своя расцветка", fontWeight = FontWeight.Bold) },
+        title = { FormHelpRow(HelpTopic.F_PALETTE) { Text(text = "Своя расцветка", fontWeight = FontWeight.Bold) } },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
