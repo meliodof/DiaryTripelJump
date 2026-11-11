@@ -39,6 +39,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import com.example.diarytripeljump.ui.components.ChartWindow
+import com.example.diarytripeljump.ui.components.pinchZoom
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -268,15 +271,20 @@ private fun ProgressChart(
     val reveal = remember(points) { Animatable(0f) }
     LaunchedEffect(points) { reveal.animateTo(1f, tween(durationMillis = 800, easing = FastOutSlowInEasing)) }
 
-    val values = points.map { it.value } + listOfNotNull(target)
+    // масштаб двумя пальцами, как у фотографии; двойное нажатие возвращает весь период
+    val window = remember(points) { ChartWindow() }
+    val first = points.first().date
+    val spanTime = (points.last().date - first).coerceAtLeast(1L)
+    fun positionOf(p: RecordPoint): Float = if (points.size == 1) 0.5f else (p.date - first).toFloat() / spanTime
+
+    // шкала по видимым точкам: при приближении график растягивается и по высоте
+    val inWindow = points.filter { window.screen(positionOf(it)) in -0.001f..1.001f }.ifEmpty { points }
+    val values = inWindow.map { it.value } + listOfNotNull(target)
     val low = values.min()
     val high = values.max()
     val span = (high - low).takeIf { it > 0 } ?: (abs(high) * 0.1).coerceAtLeast(1.0)
-    val first = points.first().date
-    val spanTime = (points.last().date - first).coerceAtLeast(1L)
 
-    fun xOf(p: RecordPoint, width: Float): Float =
-        if (points.size == 1) width / 2 else (p.date - first).toFloat() / spanTime * width
+    fun xOf(p: RecordPoint, width: Float): Float = window.screen(positionOf(p)) * width
 
     fun yOf(value: Double, height: Float): Float {
         val share = ((value - low) / span).toFloat()
@@ -287,12 +295,14 @@ private fun ProgressChart(
 
     fun nearest(x: Float, width: Float): RecordPoint = points.minBy { abs(xOf(it, width) - x) }
 
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
             .height(190.dp)
+            .pinchZoom(window, onZoom = { onPick(null) })
             .pointerInput(points) {
-                detectTapGestures { offset ->
+                detectTapGestures(onDoubleTap = { window.reset(); onPick(null) }) { offset ->
                     onPick(nearest(offset.x, size.width.toFloat()))
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 }
@@ -352,6 +362,20 @@ private fun ProgressChart(
             drawCircle(cs.surface, radius = 8.dp.toPx(), center = center)
             drawCircle(cs.primary, radius = 5.dp.toPx(), center = center)
         }
+    }
+    if (points.size > 1) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = if (window.isZoomed) "Масштаб ${window.label}" else "Раздвиньте двумя пальцами, чтобы приблизить",
+                style = MaterialTheme.typography.bodySmall,
+                color = cs.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            if (window.isZoomed) {
+                TextButton(onClick = { window.reset(); onPick(null) }) { Text("Весь период") }
+            }
+        }
+    }
     }
 }
 

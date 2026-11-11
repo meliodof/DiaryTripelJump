@@ -97,6 +97,11 @@ import com.example.diarytripeljump.data.SeriesStyle
 import com.example.diarytripeljump.data.VisualizationConfig
 import com.example.diarytripeljump.data.formatNumber
 import com.example.diarytripeljump.ui.components.AppCard
+import com.example.diarytripeljump.ui.components.pluralRu
+import com.example.diarytripeljump.data.AdviceKind
+import androidx.compose.material.icons.filled.Lightbulb
+import com.example.diarytripeljump.ui.components.ChartWindow
+import com.example.diarytripeljump.ui.components.pinchZoom
 import com.example.diarytripeljump.ui.components.AppScreenScaffold
 import com.example.diarytripeljump.ui.components.IconBadge
 import com.example.diarytripeljump.ui.components.SegmentedControl
@@ -134,9 +139,15 @@ private class Plot(val series: AnalyticsSeries, val style: SeriesStyle, val poin
 
 /** Вкладка «Аналитика»: разделы модуля. Первый раздел — визуализация показателей. */
 @Composable
-fun AnalyticsScreen(viewModel: DiaryViewModel, onOpenProfile: () -> Unit, onOpenVisualization: () -> Unit) {
+fun AnalyticsScreen(
+    viewModel: DiaryViewModel,
+    onOpenProfile: () -> Unit,
+    onOpenVisualization: () -> Unit,
+    onOpenAdvice: () -> Unit = {}
+) {
     val cs = MaterialTheme.colorScheme
     val athleteProfile by viewModel.athleteProfile.collectAsState()
+    val advice by viewModel.allAdvice.collectAsState()
     AppScreenScaffold(
         title = "Аналитика",
         avatarUri = athleteProfile?.avatarUriString,
@@ -162,6 +173,30 @@ fun AnalyticsScreen(viewModel: DiaryViewModel, onOpenProfile: () -> Unit, onOpen
                                 "Попытки, итоги тренировок и недель, вес и разбег на графиках со своими настройками",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = cs.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+            item {
+                val risks = advice.count { it.kind == AdviceKind.RISK }
+                AppCard(modifier = Modifier.coachTarget("analytics.advice"), onClick = onOpenAdvice) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        IconBadge(icon = Icons.Default.Lightbulb, tint = cs.tertiary, size = 48.dp, iconSize = 26.dp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Советы", style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
+                            Text(
+                                when {
+                                    advice.isEmpty() -> "Разбег, цели, нагрузка и подводка к старту — советы по данным дневника"
+                                    risks > 0 -> "${advice.size} ${pluralRu(advice.size, "совет", "совета", "советов")}, важных: $risks"
+                                    else -> "${advice.size} ${pluralRu(advice.size, "совет", "совета", "советов")} по данным дневника"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (risks > 0) cs.error else cs.onSurfaceVariant
                             )
                         }
                     }
@@ -433,13 +468,11 @@ private fun MultiSeriesChart(
     val reveal = remember(plots) { Animatable(0f) }
     LaunchedEffect(plots) { reveal.animateTo(1f, tween(durationMillis = 700, easing = FastOutSlowInEasing)) }
     var scrub by remember(plots) { mutableStateOf<Float?>(null) }
-    var zoom by remember { mutableFloatStateOf(1f) }
-    var windowStart by remember { mutableFloatStateOf(1f) }
+    // масштаб: двумя пальцами, как фотографию, или лупами под графиком
+    val window = remember { ChartWindow() }
 
     val positions = remember(plots, byOrder) { ChartData.positions(plots.flatMap { p -> p.points.map { it.date } }, byOrder) }
-    val visible = 1f / zoom
-    val start = windowStart * (1f - visible)
-    fun screenOf(date: Long): Float = ((positions[date] ?: 0f) - start) / visible
+    fun screenOf(date: Long): Float = window.screen(positions[date] ?: 0f)
     // шкала по точкам, которые видны в окне: при приближении график растягивается и по высоте
     val inWindow = plots.flatMap { p -> p.points.filter { screenOf(it.date) in -0.001f..1.001f } }.ifEmpty { plots.flatMap { it.points } }
     val (low, high) = ChartData.yBounds(inWindow.map { it.value }, mode, fromZero)
@@ -498,9 +531,13 @@ private fun MultiSeriesChart(
                 modifier = Modifier
                     .weight(1f)
                     .height(200.dp)
+                    .pinchZoom(window, inset = 10.dp, onZoom = { scrub = null })
                     .pointerInput(plots) {
                         val inset = 10.dp.toPx()
-                        detectTapGestures { offset ->
+                        detectTapGestures(
+                            // двойное нажатие возвращает весь график
+                            onDoubleTap = { window.reset(); scrub = null }
+                        ) { offset ->
                             scrub = ((offset.x - inset) / (size.width - 2 * inset)).coerceIn(0f, 1f)
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         }
@@ -560,20 +597,27 @@ private fun MultiSeriesChart(
             Text(shortDate(windowDates.first()), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
             Text(shortDate(windowDates.last()), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
         }
-        // масштаб: лупы меняют приближение, ползунок двигает окно по времени
+        // масштаб: пальцы или лупы меняют приближение, ползунок двигает окно по времени
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { zoom = (zoom / 2f).coerceAtLeast(1f); scrub = null }, enabled = zoom > 1f) {
+            IconButton(onClick = { window.zoomBy(0.5f, focus = 1f); scrub = null }, enabled = window.isZoomed) {
                 Icon(Icons.Default.ZoomOut, contentDescription = "Отдалить")
             }
-            Text("×${zoom.toInt()}", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
-            IconButton(onClick = { zoom = (zoom * 2f).coerceAtMost(32f); scrub = null }, enabled = zoom < 32f) {
+            Text(window.label, style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+            IconButton(onClick = { window.zoomBy(2f, focus = 1f); scrub = null }, enabled = window.zoom < 64f) {
                 Icon(Icons.Default.ZoomIn, contentDescription = "Приблизить")
             }
-            if (zoom > 1f) {
+            if (window.isZoomed) {
                 Slider(
-                    value = windowStart,
-                    onValueChange = { windowStart = it; scrub = null },
+                    value = window.slider,
+                    onValueChange = { window.slider = it; scrub = null },
                     modifier = Modifier.weight(1f)
+                )
+            } else {
+                Text(
+                    "Раздвиньте двумя пальцами, чтобы приблизить",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant,
+                    modifier = Modifier.weight(1f).padding(start = 4.dp)
                 )
             }
         }

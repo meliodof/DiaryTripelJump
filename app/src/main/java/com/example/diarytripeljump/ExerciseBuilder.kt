@@ -30,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Edit
@@ -38,6 +39,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,13 +47,17 @@ import androidx.compose.material3.InputChip
 import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.LaunchedEffect
+import com.example.diarytripeljump.data.InventorySet
+import com.example.diarytripeljump.data.InventoryUse
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -127,7 +133,10 @@ fun ExerciseEditorDialog(
         )
     }
 
-    var name by remember { mutableStateOf(start?.name ?: "") }
+    // название до свойств и его продолжение после них: «Прыжки» + в шиповках + «с разбега»
+    val startSplit = remember { splitName(start?.name.orEmpty(), start?.titleLayout) }
+    var name by remember { mutableStateOf(startSplit.first) }
+    var nameAfter by remember { mutableStateOf(startSplit.second) }
     var category by remember { mutableStateOf(start?.category ?: "Силовое упражнение") }
     var unit by remember { mutableStateOf(start?.unit ?: ResultUnit.KG) }
     // пока единицу не выбрали вручную, она подсказывается по названию (бег — секунды, присед — кг…)
@@ -135,10 +144,15 @@ fun ExerciseEditorDialog(
     var inSpikes by remember { mutableStateOf(start?.inSpikes ?: false) }
     var singleLeg by remember { mutableStateOf(start?.isSingleLeg ?: false) }
     var legSide by remember { mutableStateOf(start?.legSide) }
-    var hasInventory by remember { mutableStateOf(!start?.inventoryName.isNullOrBlank()) }
-    var inventoryName by remember { mutableStateOf(start?.inventoryName) }
-    var inventoryUnit by remember { mutableStateOf(start?.inventoryUnit) }
-    var inventoryValueText by remember { mutableStateOf(start?.inventoryValue?.let { formatNumber(it).replace(',', '.') } ?: "") }
+    // снарядов в упражнении может быть несколько, у каждого свой вес или размер
+    val picked = remember {
+        mutableStateListOf<PickedInventory>().apply {
+            InventorySet.decode(start?.inventoryName, start?.inventoryUnit, start?.inventoryValue).forEach {
+                add(PickedInventory(it.name, it.unit, it.value?.let { v -> formatNumber(v).replace(',', '.') } ?: ""))
+            }
+        }
+    }
+    var hasInventory by remember { mutableStateOf(picked.isNotEmpty()) }
     var showErrors by remember { mutableStateOf(false) }
     var showCreateInventory by remember { mutableStateOf(false) }
     var showInventoryManager by remember { mutableStateOf(false) }
@@ -148,16 +162,20 @@ fun ExerciseEditorDialog(
     LaunchedEffect(inventoryItems) {
         inventoryItems.firstOrNull { it.id !in knownInventory }?.let { fresh ->
             hasInventory = true
-            inventoryName = fresh.name
-            inventoryUnit = fresh.unit
-            inventoryValueText = ""
+            if (picked.none { it.matches(fresh) }) picked.add(PickedInventory(fresh.name, fresh.unit, ""))
         }
         knownInventory = inventoryItems.map { it.id }.toSet()
     }
     // позиции ноги, снаряда и шиповок в названии
-    var layout by remember { mutableStateOf(start?.titleLayout ?: TitleGrammar.DEFAULT_LAYOUT) }
+    var layout by remember { mutableStateOf(startSplit.third) }
     // штанга при результате в кг: вес снаряда и есть результат — отдельно не вводится
-    val loadedImplement = hasInventory && RecordsEngine.isLoadedImplement(inventoryUnit, unit)
+    fun isLoaded(p: PickedInventory) = RecordsEngine.isLoadedImplement(p.unit, unit)
+
+    /** Выбранные снаряды в полях базы (см. [InventorySet]). */
+    fun inventoryFields() = InventorySet.encode(
+        if (!hasInventory) emptyList()
+        else picked.map { InventoryUse(it.name, it.unit, if (isLoaded(it)) null else it.valueText.toDoubleOrNull()) }
+    )
 
     fun isAdded(b: BuilderBlock) = when (b) {
         BuilderBlock.SPIKES -> inSpikes
@@ -170,7 +188,7 @@ fun ExerciseEditorDialog(
             BuilderBlock.SPIKES -> inSpikes = added
             BuilderBlock.INVENTORY -> {
                 hasInventory = added
-                if (!added) { inventoryName = null; inventoryUnit = null; inventoryValueText = "" }
+                if (!added) picked.clear()
             }
             BuilderBlock.SINGLE_LEG -> {
                 singleLeg = added
@@ -195,15 +213,20 @@ fun ExerciseEditorDialog(
         dragBlock = null
     }
 
-    val inventoryMissing = hasInventory && inventoryName.isNullOrBlank()
-    val inventoryValueError = if (hasInventory && !inventoryName.isNullOrBlank() && inventoryUnit != null) {
-        EntryRules.inventoryValueError(inventoryValueText, inventoryUnit)
-    } else null
+    val inventoryMissing = hasInventory && picked.isEmpty()
+    fun valueError(p: PickedInventory): String? = if (p.unit != null) EntryRules.inventoryValueError(p.valueText, p.unit) else null
+    val inventoryValueError = if (hasInventory) picked.firstNotNullOfOrNull { valueError(it) } else null
     val canSave = name.isNotBlank() && !inventoryMissing && inventoryValueError == null
-    val inventoryText = if (hasInventory) RecordsEngine.variantInventory(inventoryName, inventoryUnit, inventoryValueText.toDoubleOrNull(), unit) else null
+    val fields = inventoryFields()
+    val inventoryText = RecordsEngine.variantInventory(fields.name, fields.unit, fields.value, unit)
+    val anyBlock = inSpikes || singleLeg || hasInventory
+    // продолжение имеет смысл, только когда есть свойства, после которых оно идёт
+    val tail = if (anyBlock) nameAfter.trim() else ""
+    val fullName = joinName(name, tail)
+    val savedLayout = layoutWithContinuation(layout, name, tail)
     val preview = RecordsEngine.exerciseTitle(
-        name.ifBlank { "Название" }, singleLeg, legSide, inSpikes,
-        if (hasInventory) inventoryName else null, inventoryUnit, inventoryValueText.toDoubleOrNull(), unit, layout
+        joinName(name.ifBlank { "Название" }, tail), singleLeg, legSide, inSpikes,
+        fields.name, fields.unit, fields.value, unit, layoutWithContinuation(layout, name.ifBlank { "Название" }, tail)
     )
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -225,6 +248,9 @@ fun ExerciseEditorDialog(
                         Text(
                             text = if (start == null) "Новое упражнение" else "Упражнение",
                             style = MaterialTheme.typography.titleLarge,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
                         )
                         HelpIconButton(onClick = rememberHelp(HelpTopic.F_BUILDER), id = "builder.help")
@@ -235,17 +261,17 @@ fun ExerciseEditorDialog(
                                 } else {
                                     onConfirm(
                                         ExerciseConfig(
-                                            name = name.trim(),
+                                            name = fullName,
                                             category = category,
                                             isSingleLeg = singleLeg,
                                             legSide = if (singleLeg) legSide else null,
-                                            inventoryName = if (hasInventory) inventoryName else null,
-                                            inventoryUnit = if (hasInventory) inventoryUnit else null,
-                                            inventoryValue = if (hasInventory && !loadedImplement) inventoryValueText.toDoubleOrNull() else null,
+                                            inventoryName = fields.name,
+                                            inventoryUnit = fields.unit,
+                                            inventoryValue = fields.value,
                                             inSpikes = inSpikes,
                                             // у разбега своя форма результата, единица не выбирается
-                                            unit = if (RunUp.isExercise(name)) ResultUnit.CM else unit,
-                                            titleLayout = layout.takeIf { it != TitleGrammar.DEFAULT_LAYOUT }
+                                            unit = if (RunUp.isExercise(fullName)) ResultUnit.CM else unit,
+                                            titleLayout = savedLayout.takeIf { it != TitleGrammar.DEFAULT_LAYOUT }
                                         )
                                     )
                                 }
@@ -352,6 +378,18 @@ fun ExerciseEditorDialog(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = cs.onSurfaceVariant
                                     )
+                                } else {
+                                    // название можно продолжить после свойств: «… в шиповках с разбега»
+                                    Text("+", style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
+                                    OutlinedTextField(
+                                        value = nameAfter,
+                                        onValueChange = { nameAfter = it },
+                                        placeholder = { Text("дальше в названии…") },
+                                        singleLine = true,
+                                        textStyle = MaterialTheme.typography.labelLarge,
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.widthIn(min = 160.dp).coachTarget("builder.after")
+                                    )
                                 }
                             }
                         }
@@ -398,20 +436,27 @@ fun ExerciseEditorDialog(
                         }
                         if (hasInventory) {
                             BlockSettings(title = "Инвентарь", icon = BuilderBlock.INVENTORY.icon) {
+                                Text(
+                                    "Можно выбрать несколько",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = cs.onSurfaceVariant
+                                )
                                 FlowRow(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     inventoryItems.forEach { item ->
+                                        val index = picked.indexOfFirst { it.matches(item) }
                                         FilterChip(
-                                            selected = inventoryName.equals(item.name, ignoreCase = true) && inventoryUnit == item.unit,
+                                            selected = index >= 0,
                                             onClick = {
-                                                inventoryName = item.name
-                                                inventoryUnit = item.unit
-                                                // у инвентаря без единицы нет веса или размера
-                                                if (item.unit == null) inventoryValueText = ""
+                                                if (index >= 0) picked.removeAt(index)
+                                                else picked.add(PickedInventory(item.name, item.unit, ""))
                                             },
-                                            label = { Text(item.name) }
+                                            label = { Text(item.name) },
+                                            leadingIcon = if (index >= 0) {
+                                                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
+                                            } else null
                                         )
                                     }
                                     AssistChip(
@@ -428,27 +473,31 @@ fun ExerciseEditorDialog(
                                 if (showErrors && inventoryMissing) {
                                     Text("Выберите инвентарь или уберите блок", style = MaterialTheme.typography.bodySmall, color = cs.error)
                                 }
-                                if (!inventoryName.isNullOrBlank() && inventoryUnit != null) {
+                                // у инвентаря без единицы нет веса или размера
+                                picked.forEachIndexed { i, p ->
+                                    if (p.unit == null) return@forEachIndexed
+                                    val error = valueError(p)
                                     OutlinedTextField(
-                                        value = inventoryValueText,
+                                        value = p.valueText,
                                         onValueChange = { v ->
-                                            inventoryValueText = EntryRules.cleanNumber(v)
+                                            val text = EntryRules.cleanNumber(v)
                                             // постоянный вес: снаряд не штанга, и результат считается не в кг
-                                            if (loadedImplement && inventoryValueText.isNotEmpty()) {
+                                            if (isLoaded(p) && text.isNotEmpty()) {
                                                 val low = name.lowercase()
                                                 val throwing = listOf("метан", "брос", "толк").any { low.contains(it) }
                                                 unit = if (throwing) ResultUnit.M else ResultUnit.REPS
                                                 unitTouched = true
                                             }
+                                            picked[i] = p.copy(valueText = text)
                                         },
-                                        label = { Text("Вес или размер снаряда") },
-                                        suffix = { Text(getUnitTitle(inventoryUnit ?: ResultUnit.CM)) },
-                                        isError = showErrors && inventoryValueError != null,
+                                        label = { Text("${p.name}: вес или размер") },
+                                        suffix = { Text(getUnitTitle(p.unit)) },
+                                        isError = showErrors && error != null,
                                         supportingText = when {
-                                            showErrors && inventoryValueError != null -> {
-                                                { Text(inventoryValueError) }
+                                            showErrors && error != null -> {
+                                                { Text(error) }
                                             }
-                                            loadedImplement -> {
+                                            isLoaded(p) -> {
                                                 { Text("Для штанги оставьте пустым: её вес вводится в попытках как результат") }
                                             }
                                             else -> null
@@ -596,14 +645,49 @@ fun ExerciseEditorDialog(
             onDismiss = { showInventoryManager = false },
             onChanged = { old, newName, newUnit ->
                 // изменён выбранный снаряд: форма показывает его новые параметры
-                if (inventoryName.equals(old.name, ignoreCase = true) && inventoryUnit == old.unit) {
-                    inventoryName = newName
-                    inventoryUnit = newUnit
-                    if (newUnit != old.unit) inventoryValueText = ""
+                val index = picked.indexOfFirst { it.matches(old) }
+                if (index >= 0) {
+                    val p = picked[index]
+                    picked[index] = PickedInventory(newName, newUnit, if (newUnit != old.unit) "" else p.valueText)
                 }
             }
         )
     }
+}
+
+private fun joinName(before: String, after: String): String = listOf(before.trim(), after.trim()).filter { it.isNotEmpty() }.joinToString(" ")
+
+/**
+ * Позиции свойств с продолжением названия: свойства, оставленные на «Авто», встают после слов [before],
+ * а [after] идёт за ними. Без продолжения позиции не меняются.
+ */
+private fun layoutWithContinuation(layout: String, before: String, after: String): String {
+    if (after.isBlank()) return layout
+    val split = TitleGrammar.afterWords(before.trim().split(Regex("\\s+")).count { it.isNotEmpty() })
+    return layout.padEnd(3, TitleGrammar.AUTO).take(3).map { if (it == TitleGrammar.AUTO) split else it }.joinToString("")
+}
+
+/**
+ * Обратно: сохранённое название и позиции — в название до свойств, продолжение и позиции для формы.
+ * Позиции «после N слов» в форме снова показываются как «Авто».
+ */
+private fun splitName(name: String, layout: String?): Triple<String, String, String> {
+    val positions = layout ?: TitleGrammar.DEFAULT_LAYOUT
+    val count = TitleGrammar.continuationSplit(positions)
+    val words = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (count == null || count >= words.size) {
+        return Triple(name, "", positions.map { if (it in '1'..'9') TitleGrammar.END else it }.joinToString(""))
+    }
+    return Triple(
+        words.take(count).joinToString(" "),
+        words.drop(count).joinToString(" "),
+        positions.map { if (it in '1'..'9') TitleGrammar.AUTO else it }.joinToString("")
+    )
+}
+
+/** Снаряд, выбранный в конструкторе; значение — как введено в поле. */
+private data class PickedInventory(val name: String, val unit: ResultUnit?, val valueText: String) {
+    fun matches(item: InventoryItem) = name.equals(item.name, ignoreCase = true) && unit == item.unit
 }
 
 @Composable

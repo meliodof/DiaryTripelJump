@@ -14,6 +14,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
+import androidx.compose.material.icons.automirrored.filled.Notes
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -442,13 +445,13 @@ fun TrainingsScreen(
             existingInputs = emptyList(),
             dialogTitle = "Новая тренировка",
             onDismiss = { showAddTrainingDialog = false },
-            onConfirm = { date, exerciseInputs ->
+            onConfirm = { date, exerciseInputs, notes ->
                 viewModel.addTrainingSession(
                     date = date,
                     trainingType = TrainingType.STRENGTH,
                     intensity = 8,
                     durationMinutes = 60,
-                    notes = "",
+                    notes = notes,
                     exerciseInputs = exerciseInputs
                 )
                 showAddTrainingDialog = false
@@ -498,7 +501,8 @@ fun TrainingsScreen(
                     runUp = exRes.runUpJson?.let { RunUp.decode(it) },
                     titleLayout = exRes.titleLayout,
                     repsPerSet = SetResults.parseReps(exRes.repsPerSetJson),
-                    isTimed = exRes.isTimed
+                    isTimed = exRes.isTimed,
+                    notes = exRes.notes
                 )
             }
         }
@@ -508,13 +512,15 @@ fun TrainingsScreen(
             initialDate = session.date,
             keepInitialTime = true,
             existingInputs = existingInputs,
+            initialNotes = session.notes.orEmpty(),
             dialogTitle = "Тренировка",
             onDismiss = { editingTrainingItem = null },
-            onConfirm = { date, exerciseInputs ->
+            onConfirm = { date, exerciseInputs, notes ->
                 viewModel.updateTrainingSessionWithExercises(
                     sessionId = session.id,
                     date = date,
-                    exerciseInputs = exerciseInputs
+                    exerciseInputs = exerciseInputs,
+                    notes = notes
                 )
                 editingTrainingItem = null
             },
@@ -1441,6 +1447,10 @@ fun TrainingSessionCard(
                 )
             }
 
+            if (!isSkipped && !session.notes.isNullOrBlank()) {
+                NoteLine(text = session.notes, modifier = Modifier.padding(end = 12.dp, top = 6.dp))
+            }
+
             if (!isSkipped && trainingItem.exerciseResults.isNotEmpty()) {
                 Column(
                     modifier = Modifier.padding(end = 12.dp, top = 4.dp),
@@ -1478,6 +1488,9 @@ fun TrainingSessionCard(
                                         maxLines = if (runUpLines != null) Int.MAX_VALUE else 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
+                                }
+                                if (!exRes.notes.isNullOrBlank()) {
+                                    NoteLine(text = exRes.notes, maxLines = 2)
                                 }
                             }
                             if (best != null) {
@@ -1527,6 +1540,32 @@ fun TrainingSessionCard(
 }
 
 // Dialog: Add/Edit Training with Explicit Separated Exercise Cards & Confirmation Popups
+/** Наибольшая длина заметки: заметка — пара строк, а не дневник целиком. */
+private const val NOTES_MAX = 500
+
+/** Заметка в карточке тренировки: значок и текст курсивом. */
+@Composable
+private fun NoteLine(text: String, modifier: Modifier = Modifier, maxLines: Int = 3) {
+    val cs = MaterialTheme.colorScheme
+    Row(modifier = modifier, verticalAlignment = Alignment.Top) {
+        Icon(
+            Icons.AutoMirrored.Filled.Notes,
+            contentDescription = "Заметка",
+            tint = cs.onSurfaceVariant,
+            modifier = Modifier.size(16.dp).padding(top = 2.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            fontStyle = FontStyle.Italic,
+            color = cs.onSurfaceVariant,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
 @Composable
 fun AddTrainingDialog(
     exercisesList: List<Exercise>,
@@ -1534,11 +1573,14 @@ fun AddTrainingDialog(
     /** true — сохранённая тренировка со своим временем; у новой подставляется текущее время. */
     keepInitialTime: Boolean = false,
     existingInputs: List<ExerciseResultInput> = emptyList(),
+    /** Заметка к тренировке в целом. */
+    initialNotes: String = "",
     dialogTitle: String = "Новая тренировка",
     onDismiss: () -> Unit,
     onConfirm: (
         date: Long,
-        exerciseInputs: List<ExerciseResultInput>
+        exerciseInputs: List<ExerciseResultInput>,
+        notes: String
     ) -> Unit,
     onSaveExercise: (ExerciseConfig) -> Unit,
     onUpdateExercise: (Exercise, ExerciseConfig) -> Unit = { _, _ -> },
@@ -1569,6 +1611,7 @@ fun AddTrainingDialog(
     var editingExercise by remember { mutableStateOf<Exercise?>(null) }
 
     var addedExerciseInputs by remember { mutableStateOf(existingInputs) }
+    var trainingNotes by remember { mutableStateOf(initialNotes) }
 
     // Deletion & Save Confirmation States
     var itemToDeleteIndex by remember { mutableStateOf<Int?>(null) }
@@ -1594,6 +1637,18 @@ fun AddTrainingDialog(
                 if (dateError != null) {
                     Text(text = dateError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
+
+                OutlinedTextField(
+                    value = trainingNotes,
+                    onValueChange = { trainingNotes = it.take(NOTES_MAX) },
+                    label = { Text("Заметка к тренировке") },
+                    placeholder = { Text("Самочувствие, погода, задачи на тренировку") },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.Notes, contentDescription = null) },
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    minLines = 1,
+                    maxLines = 5,
+                    modifier = Modifier.fillMaxWidth().coachTarget("training.notes")
+                )
 
                 FilledTonalButton(
                     onClick = { showExercisePicker = true },
@@ -1645,7 +1700,7 @@ fun AddTrainingDialog(
                         if (addedExerciseInputs.isNotEmpty()) {
                             showSaveConfirmDialog = true
                         } else {
-                            onConfirm(trainingDate, addedExerciseInputs)
+                            onConfirm(trainingDate, addedExerciseInputs, trainingNotes)
                         }
                     }
                 ) {
@@ -1808,7 +1863,7 @@ fun AddTrainingDialog(
                 Button(
                     onClick = {
                         showSaveConfirmDialog = false
-                        onConfirm(trainingDate, addedExerciseInputs)
+                        onConfirm(trainingDate, addedExerciseInputs, trainingNotes)
                     }
                 ) {
                     Text("Да, сохранить")
@@ -2160,6 +2215,36 @@ fun ExerciseResultEditorCard(
                     else "Ввести результаты попыток"
                 )
             }
+            }
+
+            // Заметка к упражнению: поле появляется по нажатию, чтобы не перегружать карточку
+            var notesOpen by remember(input.exerciseName) { mutableStateOf(!input.notes.isNullOrBlank()) }
+            if (notesOpen) {
+                OutlinedTextField(
+                    value = input.notes.orEmpty(),
+                    onValueChange = { onUpdate(input.copy(notes = it.take(NOTES_MAX))) },
+                    label = { Text("Заметка к упражнению") },
+                    placeholder = { Text("Техника, ощущения, что поправить") },
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    maxLines = 4,
+                    trailingIcon = {
+                        IconButton(onClick = {
+                            notesOpen = false
+                            onUpdate(input.copy(notes = null))
+                        }) { Icon(Icons.Default.Close, contentDescription = "Убрать заметку") }
+                    },
+                    modifier = Modifier.fillMaxWidth().coachTarget("card.notes")
+                )
+            } else {
+                TextButton(
+                    onClick = { notesOpen = true },
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    modifier = Modifier.coachTarget("card.notes")
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Notes, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Добавить заметку")
+                }
             }
         }
     }
@@ -2516,9 +2601,21 @@ fun ExercisePickerScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Закрыть") }
-                    Text(text = title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    // заголовок в одну строку: при крупном шрифте телефона он сокращается, а не переносится по буквам
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
                     if (helpTopic != null) HelpIconButton(onClick = rememberHelp(helpTopic), id = "picker.help")
-                    Button(onClick = onDismiss, modifier = Modifier.padding(end = 8.dp).coachTarget("picker.done")) { Text(doneLabel) }
+                    Button(
+                        onClick = onDismiss,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(end = 8.dp).coachTarget("picker.done")
+                    ) { Text(doneLabel, maxLines = 1, softWrap = false) }
                 }
                 Column(
                     modifier = Modifier

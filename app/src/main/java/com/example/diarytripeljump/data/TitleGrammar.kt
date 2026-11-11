@@ -146,29 +146,67 @@ object TitleGrammar {
      */
     fun compose(
         name: String, isSingleLeg: Boolean, legSide: String?, inSpikes: Boolean,
-        inventory: String?, inventoryValue: String, layout: String?
+        inventory: String?, inventoryValue: String, layout: String?,
+        /** Остальные снаряды (название и значение): «с блином 10 кг и через барьер 76 см». */
+        extra: List<Pair<String, String>> = emptyList()
     ): String {
         var base = name.trim()
         if (inSpikes) base = base.replace(NAME_SPIKES_TAIL, "")
         val leg = legPhrase(isSingleLeg, legSide)?.takeUnless { nameHasLeg(base, legSide) }
-        val implement = inventory?.takeIf { it.isNotBlank() }?.let { inventoryPhrase(base, it, inventoryValue) }?.takeIf { it.isNotBlank() }
+        val implement = (listOfNotNull(inventory?.let { it to inventoryValue }) + extra)
+            .filter { it.first.isNotBlank() }
+            .map { (inv, value) -> inventoryPhrase(base, inv, value) }
+            .filter { it.isNotBlank() }
+            .takeIf { it.isNotEmpty() }
+            ?.joinToString(" и ")
         val spikes = if (inSpikes) SPIKES_PHRASE else null
 
         val positions = (layout ?: DEFAULT_LAYOUT).padEnd(3, AUTO)
         val implementAuto = if (inventory != null && isThrow(base) && !nameHasInventory(base, inventory)) MIDDLE else END
         fun position(index: Int, auto: Char) = positions[index].let { if (it == AUTO) auto else it }
+        val words = base.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        // каждое свойство встаёт перед словом с этим номером; words.size — в конце
         val parts = listOf(
             leg to position(0, END),
             implement to position(1, implementAuto),
             spikes to position(2, END)
-        ).filter { it.first != null }
-        fun at(pos: Char) = parts.filter { it.second == pos }.mapNotNull { it.first }
+        ).mapNotNull { (text, pos) -> text?.let { Triple(it, wordIndex(pos, words.size), rank(pos)) } }
 
-        val words = base.split(Regex("\\s+")).filter { it.isNotEmpty() }
         val head = words.firstOrNull().orEmpty()
         val keepsCase = head.length > 1 && head[1].isUpperCase()
-        val first = if (at(START).isNotEmpty() && !keepsCase) head.replaceFirstChar { it.lowercase() } else head
-        val all = at(START) + first + at(MIDDLE) + words.drop(1) + at(END)
+        val startsWithProperty = parts.any { it.second == 0 } && words.isNotEmpty()
+        val all = mutableListOf<String>()
+        for (i in 0..words.size) {
+            parts.filter { it.second == i }.sortedBy { it.third }.forEach { all.add(it.first) }
+            if (i < words.size) {
+                all.add(if (i == 0 && startsWithProperty && !keepsCase) head.replaceFirstChar { it.lowercase() } else words[i])
+            }
+        }
         return all.filter { it.isNotEmpty() }.joinToString(" ").replaceFirstChar { it.uppercase() }
+    }
+
+    /**
+     * Свойства после первых [count] слов названия: так продолжение названия идёт после них
+     * («Прыжки» + в шиповках + «с разбега» = «Прыжки в шиповках с разбега»). Хранится цифрой в позиции.
+     */
+    fun afterWords(count: Int): Char = '0' + count.coerceIn(1, 9)
+
+    /** Сколько слов названия стоит перед свойствами, если оно продолжается после них; null — не продолжается. */
+    fun continuationSplit(layout: String?): Int? =
+        layout?.take(3)?.firstOrNull { it in '1'..'9' }?.digitToInt()
+
+    private fun wordIndex(pos: Char, size: Int): Int = when {
+        pos == START -> 0
+        pos == MIDDLE -> minOf(1, size)
+        pos in '1'..'9' -> minOf(pos.digitToInt(), size)
+        else -> size
+    }
+
+    /** Порядок свойств, попавших в одно место: «в середине» раньше, «в конце» позже. */
+    private fun rank(pos: Char): Int = when {
+        pos == START -> 0
+        pos == MIDDLE -> 1
+        pos in '1'..'9' -> 2
+        else -> 3
     }
 }

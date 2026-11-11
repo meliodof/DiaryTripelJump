@@ -47,6 +47,11 @@ class AppPreferences(context: Context) {
         }.toMap()
         set(value) = prefs.edit().putString(KEY_HIDDEN, value.entries.joinToString("\u001E") { "${it.key}\u001F${it.value}" }).apply()
 
+    /** Скрытые советы на главной (по id, в порядке скрытия). */
+    var dismissedAdvice: Set<String>
+        get() = prefs.getString(KEY_ADVICE, null).orEmpty().split("\u001E").filter { it.isNotEmpty() }.toCollection(LinkedHashSet())
+        set(value) = prefs.edit().putString(KEY_ADVICE, value.joinToString("\u001E")).apply()
+
     /** true — открыт демо-дневник (отдельная база), false — дневник пользователя. */
     var useDemoData: Boolean
         get() = prefs.getBoolean(KEY_DEMO, false)
@@ -64,5 +69,6 @@ class AppPreferences(context: Context) {
         private const val KEY_TUTORIAL_STEP = "tutorial_step"
         private const val KEY_TUTORIAL_RETURN = "tutorial_return"
         private const val KEY_HIDDEN = "hidden_records"
+        private const val KEY_ADVICE = "dismissed_advice"
     }
 }

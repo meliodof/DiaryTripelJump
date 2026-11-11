@@ -15,7 +15,7 @@ import com.example.diarytripeljump.data.RunUp
 /*
  * Упражнение определяется не только названием, но и свойствами: нога, шиповки, снаряд.
  * «Бросок ядра назад 5 кг» и «Бросок ядра назад 7,26 кг» — разные упражнения со своими рекордами,
- * поэтому сравнение идёт по ключу варианта, а на экране свойства выделяются цветом (см. [styledTitle]).
+ * поэтому сравнение идёт по ключу варианта, а на экране показывается полное название (см. [styledTitle]).
  */
 
 private val SpikesText = Regex("в шиповках", RegexOption.IGNORE_CASE)
@@ -48,13 +48,14 @@ fun titleWithColors(full: String, name: String, spikes: Color, inventory: Color,
     }
 }
 
+/**
+ * Название для экрана — обычным текстом, без цветового выделения свойств: цвет отвлекал и
+ * пестрил в списках. [name] оставлен, чтобы выделение при необходимости можно было вернуть ([titleWithColors]).
+ */
+@Suppress("UNUSED_PARAMETER")
 @Composable
-fun styledTitle(full: String, name: String): AnnotatedString {
-    val cs = MaterialTheme.colorScheme
-    return remember(full, name, cs.tertiary, cs.secondary, cs.primary) {
-        titleWithColors(full, name, spikes = cs.tertiary, inventory = cs.secondary, leg = cs.primary)
-    }
-}
+fun styledTitle(full: String, name: String): AnnotatedString =
+    remember(full) { AnnotatedString(full.replace("·", " ").replace(Regex("\\s+"), " ").trim()) }
 
 @Composable
 fun Exercise.styledTitle(): AnnotatedString = styledTitle(title(), name)

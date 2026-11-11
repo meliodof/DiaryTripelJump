@@ -32,7 +32,9 @@ data class ExerciseResultInput(
     /** Повторения по подходам, если их было разное число; null — во всех подходах по [reps]. */
     val repsPerSet: List<Int>? = null,
     /** Подход измеряется в секундах: [reps] и [repsPerSet] — секунды, результат один на подход. */
-    val isTimed: Boolean = false
+    val isTimed: Boolean = false,
+    /** Заметка к упражнению в этой тренировке: самочувствие, техника, условия. */
+    val notes: String? = null
 )
 
 /** Результат старта в тройном прыжке для главного экрана. */
@@ -279,6 +281,40 @@ class DiaryViewModel(
     /** Замеры веса и роста по датам. */
     val bodyMeasurements: StateFlow<List<BodyMeasurement>> = repository.getBodyMeasurements()
         .stateIn(viewModelScope, AppSharing, emptyList())
+
+    // --- Советы по данным дневника (см. [AdviceEngine]) ---
+    private val _dismissedAdvice = MutableStateFlow(preferences.dismissedAdvice)
+
+    /** Скрытые с главной советы: в аналитике они остаются и их можно вернуть. */
+    val dismissedAdvice: StateFlow<Set<String>> = _dismissedAdvice
+
+    /** Все советы по данным дневника, важные первыми — для раздела аналитики. */
+    val allAdvice: StateFlow<List<Advice>> =
+        combine(allTrainingsWithExercises, allCompetitions, records, goals, bodyMeasurements) { t, c, r, g, b ->
+            AdviceEngine.build(AdviceInput(t, c, r, g, b))
+        }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, AppSharing, emptyList())
+
+    /** Советы для главного экрана: без скрытых пользователем. */
+    val advice: StateFlow<List<Advice>> = combine(allAdvice, _dismissedAdvice) { list, dismissed ->
+        list.filter { it.id !in dismissed }
+    }.stateIn(viewModelScope, AppSharing, emptyList())
+
+    /** «Понятно»: совет скрывается с главной, пока ситуация не изменится (у новой ситуации другой id). */
+    fun dismissAdvice(advice: Advice) {
+        // хранятся только недавние: старые id уже не встретятся
+        val changed = (_dismissedAdvice.value + advice.id).toList().takeLast(200).toSet()
+        preferences.dismissedAdvice = changed
+        _dismissedAdvice.value = changed
+    }
+
+    /** Вернуть скрытый совет на главную. */
+    fun restoreAdvice(advice: Advice) {
+        val changed = _dismissedAdvice.value - advice.id
+        preferences.dismissedAdvice = changed
+        _dismissedAdvice.value = changed
+    }
 
     /** Все показатели, которые можно вывести на график в аналитике. */
     val analyticsSeries: StateFlow<List<AnalyticsSeries>> =
@@ -639,18 +675,15 @@ class DiaryViewModel(
         viewModelScope.launch {
             repository.inTransaction {
                 repository.updateInventory(item.copy(name = clean, unit = unit))
-                repository.getAllExercises().first()
-                    .filter { it.inventoryName.equals(item.name, ignoreCase = true) && it.inventoryUnit == item.unit }
-                    .forEach { ex ->
-                        repository.updateExercise(
-                            ex.copy(
-                                inventoryName = clean,
-                                inventoryUnit = unit,
-                                // 91 см не становятся 91 кг: значение в другой единице вводится заново
-                                inventoryValue = if (unit == item.unit) ex.inventoryValue else null
-                            )
-                        )
+                // в упражнении может быть несколько снарядов: меняется только этот
+                // (91 см не становятся 91 кг: значение в другой единице вводится заново)
+                repository.getAllExercises().first().forEach { ex ->
+                    InventorySet.rename(
+                        InventoryFields(ex.inventoryName, ex.inventoryUnit, ex.inventoryValue), item.name, item.unit, clean, unit
+                    )?.let { f ->
+                        repository.updateExercise(ex.copy(inventoryName = f.name, inventoryUnit = f.unit, inventoryValue = f.value))
                     }
+                }
             }
         }
     }
@@ -775,7 +808,7 @@ class DiaryViewModel(
                         trainingType = trainingType,
                         intensity = intensity,
                         durationMinutes = durationMinutes,
-                        notes = notes,
+                        notes = notes.trim(),
                         isSkipped = false
                     )
                 )
@@ -807,13 +840,16 @@ class DiaryViewModel(
     fun updateTrainingSessionWithExercises(
         sessionId: Long,
         date: Long,
-        exerciseInputs: List<ExerciseResultInput>
+        exerciseInputs: List<ExerciseResultInput>,
+        /** Заметка к тренировке; null — не менять. */
+        notes: String? = null
     ) {
         viewModelScope.launch {
             repository.inTransaction {
                 // [date] — дата и время из окна тренировки
                 repository.getAllTrainingsWithExercises().first().find { it.training.id == sessionId }?.training?.let { s ->
-                    if (date != s.date) repository.updateTrainingSession(s.copy(date = date))
+                    val newNotes = notes?.trim() ?: s.notes
+                    if (date != s.date || newNotes != s.notes) repository.updateTrainingSession(s.copy(date = date, notes = newNotes))
                 }
                 val oldResults = repository.getResultsForTraining(sessionId).first()
                 oldResults.forEach { repository.deleteExerciseResult(it) }
@@ -892,7 +928,8 @@ class DiaryViewModel(
                     runUpJson = input.runUp?.let { RunUp.encode(it) },
                     titleLayout = input.titleLayout,
                     repsPerSetJson = input.repsPerSet?.joinToString(","),
-                    isTimed = input.isTimed
+                    isTimed = input.isTimed,
+                    notes = input.notes?.trim()?.takeIf { it.isNotEmpty() }
                 )
             )
         }

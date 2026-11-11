@@ -122,6 +122,7 @@ fun DiaryScreen(
     val allExercises by viewModel.allExercises.collectAsState()
     val records by viewModel.records.collectAsState()
     val goals by viewModel.goals.collectAsState()
+    val advice by viewModel.advice.collectAsState()
     var showFavoritesPicker by remember { mutableStateOf(false) }
     var detailKey by remember { mutableStateOf<String?>(null) }
     // тройной отдельно на соревнованиях (рекорды стартов и попытки) и на тренировках
@@ -210,6 +211,21 @@ fun DiaryScreen(
                         onCompetition = { jumpSplit.first?.let { detailKey = it.key } ?: onNavigate(Routes.COMPETITIONS) },
                         onTraining = { jumpSplit.second?.let { detailKey = it.key } },
                         modifier = Modifier.coachTarget("home.jump")
+                    )
+                }
+            }
+
+            if (advice.isNotEmpty()) {
+                item {
+                    AdviceSection(
+                        advice = advice,
+                        onOpen = { a ->
+                            val key = a.recordKey
+                            if (key != null && records.any { it.key == key }) detailKey = key
+                            else a.route?.let(onNavigate)
+                        },
+                        onDismiss = { viewModel.dismissAdvice(it) },
+                        modifier = Modifier.coachTarget("home.advice")
                     )
                 }
             }

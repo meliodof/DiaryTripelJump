@@ -131,26 +131,39 @@ object RecordsEngine {
     fun isLoadedImplement(invUnit: ResultUnit?, resultUnit: ResultUnit): Boolean =
         invUnit == ResultUnit.KG && resultUnit == ResultUnit.KG
 
-    /** Снаряд, который отличает упражнение: для нагружаемого — только название, иначе название и вес/высота. */
-    fun variantInventory(invName: String?, invUnit: ResultUnit?, invValue: Double?, resultUnit: ResultUnit): String? {
-        if (invName.isNullOrBlank()) return null
-        return if (isLoadedImplement(invUnit, resultUnit)) invName.trim() else inventoryLabel(invName.trim(), invUnit, invValue)
-    }
+    /** Подпись одного снаряда: для нагружаемого — только название, иначе название и вес/высота. */
+    private fun itemLabel(item: InventoryUse, resultUnit: ResultUnit): String =
+        if (isLoadedImplement(item.unit, resultUnit)) item.name else singleInventoryLabel(item.name, item.unit, item.value)
 
-    /** Снаряд, который делает рекорд отдельным (ядро 7,26 кг); нагружаемая штанга рекорд не делит. */
+    /** Снаряды, которые отличают упражнение: «блин 10 кг + барьер 76 см» (см. [InventorySet]). */
+    fun variantInventory(invName: String?, invUnit: ResultUnit?, invValue: Double?, resultUnit: ResultUnit): String? =
+        InventorySet.decode(invName, invUnit, invValue)
+            .map { itemLabel(it, resultUnit) }
+            .takeIf { it.isNotEmpty() }
+            ?.joinToString(" + ")
+
+    /** Снаряды, которые делают рекорд отдельным (ядро 7,26 кг); нагружаемая штанга рекорд не делит. */
     fun recordInventory(invName: String?, invUnit: ResultUnit?, invValue: Double?, resultUnit: ResultUnit): String? =
-        if (isLoadedImplement(invUnit, resultUnit)) null else variantInventory(invName, invUnit, invValue, resultUnit)
+        InventorySet.decode(invName, invUnit, invValue)
+            .filterNot { isLoadedImplement(it.unit, resultUnit) }
+            .map { itemLabel(it, resultUnit) }
+            .takeIf { it.isNotEmpty() }
+            ?.joinToString(" + ")
 
     /** Полное название со всеми свойствами по правилам языка: «Метание ядра 5 кг в шиповках» (см. [TitleGrammar]). */
     fun exerciseTitle(
         name: String, isSingleLeg: Boolean, legSide: String?, inSpikes: Boolean,
         invName: String?, invUnit: ResultUnit?, invValue: Double?, resultUnit: ResultUnit,
         layout: String? = null
-    ): String = TitleGrammar.compose(
-        name, isSingleLeg, legSide, inSpikes, invName,
-        if (isLoadedImplement(invUnit, resultUnit)) "" else inventoryValueLabel(invUnit, invValue),
-        layout
-    )
+    ): String {
+        val items = InventorySet.decode(invName, invUnit, invValue).map {
+            it.name to if (isLoadedImplement(it.unit, resultUnit)) "" else inventoryValueLabel(it.unit, it.value)
+        }
+        val first = items.firstOrNull()
+        return TitleGrammar.compose(
+            name, isSingleLeg, legSide, inSpikes, first?.first, first?.second.orEmpty(), layout, extra = items.drop(1)
+        )
+    }
 
     private fun inventoryValueLabel(unit: ResultUnit?, value: Double?): String {
         if (value == null || value <= 0) return ""
@@ -183,8 +196,14 @@ object RecordsEngine {
     fun legSuffix(isSingleLeg: Boolean, legSide: String?): String =
         TitleGrammar.legPhrase(isSingleLeg, legSide)?.let { " $it" } ?: ""
 
-    fun inventoryLabel(name: String?, unit: ResultUnit?, value: Double?): String? {
-        if (name.isNullOrBlank()) return null
+    /** Подпись снарядов со значениями: «блин 10 кг + барьер 76 см». */
+    fun inventoryLabel(name: String?, unit: ResultUnit?, value: Double?): String? =
+        InventorySet.decode(name, unit, value)
+            .map { singleInventoryLabel(it.name, it.unit, it.value) }
+            .takeIf { it.isNotEmpty() }
+            ?.joinToString(" + ")
+
+    private fun singleInventoryLabel(name: String, unit: ResultUnit?, value: Double?): String {
         val unitText = when (unit) {
             ResultUnit.CM -> "см"
             ResultUnit.KG -> "кг"
