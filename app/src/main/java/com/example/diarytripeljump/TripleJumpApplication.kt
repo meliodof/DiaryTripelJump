@@ -2,6 +2,7 @@ package com.example.diarytripeljump
 
 import android.app.Application
 import com.example.diarytripeljump.data.AppPreferences
+import com.example.diarytripeljump.data.DEMO_SEED_VERSION
 import com.example.diarytripeljump.data.DiaryBackup
 import com.example.diarytripeljump.data.SeedDatabase
 import com.example.diarytripeljump.data.TripleJumpDatabase
@@ -71,7 +72,29 @@ class TripleJumpApplication : Application() {
         )
         if (demo) {
             val seed = SeedDatabase(repository)
-            applicationScope.launch { seed.seedIfEmpty() }
+            val db = database
+            applicationScope.launch {
+                // демо-база прежней версии набора (например, за 3 месяца) создаётся заново
+                if (preferences.demoSeedVersion < DEMO_SEED_VERSION) {
+                    db.clearAllTables()
+                    seed.seedDemoData()
+                    preferences.demoSeedVersion = DEMO_SEED_VERSION
+                } else {
+                    seed.seedIfEmpty()
+                }
+            }
+        }
+    }
+
+    /** Возвращает демо-дневник к исходному виду: все записи удаляются и набор создаётся заново. */
+    fun resetDemo() {
+        if (!isDemo) return
+        val db = database
+        val seed = SeedDatabase(repository)
+        applicationScope.launch {
+            db.clearAllTables()
+            seed.seedDemoData()
+            preferences.demoSeedVersion = DEMO_SEED_VERSION
         }
     }
 }

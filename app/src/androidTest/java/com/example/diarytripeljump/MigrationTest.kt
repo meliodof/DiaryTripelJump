@@ -66,6 +66,24 @@ class MigrationTest {
     }
 
     @Test
+    fun migrate24To25_clearsPlaceholderDuration() {
+        helper.createDatabase(dbName, 24).apply {
+            // заглушка 60 минут из старых версий и настоящая длительность из демо-данных
+            execSQL("INSERT INTO training_sessions (id, date, trainingType, durationMinutes, isSkipped) VALUES (1, 1000, 'STRENGTH', 60, 0)")
+            execSQL("INSERT INTO training_sessions (id, date, trainingType, durationMinutes, isSkipped) VALUES (2, 2000, 'STRENGTH', 90, 0)")
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 25, true, *TripleJumpDatabase.ALL_MIGRATIONS)
+        db.query("SELECT durationMinutes FROM training_sessions ORDER BY id").use { c ->
+            c.moveToFirst()
+            assertTrue(c.isNull(0))
+            c.moveToNext()
+            assertEquals(90, c.getInt(0))
+        }
+    }
+
+    @Test
     fun migrate23To24_profileBecomesFirstMeasurement() {
         helper.createDatabase(dbName, 23).apply {
             execSQL("INSERT INTO athlete_profile (id, firstName, lastName, height, weight) VALUES (1, 'Антон', 'Ларин', 187.0, 77.0)")

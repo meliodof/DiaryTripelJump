@@ -119,7 +119,10 @@ object AdviceEngine {
             plateau(input),
             trainingBreak(input),
             weight(input),
-            freshRecord(input)
+            freshRecord(input),
+            // модели: резкий спад относительно своей нормы и нагрузка по времени тренировок
+            *Insights.anomalies(input.records, input.now).toTypedArray(),
+            Insights.timeLoad(input.trainings, input.now)
         ).sortedBy { it.kind.ordinal }
 
     // --- Разбег ---

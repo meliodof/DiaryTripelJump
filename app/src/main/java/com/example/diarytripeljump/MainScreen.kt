@@ -336,7 +336,8 @@ fun MainScreen(
                             onBack = { navController.popBackStack() },
                             onStartTutorial = startTour,
                             onOpenTopic = { topic -> coach.show(topic.tourSteps, navigates = true) },
-                            onLeaveDemo = { onSwitchDiary(false) }
+                            onLeaveDemo = { onSwitchDiary(false) },
+                            onOpenDemo = { onSwitchDiary(true) }
                         )
                     }
                 }

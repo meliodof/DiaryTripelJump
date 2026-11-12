@@ -618,11 +618,11 @@ fun AppTimePickerDialog(
     )
 }
 
-/** Поле-кнопка выбора времени с подписью. */
+/** Поле-кнопка выбора времени с подписью; [millis] = null — время не указано, показывается «—». */
 @Composable
 fun TimeField(
     label: String,
-    millis: Long,
+    millis: Long?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -636,7 +636,7 @@ fun TimeField(
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
-                text = SimpleDateFormat("HH:mm", Locale("ru")).format(Date(millis)),
+                text = millis?.let { SimpleDateFormat("HH:mm", Locale("ru")).format(Date(it)) } ?: "—",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )

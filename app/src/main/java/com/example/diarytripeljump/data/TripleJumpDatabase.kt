@@ -263,15 +263,27 @@ abstract class TripleJumpDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 24 → 25: у тренировки теперь есть время окончания (через длительность). До этого длительность всегда
+         * сохранялась заглушкой 60 минут — она не вводилась пользователем, поэтому стирается, чтобы старые тренировки
+         * не показывали выдуманное время окончания. Схема не меняется.
+         */
+        internal val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("UPDATE training_sessions SET durationMinutes = NULL WHERE durationMinutes = 60 AND isSkipped = 0")
+            }
+        }
+
         internal val ALL_MIGRATIONS = arrayOf(
             MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17,
-            MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24
+            MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24,
+            MIGRATION_24_25
         )
 
         const val DATABASE_NAME = "triple_jump_database"
 
         // Уже выпущенную версию не меняем: любое изменение схемы — новая версия и новая миграция
-        const val CURRENT_VERSION = 24
+        const val CURRENT_VERSION = 25
 
         /** Самая старая версия, которую можно перенести без потери данных. */
         const val MIN_MIGRATABLE_VERSION = 11

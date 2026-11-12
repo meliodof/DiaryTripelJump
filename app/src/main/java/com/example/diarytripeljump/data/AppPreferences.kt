@@ -52,6 +52,19 @@ class AppPreferences(context: Context) {
         get() = prefs.getString(KEY_ADVICE, null).orEmpty().split("\u001E").filter { it.isNotEmpty() }.toCollection(LinkedHashSet())
         set(value) = prefs.edit().putString(KEY_ADVICE, value.joinToString("\u001E")).apply()
 
+    /** Показатели, по которым пользователь выбрал прогноз: id и через сколько недель (0 — к ближайшему старту). */
+    var pinnedForecasts: List<Pair<String, Int>>
+        get() = prefs.getString(KEY_FORECASTS, null).orEmpty().split("\u001E").mapNotNull { part ->
+            val (id, weeks) = part.split("\u001F").takeIf { it.size == 2 } ?: return@mapNotNull null
+            weeks.toIntOrNull()?.let { id to it }
+        }
+        set(value) = prefs.edit().putString(KEY_FORECASTS, value.joinToString("\u001E") { "${it.first}\u001F${it.second}" }).apply()
+
+    /** Версия набора демо-данных, которым заполнена демо-база; при новой версии база создаётся заново. */
+    var demoSeedVersion: Int
+        get() = prefs.getInt(KEY_DEMO_SEED, 0)
+        set(value) = prefs.edit().putInt(KEY_DEMO_SEED, value).apply()
+
     /** true — открыт демо-дневник (отдельная база), false — дневник пользователя. */
     var useDemoData: Boolean
         get() = prefs.getBoolean(KEY_DEMO, false)
@@ -70,5 +83,7 @@ class AppPreferences(context: Context) {
         private const val KEY_TUTORIAL_RETURN = "tutorial_return"
         private const val KEY_HIDDEN = "hidden_records"
         private const val KEY_ADVICE = "dismissed_advice"
+        private const val KEY_DEMO_SEED = "demo_seed_version"
+        private const val KEY_FORECASTS = "pinned_forecasts"
     }
 }

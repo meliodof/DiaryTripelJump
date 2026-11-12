@@ -61,7 +61,9 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onStartTutorial: () -> Unit,
     onOpenTopic: (HelpTopic) -> Unit,
-    onLeaveDemo: () -> Unit
+    onLeaveDemo: () -> Unit,
+    /** Открыть демо-дневник: отдельная база с примером за год. */
+    onOpenDemo: () -> Unit = {}
 ) {
     val confirm = LocalConfirm.current
     val cs = MaterialTheme.colorScheme
@@ -119,12 +121,39 @@ fun SettingsScreen(
                 .padding(start = 16.dp, end = 16.dp, top = inner.calculateTopPadding() + 4.dp, bottom = inner.calculateBottomPadding() + 24.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            if (isDemo) {
-                Surface(shape = MaterialTheme.shapes.large, color = cs.tertiaryContainer) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Открыт демо-дневник", style = MaterialTheme.typography.titleSmall, color = cs.onTertiaryContainer)
-                        Text("Это пример для обучения. Ваши данные хранятся отдельно.", style = MaterialTheme.typography.bodySmall, color = cs.onTertiaryContainer)
-                        Button(onClick = onLeaveDemo) { Text("Вернуться к своему дневнику") }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SectionHeader(
+                    title = "Демо-дневник",
+                    subtitle = "Пример за год: прогноз, связи упражнений с прыжком и советы. Ваши данные хранятся отдельно"
+                )
+                if (isDemo) {
+                    Surface(shape = MaterialTheme.shapes.large, color = cs.tertiaryContainer) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Открыт демо-дневник", style = MaterialTheme.typography.titleSmall, color = cs.onTertiaryContainer)
+                            Text(
+                                "Изменения здесь не затрагивают ваш дневник. Демо можно вернуть к исходному виду.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = cs.onTertiaryContainer
+                            )
+                            Button(onClick = onLeaveDemo) { Text("Вернуться к своему дневнику") }
+                            TextButton(onClick = {
+                                confirm.ask(
+                                    title = "Вернуть демо к исходному виду?",
+                                    text = "Все изменения в демо-дневнике будут удалены и данные создадутся заново. Ваш дневник не изменится.",
+                                    confirmLabel = "Вернуть",
+                                    destructive = true
+                                ) { (context.applicationContext as TripleJumpApplication).resetDemo() }
+                            }) { Text("Вернуть демо к исходному виду") }
+                        }
+                    }
+                } else {
+                    AppCard {
+                        ProfileOptionRow(
+                            icon = Icons.Default.Science,
+                            title = "Открыть демо-дневник",
+                            subtitle = "Посмотреть все функции на готовых данных; вернуться можно в любой момент",
+                            onClick = onOpenDemo
+                        )
                     }
                 }
             }

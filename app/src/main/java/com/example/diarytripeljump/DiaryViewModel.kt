@@ -328,6 +328,48 @@ class DiaryViewModel(
             ChartData.buildSeries(exercises, manual, starts, body, runUp)
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, emptyList())
 
+    // --- Прогноз (см. [Insights]) ---
+    private val _pinnedForecasts = MutableStateFlow(preferences.pinnedForecasts)
+
+    /** Показатели, по которым пользователь сам попросил прогноз: id показателя и через сколько недель (0 — к старту). */
+    val pinnedForecasts: StateFlow<List<Pair<String, Int>>> = _pinnedForecasts
+
+    fun addForecast(seriesId: String, weeks: Int) {
+        val changed = (_pinnedForecasts.value.filterNot { it.first == seriesId } + (seriesId to weeks)).takeLast(10)
+        preferences.pinnedForecasts = changed
+        _pinnedForecasts.value = changed
+    }
+
+    fun removeForecast(seriesId: String) {
+        val changed = _pinnedForecasts.value.filterNot { it.first == seriesId }
+        preferences.pinnedForecasts = changed
+        _pinnedForecasts.value = changed
+    }
+
+    /** Прогнозы к старту, срокам целей и по выбранным показателям, связи упражнений с тройным. */
+    val insights: StateFlow<InsightsResult> =
+        combine(
+            combine(records, tripleJumpStartResults, allCompetitions, goals) { r, s, c, g -> listOf(r, s, c, g) },
+            athleteProfile, analyticsSeries, _pinnedForecasts
+        ) { base, profile, series, pinned ->
+            @Suppress("UNCHECKED_CAST")
+            val r = base[0] as List<RecordSummary>
+            @Suppress("UNCHECKED_CAST")
+            val starts = base[1] as List<StartResultUi>
+            @Suppress("UNCHECKED_CAST")
+            val comps = base[2] as List<Competition>
+            @Suppress("UNCHECKED_CAST")
+            val g = base[3] as List<ExerciseGoal>
+            val byId = series.associateBy { it.id }
+            Insights.build(
+                r, starts.map { RecordPoint(it.competition.date, it.best, true) }, comps, g,
+                birthDate = profile?.birthDate, profilePb = profile?.customPbMeters,
+                custom = pinned.mapNotNull { (id, weeks) -> byId[id]?.let { it to weeks } }
+            )
+        }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, AppSharing, InsightsResult(emptyList(), emptyList()))
+
     private val _visualization = MutableStateFlow(preferences.visualization)
     val visualization: StateFlow<VisualizationConfig> = _visualization.asStateFlow()
 
@@ -791,7 +833,8 @@ class DiaryViewModel(
         date: Long,
         trainingType: TrainingType,
         intensity: Int,
-        durationMinutes: Int,
+        /** Длительность от начала до окончания; null — время окончания не указано. */
+        durationMinutes: Int?,
         notes: String,
         exerciseInputs: List<ExerciseResultInput>,
         hopPhase: Double? = null,
@@ -842,14 +885,18 @@ class DiaryViewModel(
         date: Long,
         exerciseInputs: List<ExerciseResultInput>,
         /** Заметка к тренировке; null — не менять. */
-        notes: String? = null
+        notes: String? = null,
+        /** Длительность от начала до окончания; null — время окончания не указано. */
+        durationMinutes: Int? = null
     ) {
         viewModelScope.launch {
             repository.inTransaction {
-                // [date] — дата и время из окна тренировки
+                // [date] — дата и время начала из окна тренировки
                 repository.getAllTrainingsWithExercises().first().find { it.training.id == sessionId }?.training?.let { s ->
                     val newNotes = notes?.trim() ?: s.notes
-                    if (date != s.date || newNotes != s.notes) repository.updateTrainingSession(s.copy(date = date, notes = newNotes))
+                    if (date != s.date || newNotes != s.notes || durationMinutes != s.durationMinutes) {
+                        repository.updateTrainingSession(s.copy(date = date, notes = newNotes, durationMinutes = durationMinutes))
+                    }
                 }
                 val oldResults = repository.getResultsForTraining(sessionId).first()
                 oldResults.forEach { repository.deleteExerciseResult(it) }

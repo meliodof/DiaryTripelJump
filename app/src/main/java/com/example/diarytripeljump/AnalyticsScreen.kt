@@ -148,6 +148,7 @@ fun AnalyticsScreen(
     val cs = MaterialTheme.colorScheme
     val athleteProfile by viewModel.athleteProfile.collectAsState()
     val advice by viewModel.allAdvice.collectAsState()
+    val insights by viewModel.insights.collectAsState()
     AppScreenScaffold(
         title = "Аналитика",
         avatarUri = athleteProfile?.avatarUriString,
@@ -188,10 +189,18 @@ fun AnalyticsScreen(
                     ) {
                         IconBadge(icon = Icons.Default.Lightbulb, tint = cs.tertiary, size = 48.dp, iconSize = 26.dp)
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Советы", style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
+                            Text("Советы и прогноз", style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
+                            // прогноз тройного — главное, что спортсмен хочет увидеть сразу
+                            insights.forecasts.firstOrNull { it.key == "main-jump" }?.let { f ->
+                                Text(
+                                    "Тройной ${f.targetLabel.substringBefore(',')}: ≈ ${com.example.diarytripeljump.data.formatRecordValue(f.value, f.unit)}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = cs.primary
+                                )
+                            }
                             Text(
                                 when {
-                                    advice.isEmpty() -> "Разбег, цели, нагрузка и подводка к старту — советы по данным дневника"
+                                    advice.isEmpty() -> "Прогноз результата, что влияет на прыжок, советы по разбегу, целям и нагрузке"
                                     risks > 0 -> "${advice.size} ${pluralRu(advice.size, "совет", "совета", "советов")}, важных: $risks"
                                     else -> "${advice.size} ${pluralRu(advice.size, "совет", "совета", "советов")} по данным дневника"
                                 },

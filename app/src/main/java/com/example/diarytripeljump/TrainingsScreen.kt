@@ -55,6 +55,8 @@ import com.example.diarytripeljump.data.PeriodRules
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.Stroke
 import com.example.diarytripeljump.data.startOfDay
+import com.example.diarytripeljump.data.formatTrainingDuration
+import com.example.diarytripeljump.data.trainingTimeRange
 import com.example.diarytripeljump.data.RecordsEngine
 import com.example.diarytripeljump.data.RunUp
 import com.example.diarytripeljump.data.RunUpAttempt
@@ -445,12 +447,12 @@ fun TrainingsScreen(
             existingInputs = emptyList(),
             dialogTitle = "Новая тренировка",
             onDismiss = { showAddTrainingDialog = false },
-            onConfirm = { date, exerciseInputs, notes ->
+            onConfirm = { date, exerciseInputs, notes, durationMinutes ->
                 viewModel.addTrainingSession(
                     date = date,
                     trainingType = TrainingType.STRENGTH,
                     intensity = 8,
-                    durationMinutes = 60,
+                    durationMinutes = durationMinutes,
                     notes = notes,
                     exerciseInputs = exerciseInputs
                 )
@@ -513,14 +515,16 @@ fun TrainingsScreen(
             keepInitialTime = true,
             existingInputs = existingInputs,
             initialNotes = session.notes.orEmpty(),
+            initialDurationMinutes = session.durationMinutes?.takeIf { it > 0 },
             dialogTitle = "Тренировка",
             onDismiss = { editingTrainingItem = null },
-            onConfirm = { date, exerciseInputs, notes ->
+            onConfirm = { date, exerciseInputs, notes, durationMinutes ->
                 viewModel.updateTrainingSessionWithExercises(
                     sessionId = session.id,
                     date = date,
                     exerciseInputs = exerciseInputs,
-                    notes = notes
+                    notes = notes,
+                    durationMinutes = durationMinutes
                 )
                 editingTrainingItem = null
             },
@@ -1395,7 +1399,8 @@ fun TrainingSessionCard(
         trainingItem.exerciseResults.map { exerciseRowUi(it, exercisesList) }
     }
     val exercisesToRender = if (isExpanded) rowsUi else rowsUi.take(1)
-    val timeText = remember(session.date) { SimpleDateFormat("HH:mm", Locale("ru")).format(Date(session.date)) }
+    // «10:00–11:30 (1 ч 30 мин)» или только начало, если окончание не указано
+    val timeText = remember(session.date, session.durationMinutes) { trainingTimeRange(session.date, session.durationMinutes) }
 
     AppCard(
         containerColor = if (isSkipped) cs.errorContainer.copy(alpha = 0.25f) else cs.surface
@@ -1543,6 +1548,9 @@ fun TrainingSessionCard(
 /** Наибольшая длина заметки: заметка — пара строк, а не дневник целиком. */
 private const val NOTES_MAX = 500
 
+/** Тренировка дольше 8 часов — скорее ошибка ввода. */
+private const val MAX_TRAINING_MINUTES = 8 * 60
+
 /** Заметка в карточке тренировки: значок и текст курсивом. */
 @Composable
 private fun NoteLine(text: String, modifier: Modifier = Modifier, maxLines: Int = 3) {
@@ -1575,12 +1583,15 @@ fun AddTrainingDialog(
     existingInputs: List<ExerciseResultInput> = emptyList(),
     /** Заметка к тренировке в целом. */
     initialNotes: String = "",
+    /** Длительность сохранённой тренировки; null — окончание не указано. */
+    initialDurationMinutes: Int? = null,
     dialogTitle: String = "Новая тренировка",
     onDismiss: () -> Unit,
     onConfirm: (
         date: Long,
         exerciseInputs: List<ExerciseResultInput>,
-        notes: String
+        notes: String,
+        durationMinutes: Int?
     ) -> Unit,
     onSaveExercise: (ExerciseConfig) -> Unit,
     onUpdateExercise: (Exercise, ExerciseConfig) -> Unit = { _, _ -> },
@@ -1600,6 +1611,10 @@ fun AddTrainingDialog(
     }
     var pickingDate by remember { mutableStateOf(false) }
     var pickingTime by remember { mutableStateOf(false) }
+    // окончание хранится длительностью: при переносе начала тренировка сдвигается целиком
+    var durationMinutes by remember { mutableStateOf(initialDurationMinutes) }
+    var pickingEnd by remember { mutableStateOf(false) }
+    var endError by remember { mutableStateOf<String?>(null) }
     var editingComplex by remember { mutableStateOf<ComplexUi?>(null) }
     // правка упражнения прямо в тренировке: индекс выполнения и параметры, ожидающие выбора «заменить / создать»
     var variantEditIndex by remember { mutableStateOf<Int?>(null) }
@@ -1630,12 +1645,35 @@ fun AddTrainingDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Row(modifier = Modifier.coachTarget("training.date"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DateField(label = "Дата тренировки", millis = trainingDate, onClick = { pickingDate = true }, modifier = Modifier.weight(1f))
-                    TimeField(label = "Время", millis = trainingDate, onClick = { pickingTime = true })
+                Column(modifier = Modifier.coachTarget("training.date"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DateField(label = "Дата тренировки", millis = trainingDate, onClick = { pickingDate = true }, modifier = Modifier.fillMaxWidth())
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TimeField(label = "Начало", millis = trainingDate, onClick = { pickingTime = true }, modifier = Modifier.weight(1f))
+                        TimeField(
+                            label = "Окончание",
+                            millis = durationMinutes?.let { trainingDate + it * 60_000L },
+                            onClick = { pickingEnd = true },
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (durationMinutes != null) {
+                            IconButton(onClick = { durationMinutes = null; endError = null }) {
+                                Icon(Icons.Default.Close, contentDescription = "Не указывать окончание")
+                            }
+                        }
+                    }
+                    durationMinutes?.let {
+                        Text(
+                            text = "Длительность: ${formatTrainingDuration(it)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 if (dateError != null) {
                     Text(text = dateError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                endError?.let {
+                    Text(text = it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
 
                 OutlinedTextField(
@@ -1700,7 +1738,7 @@ fun AddTrainingDialog(
                         if (addedExerciseInputs.isNotEmpty()) {
                             showSaveConfirmDialog = true
                         } else {
-                            onConfirm(trainingDate, addedExerciseInputs, trainingNotes)
+                            onConfirm(trainingDate, addedExerciseInputs, trainingNotes, durationMinutes)
                         }
                     }
                 ) {
@@ -1863,7 +1901,7 @@ fun AddTrainingDialog(
                 Button(
                     onClick = {
                         showSaveConfirmDialog = false
-                        onConfirm(trainingDate, addedExerciseInputs, trainingNotes)
+                        onConfirm(trainingDate, addedExerciseInputs, trainingNotes, durationMinutes)
                     }
                 ) {
                     Text("Да, сохранить")
@@ -1911,6 +1949,24 @@ fun AddTrainingDialog(
             onConfirm = { hour, minute ->
                 trainingDate = startOfDay(trainingDate) + (hour * 60L + minute) * 60_000L
                 pickingTime = false
+            }
+        )
+    }
+
+    if (pickingEnd) {
+        AppTimePickerDialog(
+            // по умолчанию предлагается полтора часа после начала
+            initialMillis = trainingDate + (durationMinutes ?: 90) * 60_000L,
+            onDismiss = { pickingEnd = false },
+            onConfirm = { hour, minute ->
+                val startMinutes = ((trainingDate - startOfDay(trainingDate)) / 60_000L).toInt()
+                val minutes = hour * 60 + minute - startMinutes
+                when {
+                    minutes <= 0 -> endError = "Окончание должно быть позже начала"
+                    minutes > MAX_TRAINING_MINUTES -> endError = "Тренировка не может длиться больше 8 часов"
+                    else -> { durationMinutes = minutes; endError = null }
+                }
+                pickingEnd = false
             }
         )
     }

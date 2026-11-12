@@ -4,6 +4,12 @@ import kotlinx.coroutines.flow.first
 import java.util.Calendar
 import java.util.Random
 
+/**
+ * Версия набора демо-данных. Если демо-база заполнена прежней версией, она создаётся заново.
+ * 2 — год данных под проверку прогноза, связей и советов (см. [DemoSignals]).
+ */
+const val DEMO_SEED_VERSION = 2
+
 /** Что из демо-набора найдено в дневнике пользователя (остатки старой автозагрузки). */
 data class DemoLeftovers(
     val trainings: Int,
@@ -29,7 +35,7 @@ data class DemoLeftovers(
 
 /**
  * Демо-данные: профиль спортсмена, справочник упражнений, комплексы, тренировки,
- * старты, рекорды и подготовительные периоды за последние три месяца (считая от сегодняшнего дня).
+ * старты, рекорды, цели, замеры веса и подготовительные периоды за последний год (считая от сегодняшнего дня).
  *
  * Заполняют только отдельную демо-базу ([TripleJumpDatabase.DEMO_DATABASE_NAME]). Старые версии приложения
  * заливали этот набор прямо в дневник пользователя — [scanLeftovers] и [removeLeftovers] находят и убирают его.
@@ -83,6 +89,7 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
         val exercises = repository.getAllExercises().first().filter { it.name in seedExercises && it.name !in stillUsed }
         val removedNames = exercises.map { it.name }.toSet()
         val goals = repository.getAllGoals().first().filter { g -> GOALS.any { it.first == g.name } && g.name in removedNames }
+
         val profile = repository.getProfile().first()?.let { isOldDemoProfile(it) } == true
 
         return Triple(
@@ -159,9 +166,13 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
 
         val FAVORITES = setOf("Приседания со штангой", "Бег 30 м", "Прыжки через барьеры")
 
+        /**
+         * Цели со сроком (упражнение, значение, дней до срока): тяга по тренду успевает к сроку, хотя ещё не достигнута,
+         * бег 30 м — не успевает. Прогноз покажет оба исхода.
+         */
         val GOALS = listOf(
-            "Приседания со штангой" to 160.0,
-            "Бег 30 м" to 3.75
+            Triple("Тяга становая", 182.0, 120),
+            Triple("Бег 30 м", 3.78, 30)
         )
 
         val COMPLEXES = listOf(
@@ -180,9 +191,23 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
         )
 
         /** Номера тренировочных дней, которые «пропущены», и причины. */
-        val SKIPS = mapOf(3 to "Болезнь", 4 to "Болезнь", 17 to "Работа", 26 to "Отдых", 38 to "Погода", 49 to "Отдых")
+        val SKIPS = mapOf(3 to "Болезнь", 4 to "Болезнь", 17 to "Работа", 26 to "Отдых", 38 to "Погода", 49 to "Отдых", 60 to "Учёба")
 
-        val SEED_MEETS = setOf("Чемпионат Москвы", "Кубок России", "Первенство ЦФО", "Всероссийские соревнования")
+        val SEED_MEETS = setOf(
+            "Чемпионат Москвы", "Кубок России", "Первенство ЦФО", "Всероссийские соревнования",
+            "Зимнее первенство области", "Открытый чемпионат города", "Мемориал прыгунов"
+        )
+
+        /** Старты демо-года: сколько дней назад (минус — впереди) и где. */
+        val MEETS = listOf(
+            Triple("Зимнее первенство области", "Тула", 330),
+            Triple("Открытый чемпионат города", "Москва", 260),
+            Triple("Мемориал прыгунов", "Рязань", 190),
+            Triple("Чемпионат Москвы", "Москва", 120),
+            Triple("Кубок России", "Казань", 63),
+            Triple("Первенство ЦФО", "Воронеж", 21),
+            Triple("Всероссийские соревнования", "Екатеринбург", -21)
+        )
 
         val SEED_PERIODS = listOf(
             "Общая подготовка" to "#2E7D6B",
@@ -205,10 +230,21 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
         set(Calendar.MILLISECOND, 0)
     }.timeInMillis
 
-    /** Добавляет демо-данные за последние 3 месяца. Повторный вызов не создаёт дубликатов. */
+    /** Неделя демо-года (0…[DemoSignals.WEEKS]) для дня, который был [back] дней назад. */
+    private fun weekOf(back: Int): Int = ((365 - back) / 7).coerceIn(0, DemoSignals.WEEKS)
+
+    private fun round(value: Double, step: Double) = Math.round(value / step) * step
+
+    /**
+     * Демо-дневник за год (считая от сегодняшнего дня), построенный так, чтобы сработали все модели и советы:
+     * прогноз тройного к ближайшему старту и к срокам двух целей (одна достижима, другая нет), связи приседа и бега 30 м
+     * с тройным ([DemoSignals]), резкий спад в беге 60 м, всплеск времени тренировок, частые заступы, жалобы в заметках,
+     * пропуски и изменение веса. Повторный вызов на заполненной базе не создаёт дубликатов.
+     */
     suspend fun seedDemoData() {
         val rnd = Random(2026)
-        val daysBack = 91
+        val daysBack = 365
+        val meetValues = MEETS.filter { it.third > 0 }.associate { it.first to round(DemoSignals.meet(weekOf(it.third)), 0.01) }
 
         repository.inTransaction {
             // --- Профиль спортсмена (чужой заполненный профиль не затираем) ---
@@ -224,11 +260,18 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
                         specialization = "Тройной прыжок",
                         birthDate = Calendar.getInstance().apply { clear(); set(2002, Calendar.MARCH, 14) }.timeInMillis,
                         height = 184.0,
-                        weight = 76.0,
-                        customPbMeters = 15.74,
+                        weight = 74.2,
+                        customPbMeters = meetValues.values.maxOrNull(),
                         avatarUriString = profile?.avatarUriString
                     )
                 )
+            }
+
+            // --- Вес за год: за последний месяц −2,6 кг (больше 3 %) — совет о весе ---
+            if (repository.getBodyMeasurements().first().isEmpty()) {
+                listOf(330 to 78.5, 240 to 78.0, 150 to 77.4, 60 to 77.0, 35 to 76.8, 2 to 74.2).forEach { (back, kg) ->
+                    repository.insertBodyMeasurement(BodyMeasurement(date = dayAt(-back, 8), heightCm = if (back == 330) 184.0 else null, weightKg = kg))
+                }
             }
 
             // --- Инвентарь ---
@@ -257,10 +300,13 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
                     )
                 }
             }
+            val runUpId = idByName[RunUp.NAME.lowercase()] ?: repository.insertExercise(
+                Exercise(name = RunUp.NAME, categoryName = C_JUMP, defaultUnit = ResultUnit.CM)
+            )
 
-            // --- Цели (по одной на упражнение; существующие не трогаем) ---
+            // --- Цели со сроком ---
             val haveGoals = repository.getAllGoals().first().map { it.recordKey }.toSet()
-            GOALS.forEach { (exName, target) ->
+            GOALS.forEach { (exName, target, days) ->
                 val d = EXERCISES.first { it.name == exName }
                 val key = RecordsEngine.exerciseRecordKey(d.name, d.legSide != null, d.legSide, d.unit)
                 if (key !in haveGoals) {
@@ -271,7 +317,8 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
                             displayName = d.name + RecordsEngine.legSuffix(d.legSide != null, d.legSide),
                             unit = d.unit,
                             targetValue = target,
-                            lowerIsBetter = RecordsEngine.isLowerBetter(d.name, d.unit)
+                            lowerIsBetter = RecordsEngine.isLowerBetter(d.name, d.unit),
+                            deadline = startOfDay(dayAt(days, 0))
                         )
                     )
                 }
@@ -290,7 +337,7 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
                 }
             }
 
-            // --- Подготовительные периоды (даты начала разные; один период вложен в другой) ---
+            // --- Подготовительные периоды года ---
             val periods = repository.getAllTrainingPeriods().first()
             suspend fun addPeriod(name: String, from: Int, to: Int, color: String) {
                 val start = startOfDay(dayAt(from, 0))
@@ -300,33 +347,52 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
                     )
                 }
             }
-            addPeriod("Общая подготовка", -91, -50, "#2E7D6B")
-            addPeriod("Специальная подготовка", -49, -22, "#2B5CA8")
-            addPeriod("Скоростно-силовой блок", -42, -29, "#C79100")
-            addPeriod("Предсоревновательный", -21, 21, "#B8471F")
+            addPeriod("Общая подготовка", -365, -200, "#2E7D6B")
+            addPeriod("Специальная подготовка", -199, -90, "#2B5CA8")
+            addPeriod("Скоростно-силовой блок", -150, -128, "#C79100")
+            addPeriod("Предсоревновательный", -40, 21, "#B8471F")
 
-            // --- Тренировки: ~5 в неделю, результаты растут к концу трёх месяцев ---
+            // --- Тренировки: ~5 в неделю весь год ---
             val trainings = repository.getAllTrainingsWithExercises().first()
             val busyDays = trainings.map { startOfDay(it.training.date) }.toSet()
-            var trainingDayIndex = 0
-            for (back in daysBack downTo 0) {
-                val date = dayAt(-back, 10)
-                val weekday = Calendar.getInstance().apply { timeInMillis = date }.get(Calendar.DAY_OF_WEEK)
-                val plan = WEEK_PLAN[weekday] ?: continue
-                val idx = trainingDayIndex++
-                if (startOfDay(date) in busyDays) continue
+            // дни по плану недели, от самого старого к сегодняшнему
+            val planDays = (daysBack downTo 0).filter { back ->
+                val weekday = Calendar.getInstance().apply { timeInMillis = dayAt(-back, 10) }.get(Calendar.DAY_OF_WEEK)
+                WEEK_PLAN.containsKey(weekday)
+            }
+            val last = planDays.size - 1
+            // пропуски: несколько за год и три за последний месяц — совет о пропусках
+            val skips = mapOf(
+                20 to "Болезнь", 21 to "Болезнь", 95 to "Работа", 150 to "Отдых", 210 to "Погода",
+                last - 4 to "Болезнь", last - 8 to "Болезнь", last - 12 to "Учёба"
+            )
+            // жалобы в заметках двух из трёх последних тренировок — совет о заметках
+            val notes = mapOf(
+                last to "Тянет заднюю поверхность бедра после прыжков",
+                last - 2 to "Болит голеностоп на отталкивании"
+            )
+            // свежий Бег 60 м заметно хуже нормы — совет «резкий спад»
+            val lastThursday = planDays.lastOrNull { back ->
+                Calendar.getInstance().apply { timeInMillis = dayAt(-back, 10) }.get(Calendar.DAY_OF_WEEK) == Calendar.THURSDAY
+            }
 
-                val skipReason = SKIPS[idx]
-                if (skipReason != null) {
+            planDays.forEachIndexed { idx, back ->
+                val date = dayAt(-back, 10)
+                if (startOfDay(date) in busyDays) return@forEachIndexed
+                val weekday = Calendar.getInstance().apply { timeInMillis = date }.get(Calendar.DAY_OF_WEEK)
+                val plan = WEEK_PLAN.getValue(weekday)
+
+                skips[idx]?.let { reason ->
                     repository.insertTrainingSession(
                         TrainingSession(
                             date = date, trainingType = TrainingType.RECOVERY, intensity = 1, durationMinutes = 0,
-                            notes = "Пропуск: $skipReason", isSkipped = true, skipReason = skipReason
+                            notes = "Пропуск: $reason", isSkipped = true, skipReason = reason
                         )
                     )
-                    continue
+                    return@forEachIndexed
                 }
 
+                val week = weekOf(back)
                 val progress = (daysBack - back).toDouble() / daysBack
                 val type = when (weekday) {
                     Calendar.MONDAY, Calendar.FRIDAY -> TrainingType.STRENGTH
@@ -334,10 +400,12 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
                     Calendar.THURSDAY -> TrainingType.CONDITIONING
                     else -> TrainingType.JUMP
                 }
+                // последняя неделя заметно длиннее обычной — совет о нагрузке по времени
+                val duration = if (back <= 6) 160 + rnd.nextInt(3) * 10 else 70 + rnd.nextInt(5) * 10
                 val sessionId = repository.insertTrainingSession(
                     TrainingSession(
                         date = date, trainingType = type, intensity = 6 + rnd.nextInt(4),
-                        durationMinutes = 70 + rnd.nextInt(5) * 10, notes = "", isSkipped = false
+                        durationMinutes = duration, notes = notes[idx] ?: "", isSkipped = false
                     )
                 )
 
@@ -351,16 +419,20 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
                         ResultUnit.REPS -> 1.0
                         else -> 0.01
                     }
-                    // тренд + небольшой разброс; округление под шаг единицы измерения
-                    val raw = d.base + d.gain * progress + (rnd.nextDouble() - 0.5) * Math.abs(d.gain) * 0.18
-                    val best = Math.round(raw / step) * step
-                    val results = (0 until d.reps).map { i ->
-                        val drop = if (i == d.reps - 1 - rnd.nextInt(d.reps)) 0.0 else step * (1 + rnd.nextInt(3))
-                        if (lowerBetter) best + drop else best - drop
-                    }.toMutableList().also { list ->
-                        // лучший результат серии всегда присутствует
-                        list[rnd.nextInt(list.size)] = best
+                    // сигналы для моделей; остальные упражнения — тренд и независимый шум
+                    val raw = when (d.name) {
+                        "Приседания со штангой" -> DemoSignals.squat(week)
+                        "Бег 30 м" -> DemoSignals.sprint30(week)
+                        "Тройной прыжок с полного разбега" -> DemoSignals.jump(week)
+                        "Бег 60 м с хода" -> d.base + d.gain * progress + rnd.nextGaussian() * 0.03 +
+                            if (back == lastThursday) 0.45 else 0.0
+                        else -> d.base + d.gain * progress + rnd.nextGaussian() * Math.abs(d.gain) * 0.08
                     }
+                    val best = round(raw, step)
+                    val results = (0 until d.reps).map {
+                        val drop = step * (1 + rnd.nextInt(3))
+                        if (lowerBetter) best + drop else best - drop
+                    }.toMutableList().also { list -> list[rnd.nextInt(list.size)] = best }
                     repository.insertExerciseResult(
                         ExerciseResult(
                             exerciseId = exId, exerciseName = d.name, trainingSessionId = sessionId, date = date,
@@ -374,37 +446,48 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
                         )
                     )
                 }
+
+                // разбег по субботам последних пяти недель: заступы в 4 из 6 попыток — совет о переносе отметки
+                if (weekday == Calendar.SATURDAY && back <= 35) {
+                    val attempts = listOf(0.5, 0.0, 1.0, 0.5, -0.5, 0.5).map { RunUpAttempt(boardFeet = it) }
+                    repository.insertExerciseResult(
+                        ExerciseResult(
+                            exerciseId = runUpId, exerciseName = RunUp.NAME, trainingSessionId = sessionId, date = date,
+                            result = 0.0, resultUnit = ResultUnit.CM, runUpJson = RunUp.encode(attempts)
+                        )
+                    )
+                }
             }
 
-            // --- Старты и рекорды ---
+            // --- Старты года: результаты идут за тренировочным трендом, впереди — ближайший старт ---
             val comps = repository.getAllCompetitions().first()
             val results = repository.getAllResults().first()
-
-            data class Meet(val name: String, val city: String, val offset: Int, val attempts: String?, val place: String?, val best: Double?, val level: String, val weather: String?)
-
-            listOf(
-                Meet("Чемпионат Москвы", "Москва", -77, "15.12, 15.31, X, 15.40, 15.22, X", "3 место", 15.40, "SB", "Тепло, +24°, ветер +0.8"),
-                Meet("Кубок России", "Казань", -49, "15.38, 15.55, 15.47, X, 15.60, 15.52", "2 место", 15.60, "SB", "Облачно, +19°, ветер +1.1"),
-                Meet("Первенство ЦФО", "Воронеж", -21, "15.50, X, 15.71, 15.66, 15.74, X", "1 место", 15.74, "PB", "Ясно, +17°, ветер +0.4"),
-                Meet("Всероссийские соревнования", "Екатеринбург", 21, null, null, null, "PB", null)
-            ).forEach { m ->
-                val date = dayAt(m.offset, 12)
-                if (comps.any { it.name == m.name && startOfDay(it.date) == startOfDay(date) }) return@forEach
-                val addr = "Россия, ${m.city}"
+            var bestSoFar = 0.0
+            MEETS.sortedByDescending { it.third }.forEach { (name, city, back) ->
+                val date = dayAt(-back, 12)
+                if (comps.any { it.name == name && startOfDay(it.date) == startOfDay(date) }) return@forEach
+                val addr = "Россия, $city"
+                val best = meetValues[name]
+                val attempts = best?.let { b ->
+                    val others = listOf(0.21, 0.09, -1.0, 0.0, 0.14, 0.05).map { d -> if (d < 0) "X" else String.format(java.util.Locale.US, "%.2f", b - d) }
+                    others.joinToString(", ")
+                }
                 val compId = repository.insertCompetition(
                     Competition(
-                        name = m.name, country = "Россия", city = m.city, location = addr, address = addr,
+                        name = name, country = "Россия", city = city, location = addr, address = addr,
                         date = date, eventTime = "11:00",
-                        attemptsJson = m.attempts, placement = m.place,
-                        status = if (m.offset < 0) CompetitionStatus.COMPLETED else CompetitionStatus.UPCOMING
+                        attemptsJson = attempts, placement = best?.let { "${1 + rnd.nextInt(4)} место" },
+                        status = if (back > 0) CompetitionStatus.COMPLETED else CompetitionStatus.UPCOMING
                     )
                 )
-                if (m.best != null && results.none { it.competitionId != null && it.date == date }) {
+                if (best != null && results.none { it.competitionId != null && it.date == date }) {
+                    val level = if (best > bestSoFar) "PB" else "SB"
+                    bestSoFar = maxOf(bestSoFar, best)
                     repository.insertTripleJumpResult(
                         TripleJumpResult(
-                            competitionId = compId, eventName = "Тройной прыжок", date = date, result = m.best,
-                            resultUnit = ResultUnit.M, isIndoor = false, recordLevel = m.level,
-                            exerciseCategory = "Прыжковые", isCompetition = true, weatherConditions = m.weather
+                            competitionId = compId, eventName = "Тройной прыжок", date = date, result = best,
+                            resultUnit = ResultUnit.M, isIndoor = back > 300, recordLevel = level,
+                            exerciseCategory = "Прыжковые", isCompetition = true, weatherConditions = "Ветер +0.${rnd.nextInt(9)}"
                         )
                     )
                 }
