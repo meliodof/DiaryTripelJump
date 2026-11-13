@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -102,7 +103,8 @@ private fun changeText(f: Forecast): String {
 /** Откуда взялся прогноз — одной фразой, без терминов. */
 private fun basisText(f: Forecast): String = when (f.method) {
     ForecastMethod.OWN_DATA ->
-        "Прогноз по вашим ${f.points} ${pluralRu(f.points, "дню", "дням", "дням")} с результатами за последние полгода. ${changeText(f)}"
+        "Прогноз по вашим последним ${f.points} ${pluralRu(f.points, "дню", "дням", "дням")} с результатами: свежие весят больше, " +
+            "а один случайный результат прогноз не сбивает. ${changeText(f)}"
     ForecastMethod.TYPICAL_GROWTH ->
         (if (f.points == 0) "Своих результатов в дневнике пока нет, поэтому прогноз — от рекорда в профиле"
         else "Своих результатов пока мало (${f.points}), поэтому прогноз — от последнего результата") +
@@ -341,7 +343,7 @@ private val AdviceKind.groupTitle: String
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun AdviceScreen(viewModel: DiaryViewModel, onBack: () -> Unit, onNavigate: (String) -> Unit) {
+fun AdviceScreen(viewModel: DiaryViewModel, onBack: () -> Unit, onNavigate: (String) -> Unit, onOpenAssistant: () -> Unit = {}) {
     val cs = MaterialTheme.colorScheme
     val insights by viewModel.insights.collectAsState()
     val all by viewModel.allAdvice.collectAsState()
@@ -375,6 +377,24 @@ fun AdviceScreen(viewModel: DiaryViewModel, onBack: () -> Unit, onNavigate: (Str
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // --- Вопрос к дневнику своими словами ---
+            item(key = "assistant") {
+                AppCard(onClick = onOpenAssistant, modifier = Modifier.fillMaxWidth().coachTarget("advice.assistant")) {
+                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconBadge(icon = Icons.Default.QuestionAnswer, tint = cs.primary)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Спросить дневник", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "«Итоги недели», «как мой присед», «готов ли я к старту» — ответ из ваших данных",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = cs.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
             // --- Прогноз ---
             item(key = "forecast:title") { SectionTitle("Прогноз") }
             if (insights.forecasts.none { !it.custom }) {

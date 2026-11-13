@@ -99,6 +99,7 @@ object Routes {
     const val ANALYTICS = "analytics"
     const val VISUALIZATION = "analytics/visualization"
     const val ADVICE = "analytics/advice"
+    const val ASSISTANT = "analytics/assistant"
 }
 
 /** Пункты нижней навигации (вкладки верхнего уровня). */
@@ -281,6 +282,23 @@ fun MainScreen(
                         popExitTransition = { slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(250)) + fadeOut(tween(250)) }
                     ) {
                         AdviceScreen(
+                            viewModel = viewModel,
+                            onBack = { navController.popBackStack() },
+                            onNavigate = { route ->
+                                if (TopLevelDestination.entries.any { it.route == route }) navController.navigateTopLevel(route)
+                                else navController.navigate(route) { launchSingleTop = true }
+                            },
+                            onOpenAssistant = { navController.navigate(Routes.ASSISTANT) { launchSingleTop = true } }
+                        )
+                    }
+                    composable(
+                        route = Routes.ASSISTANT,
+                        enterTransition = { slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(250)) + fadeIn(tween(250)) },
+                        exitTransition = { fadeOut(tween(TAB_EXIT_MS)) },
+                        popEnterTransition = { fadeIn(tween(TAB_ENTER_MS)) },
+                        popExitTransition = { slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(250)) + fadeOut(tween(250)) }
+                    ) {
+                        AssistantScreen(
                             viewModel = viewModel,
                             onBack = { navController.popBackStack() },
                             onNavigate = { route ->

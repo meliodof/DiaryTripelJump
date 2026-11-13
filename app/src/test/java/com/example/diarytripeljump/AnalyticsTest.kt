@@ -77,6 +77,20 @@ class AnalyticsTest {
     }
 
     @Test
+    fun records_onlyNewPersonalBests() {
+        val samples = listOf(
+            SeriesSample(day(10, 2), listOf(13.0, 13.4)),
+            SeriesSample(day(10, 4), listOf(13.2)),
+            SeriesSample(day(10, 10), listOf(13.6, 13.0)),
+            SeriesSample(day(10, 12), listOf(13.6))
+        )
+        assertEquals(listOf(13.4, 13.6), ChartData.aggregate(samples, Aggregation.RECORDS, false).map { it.value })
+        // бег: меньше — лучше
+        val sprint = listOf(SeriesSample(1L, listOf(4.2)), SeriesSample(2L, listOf(4.3)), SeriesSample(3L, listOf(4.1, 4.4)))
+        assertEquals(listOf(4.2, 4.1), ChartData.aggregate(sprint, Aggregation.RECORDS, true).map { it.value })
+    }
+
+    @Test
     fun positions_byTimeOrByOrder() {
         val dates = listOf(0L, 10L, 100L)
         assertEquals(mapOf(0L to 0f, 10L to 0.1f, 100L to 1f), ChartData.positions(dates, byOrder = false))

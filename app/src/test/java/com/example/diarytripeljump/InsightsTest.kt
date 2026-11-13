@@ -28,23 +28,38 @@ class InsightsTest {
     }
 
     @Test
-    fun forecast_linearProgress_averagesLastAndLine() {
+    fun forecast_ownData_smoothedLevel() {
         // 12 тренировок раз в 5 дней, +5 см каждые 5 дней
         val start = now - 56 * day
         val points = (0 until 12).map { RecordPoint(start + it * 5 * day, 14.0 + it * 0.05, false) }
-        val target = now + 14 * day
-        val f = Insights.forecast("t", "Тройной", ResultUnit.M, false, points, target, "к старту", now)!!
-        val line = 14.0 + 0.01 * ((target - start) / day.toDouble())
-        val last = points.last().value
-        assertEquals((line + last) / 2, f.value, 1e-6)
+        val f = Insights.forecast("t", "Тройной", ResultUnit.M, false, points, now + 14 * day, "к старту", now)!!
+        var level = points.first().value
+        points.drop(1).forEach { level = 0.3 * it.value + 0.7 * level }
+        assertEquals(level, f.value, 1e-9)
+        assertTrue("уровень ниже последнего результата при росте", f.value < points.last().value)
         assertEquals(ForecastMethod.OWN_DATA, f.method)
         assertEquals(0.07, f.slopePerWeek, 1e-9)
         assertEquals(Reliability.HIGH, f.reliability)
     }
 
     @Test
+    fun smoothLevel_afterSeasonBreak_trustsNewResultMore() {
+        val p = listOf(RecordPoint(0, 14.0, true), RecordPoint(10 * day, 14.0, true), RecordPoint(200 * day, 15.0, true))
+        assertEquals(14.0 + 0.6 * 1.0, Insights.smoothLevel(p).first, 1e-9)
+        val near = p.take(2) + RecordPoint(20 * day, 15.0, true)
+        assertEquals(14.0 + 0.3 * 1.0, Insights.smoothLevel(near).first, 1e-9)
+    }
+
+    @Test
+    fun forecast_oneOddResult_doesNotSwingForecast() {
+        val points = (0 until 10).map { RecordPoint(now - (10 - it) * 7 * day, 14.0, true) } + RecordPoint(now, 12.5, true)
+        val f = Insights.forecast("t", "Тройной", ResultUnit.M, false, points, now + 14 * day, "к старту", now)!!
+        assertEquals(14.0 - 0.3 * 1.5, f.value, 1e-9)
+    }
+
+    @Test
     fun coldStart_fewResults_lastResultOrTypicalGrowth() {
-        val points = (0 until 4).map { RecordPoint(now - it * 10 * day, 14.0, false) }
+        val points = (0 until 2).map { RecordPoint(now - it * 10 * day, 14.0, false) }
         val plain = Insights.forecast("t", "Тройной", ResultUnit.M, false, points, now + week, "к старту", now)!!
         assertEquals(ForecastMethod.LAST_RESULT, plain.method)
         assertEquals(14.0, plain.value, 1e-9)
@@ -83,7 +98,8 @@ class InsightsTest {
     fun forecast_goalReached() {
         val start = now - 56 * day
         val points = (0 until 12).map { RecordPoint(start + it * 5 * day, 100.0 + it * 2.5, false) }
-        val f = Insights.forecast("g", "Присед", ResultUnit.KG, false, points, now + 14 * day, "к сроку", now, goal = 130.0)!!
+        // уровень сглаживания отстаёт от последнего результата (127,5) примерно на 6 кг при ровном росте
+        val f = Insights.forecast("g", "Присед", ResultUnit.KG, false, points, now + 14 * day, "к сроку", now, goal = 120.0)!!
         assertEquals(true, f.reachesGoal)
         val far = Insights.forecast("g", "Присед", ResultUnit.KG, false, points, now + 14 * day, "к сроку", now, goal = 200.0)!!
         assertEquals(false, far.reachesGoal)

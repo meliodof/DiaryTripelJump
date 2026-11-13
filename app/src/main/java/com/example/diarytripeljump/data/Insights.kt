@@ -94,11 +94,21 @@ object Insights {
     private const val WEEK = 7 * DAY
 
     object Limits {
-        /** Прогноз строится по последним точкам за полгода до даты прогноза. */
+        /** Прогноз строится по последним [FORECAST_POINTS] дням с результатами; перерыв дольше [FORECAST_BREAK_DAYS] начинает ряд заново. */
         const val FORECAST_POINTS = 30
-        const val FORECAST_WINDOW_DAYS = 180
-        const val FORECAST_MIN_POINTS = 6
-        const val FORECAST_MIN_SPAN_DAYS = 21
+        const val FORECAST_BREAK_DAYS = 400
+        /** С какого числа дней с результатами прогноз строится по своим данным, а не по типичному приросту. */
+        const val FORECAST_MIN_POINTS = 3
+        /**
+         * Вес нового результата в сглаживании. Подобран на реальных рядах 150 прыгунов тройным (TFRRS, 3612 стартов,
+         * перекрёстная проверка по спортсменам): лучший вес 0,3–0,4, тренд не улучшает прогноз.
+         */
+        const val SMOOTHING = 0.3
+        /** После перерыва дольше [SEASON_BREAK_DAYS] дней (межсезонье) первый результат весит больше — так точнее на тех же данных. */
+        const val BREAK_WEIGHT = 0.6
+        const val SEASON_BREAK_DAYS = 45
+        /** Естественный разброс результата от старта к старту (доля): по данным TFRRS 2,5 %, по Hopkins (2005) у элиты 1,7 %. */
+        const val TYPICAL_SPREAD = 0.025
         /** Прогноз дальше, чем на столько недель, без старта не строится. */
         const val DEFAULT_HORIZON_WEEKS = 8
 
@@ -176,25 +186,45 @@ object Insights {
     }
 
     /**
-     * Лучший результат каждого дня за полгода до даты прогноза [target] (но не позже [now]), не больше
-     * [Limits.FORECAST_POINTS] последних. Окно выбрано проверкой на реальных рядах: год и 9 месяцев от сегодня
-     * на части спортсменов прогнозировали хуже, чем «как в прошлый раз».
+     * Лучший результат каждого дня не позже [now], не больше [Limits.FORECAST_POINTS] последних; если между
+     * результатами был перерыв дольше [Limits.FORECAST_BREAK_DAYS] дней, берётся только то, что после него.
      */
-    private fun daily(points: List<RecordPoint>, lowerIsBetter: Boolean, now: Long, target: Long) = points
-        .filter { it.date in (target - Limits.FORECAST_WINDOW_DAYS * DAY)..now }
-        .groupBy { it.date / DAY }
-        .map { (_, ps) -> if (lowerIsBetter) ps.minBy { it.value } else ps.maxBy { it.value } }
-        .sortedBy { it.date }
-        .takeLast(Limits.FORECAST_POINTS)
+    private fun daily(points: List<RecordPoint>, lowerIsBetter: Boolean, now: Long): List<RecordPoint> {
+        val all = points
+            .filter { it.date <= now }
+            .groupBy { it.date / DAY }
+            .map { (_, ps) -> if (lowerIsBetter) ps.minBy { it.value } else ps.maxBy { it.value } }
+            .sortedBy { it.date }
+        val restart = all.indices.lastOrNull { it > 0 && all[it].date - all[it - 1].date > Limits.FORECAST_BREAK_DAYS * DAY } ?: 0
+        return all.drop(restart).takeLast(Limits.FORECAST_POINTS)
+    }
+
+    /**
+     * Сглаженный уровень ряда: каждый новый результат входит с весом [Limits.SMOOTHING], остальное — прежний уровень;
+     * первый результат после межсезонья — с весом [Limits.BREAK_WEIGHT]. Точки — по возрастанию даты.
+     * Возвращает уровень и относительные отклонения каждого результата от уровня перед ним.
+     */
+    fun smoothLevel(points: List<RecordPoint>): Pair<Double, List<Double>> {
+        var level = points.first().value
+        val deviations = mutableListOf<Double>()
+        for (i in 1 until points.size) {
+            val v = points[i].value
+            if (level != 0.0) deviations += abs(v - level) / abs(level)
+            val afterBreak = points[i].date - points[i - 1].date > Limits.SEASON_BREAK_DAYS * DAY
+            val w = if (afterBreak) Limits.BREAK_WEIGHT else Limits.SMOOTHING
+            level = w * v + (1 - w) * level
+        }
+        return level to deviations
+    }
 
     /**
      * Прогноз ряда [points] к дате [target].
      *
-     * Своих результатов достаточно (от [Limits.FORECAST_MIN_POINTS] дней на отрезке от
-     * [Limits.FORECAST_MIN_SPAN_DAYS] дней) — среднее двух оценок: последнего результата и линейной регрессии по
-     * результатам за полгода до даты прогноза. Скользящая проверка на трёх реальных рядах тройного (TFRRS, 137 стартов
-     * трёх спортсменов NCAA): средняя ошибка прогноза следующего старта 0,228 / 0,364 / 0,488 м против
-     * 0,236 / 0,396 / 0,492 м у «как на прошлом старте» — лучше у всех троих, в среднем на 4 %.
+     * Своих результатов достаточно (от [Limits.FORECAST_MIN_POINTS] дней) — сглаженный уровень: свежие результаты весят
+     * больше, старые — меньше ([smoothLevel]). Вес подобран на реальных рядах 150 прыгунов тройным (TFRRS, 3612 стартов,
+     * перекрёстная проверка по спортсменам): средняя ошибка прогноза следующего старта 0,383 м против 0,442 м у «как на
+     * прошлом старте» и 0,439 м у прежней модели (среднее последнего результата и прямой линии). Тренд и прямая линия
+     * на этих данных прогноз не улучшали — результат одного старта колеблется сильнее, чем растёт за сезон.
      *
      * Холодный старт — результатов мало: от последнего результата (или от [fallbackLevel], например рекорда из профиля)
      * с типичным приростом [growthPerYear] за год. Нет ни результатов, ни запасного уровня — null.
@@ -204,33 +234,26 @@ object Insights {
         target: Long, targetLabel: String, now: Long, goal: Double? = null, recordKey: String? = null,
         growthPerYear: Double = 0.0, fallbackLevel: Double? = null, custom: Boolean = false
     ): Forecast? {
-        val daily = daily(points, lowerIsBetter, now, target).ifEmpty {
-            // в окне ничего нет — для холодного старта годится и более старый последний результат
-            listOfNotNull(points.filter { it.date <= now }.maxByOrNull { it.date })
-        }
-        val enough = daily.size >= Limits.FORECAST_MIN_POINTS &&
-            (daily.last().date - daily.first().date) / DAY.toDouble() >= Limits.FORECAST_MIN_SPAN_DAYS
-        if (enough) {
-            val first = daily.first().date
-            val spanDays = (daily.last().date - first) / DAY.toDouble()
-            val xs = daily.map { (it.date - first) / DAY.toDouble() }
-            val f = fit(xs, daily.map { it.value })
-            if (f != null) {
-                val x0 = (target - first) / DAY.toDouble()
-                val value = (daily.last().value + f.at(x0)) / 2
-                val horizon = x0 - xs.last()
-                val reliability = when {
-                    daily.size >= 10 && f.r2 >= 0.5 && horizon <= spanDays * 0.5 -> Reliability.HIGH
-                    f.r2 >= 0.25 && horizon <= spanDays -> Reliability.MEDIUM
-                    else -> Reliability.LOW
-                }
-                return Forecast(
-                    key = key, title = title, unit = unit, lowerIsBetter = lowerIsBetter, targetDate = target,
-                    targetLabel = targetLabel, value = value, slopePerWeek = f.b * 7, points = daily.size,
-                    reliability = reliability, method = ForecastMethod.OWN_DATA, history = daily, goal = goal,
-                    recordKey = recordKey, custom = custom
-                )
+        val daily = daily(points, lowerIsBetter, now)
+        if (daily.size >= Limits.FORECAST_MIN_POINTS) {
+            val (level, deviations) = smoothLevel(daily)
+            // насколько ровно идут результаты: типичное отклонение от уровня в сравнении с обычным разбросом на старте
+            val spread = deviations.sorted().let { if (it.isEmpty()) 0.0 else it[it.size / 2] }
+            val horizonWeeks = (target - daily.last().date) / WEEK.toDouble()
+            val reliability = when {
+                daily.size >= 10 && spread <= Limits.TYPICAL_SPREAD && horizonWeeks <= 8 -> Reliability.HIGH
+                daily.size >= 5 && spread <= 2 * Limits.TYPICAL_SPREAD && horizonWeeks <= 16 -> Reliability.MEDIUM
+                else -> Reliability.LOW
             }
+            // как меняется результат — только для пояснения на карточке; в прогноз прямая линия не входит
+            val first = daily.first().date
+            val slope = fit(daily.map { (it.date - first) / DAY.toDouble() }, daily.map { it.value })?.b ?: 0.0
+            return Forecast(
+                key = key, title = title, unit = unit, lowerIsBetter = lowerIsBetter, targetDate = target,
+                targetLabel = targetLabel, value = level, slopePerWeek = slope * 7, points = daily.size,
+                reliability = reliability, method = ForecastMethod.OWN_DATA, history = daily, goal = goal,
+                recordKey = recordKey, custom = custom
+            )
         }
         // холодный старт: своих результатов мало
         val base = daily.lastOrNull()?.value ?: fallbackLevel ?: return null
@@ -496,7 +519,7 @@ object Insights {
         KnownLink(
             "Сила ног в приседе на 1 кг веса тела",
             "Присед по отношению к весу тела заметно связан со скоростью на 30 м и высотой прыжка.",
-            "Loturco и соавт., 2021; Wagner и соавт., 2023",
+            "Wagner и соавт., 2023 (Montenegrin Journal of Sports Science and Medicine)",
             listOf("присед")
         )
     )
@@ -510,12 +533,13 @@ object Insights {
     /** Как считаются прогноз и связи — для блока «Как считаются советы». */
     val methods: List<Pair<String, String>>
         get() = listOf(
-            "Прогноз" to "Когда результатов достаточно (от ${Limits.FORECAST_MIN_POINTS} дней на отрезке от " +
-                "${Limits.FORECAST_MIN_SPAN_DAYS} дней), прогноз — среднее двух оценок: последнего результата и прямой линии по " +
-                "лучшим результатам дня за полгода до даты прогноза. Проверка на реальных результатах трёх прыгунов тройным " +
-                "(137 стартов, студенческие соревнования США, TFRRS): прогноз следующего старта ошибался в среднем на 23, 36 и " +
-                "49 см, а «как в прошлый раз» — на 24, 40 и 49 см. Результат на одном старте сильно колеблется, поэтому прогноз " +
-                "— ориентир, а не обещание. Надёжность зависит от числа результатов, их ровности и того, насколько далеко дата.",
+            "Прогноз" to "Когда есть хотя бы ${Limits.FORECAST_MIN_POINTS} дня с результатами, прогноз — сглаженный уровень: " +
+                "каждый новый результат входит с весом ${(Limits.SMOOTHING * 100).roundToInt()} %, остальное — прежний уровень, " +
+                "так что свежие результаты важнее старых, а один неудачный или случайно удачный старт не сбивает прогноз. " +
+                "Вес подобран на реальных результатах 150 прыгунов тройным (3612 стартов, студенческие соревнования США, TFRRS): " +
+                "прогноз следующего старта ошибался в среднем на 38 см, «как в прошлый раз» — на 44 см. Результат на одном " +
+                "старте колеблется примерно на ${(Limits.TYPICAL_SPREAD * 100).roundToInt()}—3 %, поэтому прогноз — ориентир, " +
+                "а не обещание. Надёжность зависит от числа результатов, их ровности и того, насколько далеко дата.",
             "Мало данных" to "Пока результатов мало, прогноз берёт последний результат (или личный рекорд из профиля) и " +
                 "добавляет типичный прирост по возрасту: до 18 лет — 4 % в год, в 18–23 года — 1,5 %, взрослым — 0 %. " +
                 "Цифры — по исследованиям юных прыгунов тройным (в среднем +1,5…6,3 % в год до 18 лет, у взрослых результат " +

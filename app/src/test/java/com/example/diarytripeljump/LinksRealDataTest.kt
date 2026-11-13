@@ -12,8 +12,8 @@ import java.util.Random
 /**
  * Проверка поиска связей «упражнение → тройной».
  *
- * 1. Реальные данные: у двух прыгунов (TFRRS: tfrrs.org/athletes/8667434 — Justin Davis, tfrrs.org/athletes/7978401 —
- *    Velecia Williams) на одних соревнованиях есть и длина, и тройной. От недели к неделе они почти не совпадают
+ * 1. Реальные данные: у двух прыгунов (протоколы TFRRS, псевдонимизированы: метки D и E вместо имён, ссылки на профили
+ *    убраны) на одних соревнованиях есть и длина, и тройной. От недели к неделе они почти не совпадают
  *    (коэффициенты связи от −0,39 до 0,4 в зависимости от сдвига, перестановочный p = 0,35 и 0,93), поэтому модель
  *    не должна показывать связь.
  * 2. Чистый шум: упражнение, никак не связанное с тройным, не должно давать «связь» чаще, чем примерно в 5–10 % случаев.
@@ -42,10 +42,10 @@ class LinksRealDataTest {
     }
 
     @Test
-    fun davis_longJumpDoesNotMoveWithTripleWeekToWeek() = noLink(DAVIS)
+    fun athleteD_longJumpDoesNotMoveWithTripleWeekToWeek() = noLink(ATHLETE_D)
 
     @Test
-    fun williams_longJumpDoesNotMoveWithTripleWeekToWeek() = noLink(WILLIAMS)
+    fun athleteE_longJumpDoesNotMoveWithTripleWeekToWeek() = noLink(ATHLETE_E)
 
     @Test
     fun noise_rarelyGivesLinks() {
@@ -64,7 +64,7 @@ class LinksRealDataTest {
     }
 
     private companion object {
-        val DAVIS = """
+        val ATHLETE_D = """
             2023-12-01 LJ 6.55
             2023-12-01 TJ 14.33
             2024-01-14 LJ 6.84
@@ -119,7 +119,7 @@ class LinksRealDataTest {
             2026-05-27 LJ 7.32
         """
 
-        val WILLIAMS = """
+        val ATHLETE_E = """
             2022-01-14 LJ 6.01
             2022-01-14 TJ 12.67
             2022-01-28 TJ 12.52

@@ -48,7 +48,7 @@ val HelpTopic.icon: ImageVector
         HelpTopic.F_PERIOD, HelpTopic.F_SKIP -> Icons.Default.FitnessCenter
         HelpTopic.F_COMPETITION, HelpTopic.F_SKIP_START -> Icons.Default.EmojiEvents
         HelpTopic.F_RECORD, HelpTopic.F_RECORD_DETAIL, HelpTopic.F_GOAL -> Icons.Default.MilitaryTech
-        HelpTopic.F_VISUALIZATION, HelpTopic.F_CHART_SETTINGS, HelpTopic.F_ADVICE -> Icons.AutoMirrored.Filled.ShowChart
+        HelpTopic.F_VISUALIZATION, HelpTopic.F_CHART_SETTINGS, HelpTopic.F_ADVICE, HelpTopic.F_ASSISTANT -> Icons.AutoMirrored.Filled.ShowChart
         HelpTopic.F_BUILDER, HelpTopic.F_COMPLEX, HelpTopic.F_INVENTORY -> Icons.Default.Category
         HelpTopic.F_BODY, HelpTopic.F_PROFILE_EDIT, HelpTopic.F_RUNUP_LENGTH, HelpTopic.F_RANKS -> Icons.Default.Person
         HelpTopic.F_FAVORITES -> Icons.Default.Home

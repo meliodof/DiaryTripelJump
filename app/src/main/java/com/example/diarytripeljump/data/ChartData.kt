@@ -41,6 +41,8 @@ enum class ChartMode(val label: String) {
 enum class Aggregation(val label: String) {
     EACH("Каждая попытка"),
     SESSION_BEST("Лучшая за тренировку"),
+    /** Только тренировки, на которых побит прежний лучший результат: как росли рекорды. */
+    RECORDS("Рекордные"),
     SESSION_AVG("Средняя за тренировку"),
     WEEK_BEST("Лучшая за неделю"),
     WEEK_AVG("Средняя за неделю"),
@@ -231,6 +233,14 @@ object ChartData {
             // попытки одного дня идут друг за другом с шагом в минуту: порядок сохраняется, точки не совпадают
             Aggregation.EACH -> filled.flatMap { s -> s.values.mapIndexed { i, v -> RecordPoint(s.date + i * 60_000L, v, false) } }
             Aggregation.SESSION_BEST -> filled.map { RecordPoint(it.date, best(it.values), false) }
+            Aggregation.RECORDS -> {
+                var record: Double? = null
+                filled.sortedBy { it.date }.mapNotNull { s ->
+                    val v = best(s.values)
+                    val beaten = record?.let { if (lowerIsBetter) v < it else v > it } ?: true
+                    if (beaten) { record = v; RecordPoint(s.date, v, false) } else null
+                }
+            }
             Aggregation.SESSION_AVG -> filled.map { RecordPoint(it.date, it.values.average(), false) }
             else -> filled.groupBy { weekStart(it.date) }.toSortedMap().map { (week, list) ->
                 val values = list.flatMap { it.values }

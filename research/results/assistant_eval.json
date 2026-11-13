@@ -1,0 +1,120 @@
+{
+ "intents": {
+  "classes": [
+   "FORECAST",
+   "WEEK",
+   "EXERCISE",
+   "RECORDS",
+   "LINKS",
+   "READY",
+   "LOAD",
+   "HEALTH",
+   "NEXT_START",
+   "GOALS",
+   "ADVICE",
+   "RUNUP",
+   "HELP",
+   "OTHER"
+  ],
+  "train_examples": 939,
+  "base_phrases": 265,
+  "C": 10,
+  "cv_accuracy": 0.6965,
+  "cv_macro_f1": 0.6635,
+  "hard_n": 112,
+  "hard_accuracy": 0.9375,
+  "keywords_hard_accuracy": 0.6429,
+  "keywords_train_accuracy": 0.6645,
+  "threshold": 0.19,
+  "per_class_hard": {
+   "FORECAST": 0.875,
+   "WEEK": 0.875,
+   "EXERCISE": 1.0,
+   "RECORDS": 1.0,
+   "LINKS": 1.0,
+   "READY": 0.875,
+   "LOAD": 0.75,
+   "HEALTH": 1.0,
+   "NEXT_START": 1.0,
+   "GOALS": 1.0,
+   "ADVICE": 1.0,
+   "RUNUP": 1.0,
+   "HELP": 0.75,
+   "OTHER": 1.0
+  },
+  "hard_mistakes": [
+   [
+    "ожидания на ближайшие соревы",
+    "FORECAST",
+    "NEXT_START"
+   ],
+   [
+    "сводку дай",
+    "WEEK",
+    "OTHER"
+   ],
+   [
+    "как на пик выйти",
+    "READY",
+    "OTHER"
+   ],
+   [
+    "пора отдыхать?",
+    "LOAD",
+    "HELP"
+   ],
+   [
+    "сколько часов тренилсь",
+    "LOAD",
+    "OTHER"
+   ],
+   [
+    "хай",
+    "HELP",
+    "OTHER"
+   ],
+   [
+    "здарова",
+    "HELP",
+    "OTHER"
+   ]
+  ]
+ },
+ "notes": {
+  "labels": [
+   "pain",
+   "fatigue",
+   "sleep",
+   "good",
+   "technique",
+   "illness"
+  ],
+  "train_examples": 630,
+  "base_notes": 210,
+  "cv_f1": {
+   "pain": 0.7668,
+   "fatigue": 0.7176,
+   "sleep": 0.7885,
+   "good": 0.624,
+   "technique": 0.7261,
+   "illness": 0.5155
+  },
+  "cv_macro_f1": 0.6898,
+  "hard_n": 24,
+  "hard_f1": {
+   "pain": 0.8889,
+   "fatigue": 1.0,
+   "sleep": 1.0,
+   "good": 0.8571,
+   "technique": 1.0,
+   "illness": 0.8
+  },
+  "pain_regex_cv_f1": 0.6804,
+  "pain_regex_hard_f1": 0.5714,
+  "pain_model_hard_f1": 0.8889
+ },
+ "model_size_kb": {
+  "intent_model.txt": 401.3,
+  "notes_model.txt": 164.6
+ }
+}

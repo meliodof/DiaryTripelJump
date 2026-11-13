@@ -101,7 +101,8 @@ object AdviceEngine {
                 "${percent(Limits.LOAD_GROWTH - 1)} и больше. Перерыв — ${Limits.BREAK_DAYS}+ дней без тренировок.",
             "Подводка к старту" to "За ${Limits.TAPER_DAYS} дней до старта: снижен ли объём, отдых в последние два дня.",
             "Пропуски" to "${Limits.SKIPS}+ пропуска за 30 дней, с самой частой причиной.",
-            "Заметки" to "Слова «болит», «тянет», «травма» и похожие в ${Limits.NOTES_MENTIONS} из ${Limits.NOTES_TRAININGS} последних тренировок.",
+            "Заметки" to "Жалоба на боль в ${Limits.NOTES_MENTIONS} из ${Limits.NOTES_TRAININGS} последних тренировок: слова «болит», " +
+                "«тянет», «травма» или своя модель разбора заметок, которая понимает и «колено ноет», «ахилл побаливает».",
             "Вес" to "Изменение на ${percent(Limits.WEIGHT_SHARE)} и больше за месяц.",
             "Рекорды" to "Рекорд, обновлённый за последние ${Limits.FRESH_RECORD_DAYS} дней."
         )
@@ -338,15 +339,19 @@ object AdviceEngine {
         // текст приводится к нижнему регистру заранее: без UNICODE_CASE регистр кириллицы в шаблоне не учитывается
         fun notesOf(t: TrainingWithExercises) =
             (listOfNotNull(t.training.notes) + t.exerciseResults.mapNotNull { it.notes }).map { it.lowercase() }
-        val mentions = recent.filter { t -> notesOf(t).any { PAIN.containsMatchIn(it) } }
+        // жалоба — ключевое слово или метка «боль» своей модели разбора заметок ([NoteTagger]): «колено ноет», «ахилл побаливает»
+        fun complaint(note: String) = PAIN.containsMatchIn(note) || NoteTag.PAIN in NoteTagger.tags(note)
+        val mentions = recent.filter { t -> notesOf(t).any(::complaint) }
         if (mentions.size < Limits.NOTES_MENTIONS) return null
-        val word = mentions.flatMap { notesOf(it) }.firstNotNullOfOrNull { PAIN.find(it)?.value }
+        val notes = mentions.flatMap { notesOf(it) }
+        val word = notes.firstNotNullOfOrNull { PAIN.find(it)?.value }
+        val quote = word?.let { "«$it»" } ?: notes.firstOrNull(::complaint)?.let { "жалоба («${it.take(40)}»)" } ?: "жалоба"
         return Advice(
             id = "pain-${mentions.first().training.id}", kind = AdviceKind.RISK,
             title = "Жалобы в заметках",
-            text = "В ${mentions.size} из ${recent.size} последних тренировок в заметках есть «$word». " +
+            text = "В ${mentions.size} из ${recent.size} последних тренировок в заметках есть $quote. " +
                 "Стоит снизить прыжковую нагрузку и, если не проходит, показаться врачу.",
-            because = "Заметки последних ${recent.size} тренировок.",
+            because = "Заметки последних ${recent.size} тренировок: ключевые слова и модель разбора заметок.",
             route = "trainings"
         )
     }

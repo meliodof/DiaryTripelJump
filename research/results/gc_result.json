@@ -1,0 +1,107 @@
+{
+ "athletes": 31,
+ "links": {
+  "мощность 10 с (как бег 30 м)": {
+   "athletes_tested": 31,
+   "share_found": 0.645,
+   "share_control": 0.0,
+   "positive": 19,
+   "negative": 1,
+   "lag_hist": {
+    "0": 18,
+    "1": 0,
+    "2": 1,
+    "3": 0,
+    "4": 1,
+    "5": 0,
+    "6": 0
+   },
+   "median_abs_r": 0.605
+  },
+  "мощность 1 мин": {
+   "athletes_tested": 31,
+   "share_found": 0.806,
+   "share_control": 0.032,
+   "positive": 25,
+   "negative": 0,
+   "lag_hist": {
+    "0": 24,
+    "1": 0,
+    "2": 1,
+    "3": 0,
+    "4": 0,
+    "5": 0,
+    "6": 0
+   },
+   "median_abs_r": 0.7
+  },
+  "мощность 20 мин": {
+   "athletes_tested": 31,
+   "share_found": 0.968,
+   "share_control": 0.0,
+   "positive": 30,
+   "negative": 0,
+   "lag_hist": {
+    "0": 30,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0,
+    "5": 0,
+    "6": 0
+   },
+   "median_abs_r": 0.76
+  },
+  "часы за неделю": {
+   "athletes_tested": 31,
+   "share_found": 0.226,
+   "share_control": 0.032,
+   "positive": 7,
+   "negative": 0,
+   "lag_hist": {
+    "0": 7,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0,
+    "5": 0,
+    "6": 0
+   },
+   "median_abs_r": 0.61
+  },
+  "нагрузка TSS за неделю": {
+   "athletes_tested": 30,
+   "share_found": 0.5,
+   "share_control": 0.0,
+   "positive": 15,
+   "negative": 0,
+   "lag_hist": {
+    "0": 15,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0,
+    "5": 0,
+    "6": 0
+   },
+   "median_abs_r": 0.56
+  }
+ },
+ "forecast": {
+  "weeks": 1601,
+  "athletes": 31,
+  "naive_%": 12.423988074503537,
+  "mean3_%": 10.886012007960415,
+  "learned_no_load_%": 10.8635081246242,
+  "learned_plus_tss_%": 10.922469442429266,
+  "learned_plus_hours_%": 11.218998428858907,
+  "tss_vs_base_ci": [
+   -0.005,
+   0.149
+  ],
+  "hours_vs_base_ci": [
+   -0.008,
+   1.081
+  ]
+ }
+}

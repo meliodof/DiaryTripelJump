@@ -663,6 +663,13 @@ private fun ChartSettingsDialog(
                         ToggleChip(label = a.label, selected = chart.aggregation == a, onClick = { chart = chart.copy(aggregation = a) })
                     }
                 }
+                if (chart.aggregation == Aggregation.RECORDS) {
+                    Text(
+                        "Только тренировки и старты, где побит прежний лучший результат: видно, как и когда росли рекорды",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant
+                    )
+                }
                 Text("Шкала", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
                 SegmentedControl(
                     options = ChartMode.entries.map { it.label },

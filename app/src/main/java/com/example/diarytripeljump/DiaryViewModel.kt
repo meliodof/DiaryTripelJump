@@ -316,6 +316,31 @@ class DiaryViewModel(
         _dismissedAdvice.value = changed
     }
 
+    // --- Помощник «Спросить дневник» (см. [DiaryAssistant]) ---
+    private val _assistantMessages = MutableStateFlow<List<AssistantMessage>>(emptyList())
+
+    /** Переписка с помощником за время работы приложения (не сохраняется: вопросы могут касаться здоровья). */
+    val assistantMessages: StateFlow<List<AssistantMessage>> = _assistantMessages.asStateFlow()
+
+    fun askAssistant(question: String) {
+        val q = question.trim().take(500)
+        if (q.isEmpty()) return
+        val id = System.nanoTime()
+        _assistantMessages.value = (_assistantMessages.value + AssistantMessage(id, true, q)).takeLast(40)
+        viewModelScope.launch(Dispatchers.Default) {
+            val input = AssistantInput(
+                records = records.value, insights = insights.value, advice = allAdvice.value,
+                trainings = allTrainingsWithExercises.value, competitions = allCompetitions.value, goals = goals.value
+            )
+            val answer = DiaryAssistant.answer(q, input)
+            _assistantMessages.value = (_assistantMessages.value + AssistantMessage(id + 1, false, answer.text, answer)).takeLast(40)
+        }
+    }
+
+    fun clearAssistant() {
+        _assistantMessages.value = emptyList()
+    }
+
     /** Все показатели, которые можно вывести на график в аналитике. */
     val analyticsSeries: StateFlow<List<AnalyticsSeries>> =
         combine(allExerciseResults, rawTripleJumpResults, allCompetitions, bodyMeasurements, runUpHistory) { exercises, manual, comps, body, runUp ->
