@@ -319,13 +319,6 @@ private fun KnownLinksCard(links: Map<KnownLink, Boolean>) {
                     Text(link.source, style = MaterialTheme.typography.labelSmall, fontStyle = FontStyle.Italic, color = cs.onSurfaceVariant)
                 }
             }
-            Text(
-                "Это сравнение разных спортсменов. У одного спортсмена от недели к неделе связь бывает слабее — поэтому выше " +
-                    "показаны только связи, подтверждённые вашими данными. Записывайте эти упражнения, чтобы их можно было проверить.",
-                style = MaterialTheme.typography.bodySmall,
-                fontStyle = FontStyle.Italic,
-                color = cs.onSurfaceVariant
-            )
         }
     }
 }
@@ -438,15 +431,6 @@ fun AdviceScreen(viewModel: DiaryViewModel, onBack: () -> Unit, onNavigate: (Str
                     insights.influences.forEachIndexed { i, inf ->
                         InfluenceRow(inf, onOpen = if (records.any { it.key == inf.key }) { { openedRecord = inf.key } } else null)
                         if (i < insights.influences.lastIndex) HorizontalDivider(color = cs.outlineVariant)
-                    }
-                    if (insights.influences.isNotEmpty()) {
-                        Text(
-                            "Совпадение во времени не доказывает причину: это подсказка, что стоит обсудить с тренером.",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontStyle = FontStyle.Italic,
-                            color = cs.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
-                        )
                     }
                 }
             }

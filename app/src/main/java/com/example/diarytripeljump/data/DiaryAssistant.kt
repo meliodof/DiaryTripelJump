@@ -98,8 +98,10 @@ object DiaryAssistant {
         }
         val (route, label) = when (intent) {
             AssistantIntent.RECORDS, AssistantIntent.EXERCISE, AssistantIntent.GOALS -> "records" to "Открыть рекорды"
-            AssistantIntent.NEXT_START, AssistantIntent.READY -> "competitions" to "Открыть старты"
-            AssistantIntent.WEEK, AssistantIntent.LOAD, AssistantIntent.HEALTH, AssistantIntent.RUNUP -> "trainings" to "Открыть тренировки"
+            AssistantIntent.NEXT_START -> "competitions" to "Открыть старты"
+            // подводка, нагрузка, разбег и итоги периода нагляднее в обзоре аналитики: подводка, карта сезона, мишень
+            AssistantIntent.READY, AssistantIntent.LOAD, AssistantIntent.RUNUP, AssistantIntent.WEEK -> "analytics" to "Открыть обзор"
+            AssistantIntent.HEALTH -> "trainings" to "Открыть тренировки"
             else -> null to null
         }
         return AssistantAnswer(text, intent, conf, route, label)
@@ -286,7 +288,7 @@ object DiaryAssistant {
         if (counts.isEmpty()) sb.append("Ни боли, ни усталости, ни плохого сна в них не видно.")
         else {
             sb.append("В них: ").append(counts.entries.joinToString { "${it.key.label} — ${it.value.size}" }).append(". ")
-            (counts[NoteTag.PAIN] ?: counts[NoteTag.ILLNESS])?.firstOrNull()?.let { (d, text) ->
+            (counts[NoteTag.PAIN] ?: counts[NoteTag.ILLNESS])?.firstOrNull()?.first?.let { (d, text) ->
                 sb.append("Например, ${date(d)}: «${text.take(60)}». ")
             }
             if (NoteTag.PAIN in counts || NoteTag.ILLNESS in counts) {

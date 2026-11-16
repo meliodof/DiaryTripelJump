@@ -90,6 +90,18 @@ import com.example.diarytripeljump.data.ChartMode
 import com.example.diarytripeljump.data.ChartPoint
 import com.example.diarytripeljump.data.ChartRange
 import com.example.diarytripeljump.data.LineStyle
+import com.example.diarytripeljump.data.ChartKind
+import com.example.diarytripeljump.data.FormRadar
+import com.example.diarytripeljump.data.RadarKey
+import com.example.diarytripeljump.data.radarWarnings
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.launch
+import com.example.diarytripeljump.data.RunUpTarget
+import com.example.diarytripeljump.data.SeasonMap
+import com.example.diarytripeljump.data.TaperTimeline
+import androidx.compose.ui.geometry.Size
 import com.example.diarytripeljump.data.RecordInsights
 import com.example.diarytripeljump.data.RecordsEngine
 import com.example.diarytripeljump.data.SeriesGroup
@@ -149,6 +161,34 @@ fun AnalyticsScreen(
     val athleteProfile by viewModel.athleteProfile.collectAsState()
     val advice by viewModel.allAdvice.collectAsState()
     val insights by viewModel.insights.collectAsState()
+    val records by viewModel.records.collectAsState()
+    val trainings by viewModel.allTrainingsWithExercises.collectAsState()
+    val competitions by viewModel.allCompetitions.collectAsState()
+    val body by viewModel.bodyMeasurements.collectAsState()
+    val now = remember { System.currentTimeMillis() }
+    // общий фокус обзора: день, выбранный на карте сезона или в подводке, — радар и мишень показывают состояние на него
+    var focusDay by rememberSaveable { mutableStateOf<Long?>(null) }
+    val asOf = focusDay?.let { it + 86_400_000L - 1 } ?: now
+    // обзор: считается при изменении данных или выбранного дня, а не при каждой перерисовке
+    val radar = remember(records, trainings, competitions, body, asOf) { FormRadar.build(records, trainings, competitions, body, asOf) }
+    val warnings = remember(radar, advice) { radarWarnings(radar, advice) }
+    val runUp = remember(trainings, competitions, asOf) { RunUpTarget.build(trainings, competitions, asOf) }
+    val season = remember(trainings, competitions, records) { SeasonMap.build(trainings, competitions, records, now) }
+    val taper = remember(trainings, competitions) { TaperTimeline.build(trainings, competitions, now) }
+    val mainForecast = insights.forecasts.firstOrNull { it.key == "main-jump" }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    // порядок карточек: по нему радар прокручивает к мишени или карте сезона
+    val keys = buildList {
+        add("visualization"); add("advice")
+        if (focusDay != null) add("overview:focus")
+        if (taper != null) add("overview:taper")
+        add("overview:radar"); add("overview:season"); add("overview:runup")
+    }
+    fun jumpTo(key: String) {
+        val i = keys.indexOf(key)
+        if (i >= 0) scope.launch { listState.animateScrollToItem(i) }
+    }
     AppScreenScaffold(
         title = "Аналитика",
         avatarUri = athleteProfile?.avatarUriString,
@@ -156,11 +196,12 @@ fun AnalyticsScreen(
         onHelp = rememberHelp(HelpTopic.ANALYTICS)
     ) { inner ->
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = screenContentPadding(inner),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            item {
+            item(key = "visualization") {
                 AppCard(modifier = Modifier.coachTarget("analytics.visualization"), onClick = onOpenVisualization) {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -179,7 +220,7 @@ fun AnalyticsScreen(
                     }
                 }
             }
-            item {
+            item(key = "advice") {
                 val risks = advice.count { it.kind == AdviceKind.RISK }
                 AppCard(modifier = Modifier.coachTarget("analytics.advice"), onClick = onOpenAdvice) {
                     Row(
@@ -211,6 +252,41 @@ fun AnalyticsScreen(
                     }
                 }
             }
+            // выбранный день: радар и мишень показаны на него; сброс возвращает к сегодняшнему дню
+            focusDay?.let { d ->
+                item(key = "overview:focus") {
+                    AppCard(containerColor = cs.primaryContainer) {
+                        Row(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Обзор на ${SimpleDateFormat("d MMMM yyyy", Locale("ru")).format(Date(d))}",
+                                style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer, modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = { focusDay = null }) { Text("Сегодня") }
+                        }
+                    }
+                }
+            }
+            // подводка показывается, только когда старт ближе трёх недель
+            taper?.let { t ->
+                item(key = "overview:taper") {
+                    TaperCard(t, mainForecast, modifier = Modifier.coachTarget("analytics.taper"),
+                        focusDay = focusDay, onPick = { focusDay = it }, onOpenForecast = onOpenAdvice)
+                }
+            }
+            item(key = "overview:radar") {
+                FormRadarCard(
+                    radar, modifier = Modifier.coachTarget("analytics.radar"),
+                    warnings = warnings,
+                    asOfLabel = focusDay?.let { "на ${SimpleDateFormat("d MMMM", Locale("ru")).format(Date(it))}" },
+                    onShowChart = { id -> viewModel.showOnChart(id); onOpenVisualization() },
+                    onJump = { key -> jumpTo(if (key == RadarKey.RUNUP) "overview:runup" else "overview:season") },
+                    onOpenAdvice = onOpenAdvice
+                )
+            }
+            item(key = "overview:season") {
+                SeasonMapCard(season, modifier = Modifier.coachTarget("analytics.season"), focusDay = focusDay, onPick = { focusDay = it })
+            }
+            item(key = "overview:runup") { RunUpTargetCard(runUp, modifier = Modifier.coachTarget("analytics.runup"), focusDay = focusDay) }
         }
     }
 }
@@ -394,7 +470,7 @@ private fun ChartCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(chart.title, style = MaterialTheme.typography.titleMedium, color = cs.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
-                        "${chart.aggregation.label} · ${chart.mode.label}" + if (chart.smoothing) " · сглаживание" else "",
+                        "${chart.kind.label} · ${chart.aggregation.label} · ${chart.mode.label}" + if (chart.smoothing) " · сглаживание" else "",
                         style = MaterialTheme.typography.bodySmall,
                         color = cs.onSurfaceVariant
                     )
@@ -415,7 +491,7 @@ private fun ChartCard(
                         color = cs.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 24.dp)
                     )
-                    else -> MultiSeriesChart(plots, chart.mode, chart.fromZero, chart.byOrder || chart.aggregation == Aggregation.EACH, unitOverride)
+                    else -> MultiSeriesChart(plots, chart.mode, chart.fromZero, chart.byOrder || chart.aggregation == Aggregation.EACH, unitOverride, chart.kind)
                 }
                 // при одном показателе название уже в заголовке, отдельная строка нужна только для нескольких
                 chosen.forEachIndexed { index, style ->
@@ -470,7 +546,8 @@ private fun MultiSeriesChart(
     mode: ChartMode,
     fromZero: Boolean,
     byOrder: Boolean,
-    unitOverride: String?
+    unitOverride: String?,
+    kind: ChartKind = ChartKind.LINE
 ) {
     val cs = MaterialTheme.colorScheme
     val haptics = LocalHapticFeedback.current
@@ -518,13 +595,6 @@ private fun MultiSeriesChart(
                         }
                     }
                 }
-            } else {
-                Text(
-                    "Проведите пальцем по графику, чтобы увидеть значения",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = cs.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.CenterStart)
-                )
             }
         }
         Row {
@@ -575,16 +645,50 @@ private fun MultiSeriesChart(
                 }
 
                 // при приближении всё, что за краями окна, обрезается
+                // основание столбцов и заливки: ноль, если он на шкале, иначе низ графика
+                val baseY = if (low <= 0.0 && high >= 0.0) y(0.0) else h
                 clipRect(left = 0f, right = w * reveal.value) {
-                    plots.forEach { plot ->
-                        val style = plot.style
-                        if (style.style != LineStyle.POINTS && plot.points.size > 1) {
-                            val path = Path()
-                            plot.points.forEachIndexed { i, p -> if (i == 0) path.moveTo(x(p.date), y(p.value)) else path.lineTo(x(p.date), y(p.value)) }
-                            drawPath(path, plot.color, style = Stroke(width = style.width.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                    when (kind) {
+                        ChartKind.BAR -> {
+                            // столбцы показателей одного дня стоят рядом; ширина — по самому узкому промежутку между датами
+                            val xs = plots.flatMap { p -> p.points.map { x(it.date) } }.distinct().sorted()
+                            val gap = xs.zipWithNext { a, b -> b - a }.filter { it > 0.5f }.minOrNull() ?: (w - 2 * inset)
+                            val slot = (gap * 0.8f).coerceIn(3.dp.toPx(), 36.dp.toPx())
+                            val bw = slot / plots.size
+                            plots.forEachIndexed { k, plot ->
+                                plot.points.forEach { p ->
+                                    val left = x(p.date) - slot / 2 + k * bw
+                                    val top = minOf(y(p.value), baseY)
+                                    drawRect(plot.color, topLeft = Offset(left, top), size = Size(bw * 0.9f, abs(baseY - y(p.value)).coerceAtLeast(1f)))
+                                }
+                            }
                         }
-                        if (style.style != LineStyle.LINE || plot.points.size == 1) {
-                            plot.points.forEach { p -> drawCircle(plot.color, radius = (style.width + 1.5f).dp.toPx(), center = Offset(x(p.date), y(p.value))) }
+                        else -> plots.forEach { plot ->
+                            val style = plot.style
+                            fun trace(path: Path, startAtBase: Boolean) {
+                                plot.points.forEachIndexed { i, p ->
+                                    when {
+                                        i == 0 && startAtBase -> { path.moveTo(x(p.date), baseY); path.lineTo(x(p.date), y(p.value)) }
+                                        i == 0 -> path.moveTo(x(p.date), y(p.value))
+                                        // ступенька: значение держится до следующей точки — так видно, сколько держался рекорд
+                                        kind == ChartKind.STEP -> { path.lineTo(x(p.date), y(plot.points[i - 1].value)); path.lineTo(x(p.date), y(p.value)) }
+                                        else -> path.lineTo(x(p.date), y(p.value))
+                                    }
+                                }
+                            }
+                            val path = Path().also { trace(it, startAtBase = false) }
+                            if (kind == ChartKind.AREA && plot.points.size > 1) {
+                                val area = Path().also { trace(it, startAtBase = true) }
+                                area.lineTo(x(plot.points.last().date), baseY)
+                                area.close()
+                                drawPath(area, plot.color.copy(alpha = 0.18f))
+                            }
+                            if ((kind != ChartKind.LINE || style.style != LineStyle.POINTS) && plot.points.size > 1) {
+                                drawPath(path, plot.color, style = Stroke(width = style.width.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                            }
+                            if ((kind == ChartKind.LINE && style.style != LineStyle.LINE) || plot.points.size == 1) {
+                                plot.points.forEach { p -> drawCircle(plot.color, radius = (style.width + 1.5f).dp.toPx(), center = Offset(x(p.date), y(p.value))) }
+                            }
                         }
                     }
                 }
@@ -621,13 +725,6 @@ private fun MultiSeriesChart(
                     onValueChange = { window.slider = it; scrub = null },
                     modifier = Modifier.weight(1f)
                 )
-            } else {
-                Text(
-                    "Раздвиньте двумя пальцами, чтобы приблизить",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = cs.onSurfaceVariant,
-                    modifier = Modifier.weight(1f).padding(start = 4.dp)
-                )
             }
         }
     }
@@ -657,18 +754,17 @@ private fun ChartSettingsDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                Text("Вид графика", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    ChartKind.entries.forEach { k ->
+                        ToggleChip(label = k.label, selected = chart.kind == k, onClick = { chart = chart.copy(kind = k) })
+                    }
+                }
                 Text("Что показывать", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Aggregation.entries.forEach { a ->
                         ToggleChip(label = a.label, selected = chart.aggregation == a, onClick = { chart = chart.copy(aggregation = a) })
                     }
-                }
-                if (chart.aggregation == Aggregation.RECORDS) {
-                    Text(
-                        "Только тренировки и старты, где побит прежний лучший результат: видно, как и когда росли рекорды",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = cs.onSurfaceVariant
-                    )
                 }
                 Text("Шкала", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
                 SegmentedControl(
@@ -676,25 +772,10 @@ private fun ChartSettingsDialog(
                     selectedIndex = chart.mode.ordinal,
                     onSelect = { chart = chart.copy(mode = ChartMode.entries[it]) }
                 )
-                Text(
-                    text = when (chart.mode) {
-                        ChartMode.ABSOLUTE -> "Значения как есть: удобно для показателей в одних единицах"
-                        ChartMode.NORMALIZED -> "Каждый показатель растянут от своего минимума до максимума"
-                        ChartMode.CHANGE -> "Прирост от первой точки периода: сравнимы разные единицы"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = cs.onSurfaceVariant
-                )
                 if (chart.aggregation != Aggregation.EACH) {
-                    SwitchRow("Точки через равные промежутки", "По порядку, а не по датам: перерывы не растягивают график", chart.byOrder) {
+                    SwitchRow("Точки через равные промежутки", "По порядку, а не по датам", chart.byOrder) {
                         chart = chart.copy(byOrder = it)
                     }
-                } else {
-                    Text(
-                        "Попытки показываются по порядку, чтобы попытки одного дня не сливались в столбик",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = cs.onSurfaceVariant
-                    )
                 }
                 SwitchRow("Сглаживание", "Среднее по трём соседним точкам", chart.smoothing) { chart = chart.copy(smoothing = it) }
                 if (chart.mode == ChartMode.ABSOLUTE) {

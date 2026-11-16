@@ -49,6 +49,14 @@ enum class Aggregation(val label: String) {
     WEEK_COUNT("Попыток за неделю")
 }
 
+/** Как рисуется график целиком: линии, столбцы, области с заливкой или ступеньки. */
+enum class ChartKind(val label: String) {
+    LINE("Линии"),
+    BAR("Столбцы"),
+    AREA("Области"),
+    STEP("Ступеньки")
+}
+
 enum class LineStyle(val label: String) {
     LINE("Линия"),
     POINTS("Точки"),
@@ -79,7 +87,8 @@ data class ChartConfig(
     val smoothing: Boolean = false,
     val fromZero: Boolean = false,
     /** Точки через равные промежутки по порядку, а не по датам: попытки одного дня не слипаются. */
-    val byOrder: Boolean = false
+    val byOrder: Boolean = false,
+    val kind: ChartKind = ChartKind.LINE
 )
 
 /** Настройки экрана визуализации; сохраняются между запусками. */
@@ -88,10 +97,21 @@ data class VisualizationConfig(
     val range: ChartRange = ChartRange.YEAR
 ) {
     fun encode(): String = range.name + CHART + charts.joinToString(CHART) { c ->
-        listOf(c.id, c.title.replace(Regex("[\u001C-\u001F]"), " "), c.mode.name, c.aggregation.name, c.smoothing, c.fromZero, c.byOrder)
+        listOf(c.id, c.title.replace(Regex("[\u001C-\u001F]"), " "), c.mode.name, c.aggregation.name, c.smoothing, c.fromZero, c.byOrder, c.kind.name)
             .joinToString(FIELD) + GROUP + c.series.joinToString(GROUP) { s ->
             listOf(s.id, s.color, s.style.name, s.width, s.visible).joinToString(FIELD)
         }
+    }
+
+    /**
+     * Показать показатель первым графиком: если он уже есть на каком-то графике — этот график поднимается наверх,
+     * иначе сверху появляется новый график с ним. Так из обзора аналитики можно перейти к подробному графику.
+     */
+    fun focusSeries(seriesId: String, title: String): VisualizationConfig {
+        val existing = charts.firstOrNull { c -> c.series.any { it.id == seriesId } }
+        if (existing != null) return copy(charts = listOf(existing.copy(series = existing.series.map { if (it.id == seriesId) it.copy(visible = true) else it })) + charts.filter { it.id != existing.id })
+        val id = (charts.maxOfOrNull { it.id } ?: 0) + 1
+        return copy(charts = listOf(ChartConfig(id = id, title = title, series = listOf(SeriesStyle(seriesId, SeriesStyle.AUTO_COLOR)))) + charts)
     }
 
     companion object {
@@ -114,6 +134,8 @@ data class VisualizationConfig(
                         smoothing = head[4].toBoolean(),
                         fromZero = head[5].toBoolean(),
                         byOrder = head.getOrNull(6)?.toBoolean() ?: false,
+                        // настройки прежних версий без вида графика — линии
+                        kind = head.getOrNull(7)?.let { k -> ChartKind.entries.firstOrNull { it.name == k } } ?: ChartKind.LINE,
                         series = groups.drop(1).filter { it.isNotBlank() }.map { g ->
                             val f = g.split(FIELD)
                             SeriesStyle(f[0], f[1].toInt(), LineStyle.valueOf(f[2]), f[3].toFloat(), f[4].toBoolean())

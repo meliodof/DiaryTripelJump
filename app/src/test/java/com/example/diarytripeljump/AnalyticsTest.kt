@@ -4,6 +4,7 @@ import com.example.diarytripeljump.data.Aggregation
 import com.example.diarytripeljump.data.BodyMeasurement
 import com.example.diarytripeljump.data.ChartConfig
 import com.example.diarytripeljump.data.ChartData
+import com.example.diarytripeljump.data.ChartKind
 import com.example.diarytripeljump.data.ChartMode
 import com.example.diarytripeljump.data.ChartRange
 import com.example.diarytripeljump.data.ExerciseResult
@@ -119,14 +120,22 @@ class AnalyticsTest {
             charts = listOf(
                 ChartConfig(
                     id = 7, title = "Прыжки", mode = ChartMode.CHANGE, aggregation = Aggregation.WEEK_AVG, smoothing = true, fromZero = true, byOrder = true,
-                    series = listOf(SeriesStyle("rec:ex|тройной|BOTH|M", -16776961, LineStyle.LINE, 4f, false))
+                    series = listOf(SeriesStyle("rec:ex|тройной|BOTH|M", -16776961, LineStyle.LINE, 4f, false)), kind = ChartKind.BAR
                 ),
-                ChartConfig(id = 8, title = "Вес")
+                ChartConfig(id = 8, title = "Вес", aggregation = Aggregation.RECORDS, kind = ChartKind.STEP)
             ),
             range = ChartRange.QUARTER
         )
         assertEquals(config, VisualizationConfig.decode(config.encode()))
         assertEquals(VisualizationConfig(), VisualizationConfig.decode("сломано"))
+    }
+
+    @Test
+    fun config_fromOlderVersion_drawsLines() {
+        // сохранено версией без вида графика: 7 полей вместо 8
+        val old = VisualizationConfig(charts = listOf(ChartConfig(id = 3, title = "Присед"))).encode()
+            .replace("\u001F" + ChartKind.LINE.name, "")
+        assertEquals(ChartKind.LINE, VisualizationConfig.decode(old).charts.single().kind)
     }
 
     @Test

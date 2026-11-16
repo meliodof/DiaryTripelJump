@@ -136,9 +136,18 @@ fun MainScreen(
     viewModel: DiaryViewModel,
     isDemo: Boolean,
     onSwitchDiary: (demo: Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** Раздел, который открыть сразу (нажатие на виджет); null — как обычно. */
+    openRoute: String? = null,
+    onRouteOpened: () -> Unit = {}
 ) {
     val navController = rememberNavController()
+    LaunchedEffect(openRoute) {
+        if (openRoute != null) {
+            navController.navigateTopLevel(openRoute)
+            onRouteOpened()
+        }
+    }
     // кнопка «Новая тренировка» на главной сразу открывает окно на вкладке тренировок
     var openNewTraining by remember { mutableStateOf(false) }
 

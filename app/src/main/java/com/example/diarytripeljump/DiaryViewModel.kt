@@ -395,6 +395,16 @@ class DiaryViewModel(
             .flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, AppSharing, InsightsResult(emptyList(), emptyList()))
 
+    /**
+     * Данные виджета на рабочий стол: ближайший старт, прогноз и рекорд. Пауза отсекает пустые значения при запуске,
+     * пока база ещё не прочитана, — иначе виджет на мгновение показал бы «стартов нет».
+     */
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    val widgetSnapshot: Flow<WidgetSnapshot> =
+        combine(records, allCompetitions, insights) { r, c, i -> WidgetSnapshot.of(r, c, i, System.currentTimeMillis()) }
+            .debounce(1_500)
+            .distinctUntilChanged()
+
     private val _visualization = MutableStateFlow(preferences.visualization)
     val visualization: StateFlow<VisualizationConfig> = _visualization.asStateFlow()
 
@@ -408,6 +418,12 @@ class DiaryViewModel(
     /** Изменение от текущих настроек, а не от их копии на экране: быстрые нажатия не теряются и не дублируются. */
     fun updateVisualization(change: (VisualizationConfig) -> VisualizationConfig) {
         saveVisualization(change(_visualization.value))
+    }
+
+    /** Из обзора аналитики: показатель первым графиком в визуализации. */
+    fun showOnChart(seriesId: String) {
+        val title = analyticsSeries.value.firstOrNull { it.id == seriesId }?.title ?: return
+        updateVisualization { it.focusSeries(seriesId, title) }
     }
 
     /** Новый замер; в профиль попадает самый поздний. */

@@ -155,20 +155,20 @@ object AdviceEngine {
                 title = "Частые заступы",
                 text = "В ${fouls.size} из ${attempts.size} попыток заступ, в среднем на ${feet(fouls.average())}. " +
                     "Стоит попробовать отнести отметку примерно на столько же.",
-                because = because, route = "trainings"
+                because = because, route = "analytics"
             )
             shorts.size >= attempts.size * Limits.RUN_UP_SHARE -> Advice(
                 id = "runup-short-$week", kind = AdviceKind.CHANCE,
                 title = "Недоступы до бруска",
                 text = "В ${shorts.size} из ${attempts.size} попыток недоступ, в среднем на ${feet(abs(shorts.average()))}. " +
                     "Можно поднести отметку — так меньше теряется в длине прыжка.",
-                because = because, route = "trainings"
+                because = because, route = "analytics"
             )
             hits >= attempts.size * Limits.RUN_UP_STABLE -> Advice(
                 id = "runup-stable-$week", kind = AdviceKind.GOOD,
                 title = "Разбег стабилен",
                 text = "$hits из ${attempts.size} попыток точно в брусок. Отметку можно не трогать.",
-                because = because, route = "trainings"
+                because = because, route = "analytics"
             )
             else -> null
         }
@@ -267,7 +267,7 @@ object AdviceEngine {
             text = "За неделю $thisWeek повторений против ${average.roundToInt()} в среднем раньше. " +
                 "Резкий рост повышает риск перегрузки — добавь восстановление или распредели объём.",
             because = "Объём: повторения во всех подходах за 7 дней и за три недели до этого.",
-            route = "trainings"
+            route = "analytics"
         )
     }
 
@@ -308,7 +308,7 @@ object AdviceEngine {
             title = "Подводка: ${next.name}",
             text = text,
             because = "Дата старта и объём тренировок за последнюю неделю.",
-            route = "competitions"
+            route = "analytics"
         )
     }
 

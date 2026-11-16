@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">DiaryTripelJump</string>
+    <string name="widget_description">Дни до старта, прогноз и рекорд в тройном</string>
+    <string name="widget_until_start">До старта</string>
 </resources>

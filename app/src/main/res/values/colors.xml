@@ -7,4 +7,10 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <!-- виджет на рабочем столе -->
+    <color name="widget_bg_start">#FF2A1F33</color>
+    <color name="widget_bg_end">#FF3D1B36</color>
+    <color name="widget_text">#FFFFFFFF</color>
+    <color name="widget_text_dim">#B3FFFFFF</color>
+    <color name="widget_accent">#FFFF4FA3</color>
 </resources>
