@@ -274,16 +274,34 @@ abstract class TripleJumpDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 25 → 26: дата рекорда в тройном из профиля. Рекорд из профиля — официальный стартовый результат, часто
+         * показанный ещё до начала ведения дневника; без даты он считается самым ранним результатом.
+         */
+        internal val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE athlete_profile ADD COLUMN customPbDate INTEGER")
+            }
+        }
+
+        /** 26 → 27: комментарии к отдельным попыткам упражнений и стартов. */
+        internal val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE exercise_results ADD COLUMN attemptNotesJson TEXT")
+                db.execSQL("ALTER TABLE competitions ADD COLUMN attemptNotesJson TEXT")
+            }
+        }
+
         internal val ALL_MIGRATIONS = arrayOf(
             MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17,
             MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24,
-            MIGRATION_24_25
+            MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27
         )
 
         const val DATABASE_NAME = "triple_jump_database"
 
         // Уже выпущенную версию не меняем: любое изменение схемы — новая версия и новая миграция
-        const val CURRENT_VERSION = 25
+        const val CURRENT_VERSION = 27
 
         /** Самая старая версия, которую можно перенести без потери данных. */
         const val MIN_MIGRATABLE_VERSION = 11

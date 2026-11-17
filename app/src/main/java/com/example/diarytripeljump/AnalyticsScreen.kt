@@ -11,6 +11,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
+import com.example.diarytripeljump.ui.components.Camera3D
+import com.example.diarytripeljump.ui.components.V3
+import com.example.diarytripeljump.ui.components.box
+import com.example.diarytripeljump.ui.components.drawFaces
+import com.example.diarytripeljump.ui.components.floorQuad
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -91,16 +100,12 @@ import com.example.diarytripeljump.data.ChartPoint
 import com.example.diarytripeljump.data.ChartRange
 import com.example.diarytripeljump.data.LineStyle
 import com.example.diarytripeljump.data.ChartKind
-import com.example.diarytripeljump.data.FormRadar
-import com.example.diarytripeljump.data.RadarKey
-import com.example.diarytripeljump.data.radarWarnings
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
-import kotlinx.coroutines.launch
 import com.example.diarytripeljump.data.RunUpTarget
-import com.example.diarytripeljump.data.SeasonMap
-import com.example.diarytripeljump.data.TaperTimeline
+import com.example.diarytripeljump.data.RunUpScope
+import androidx.compose.material.icons.filled.GpsFixed
+import com.example.diarytripeljump.data.runUpShots
 import androidx.compose.ui.geometry.Size
 import com.example.diarytripeljump.data.RecordInsights
 import com.example.diarytripeljump.data.RecordsEngine
@@ -155,40 +160,19 @@ fun AnalyticsScreen(
     viewModel: DiaryViewModel,
     onOpenProfile: () -> Unit,
     onOpenVisualization: () -> Unit,
-    onOpenAdvice: () -> Unit = {}
+    onOpenAdvice: () -> Unit = {},
+    onOpenRunUp: () -> Unit = {}
 ) {
     val cs = MaterialTheme.colorScheme
     val athleteProfile by viewModel.athleteProfile.collectAsState()
     val advice by viewModel.allAdvice.collectAsState()
     val insights by viewModel.insights.collectAsState()
-    val records by viewModel.records.collectAsState()
     val trainings by viewModel.allTrainingsWithExercises.collectAsState()
     val competitions by viewModel.allCompetitions.collectAsState()
-    val body by viewModel.bodyMeasurements.collectAsState()
     val now = remember { System.currentTimeMillis() }
-    // общий фокус обзора: день, выбранный на карте сезона или в подводке, — радар и мишень показывают состояние на него
-    var focusDay by rememberSaveable { mutableStateOf<Long?>(null) }
-    val asOf = focusDay?.let { it + 86_400_000L - 1 } ?: now
-    // обзор: считается при изменении данных или выбранного дня, а не при каждой перерисовке
-    val radar = remember(records, trainings, competitions, body, asOf) { FormRadar.build(records, trainings, competitions, body, asOf) }
-    val warnings = remember(radar, advice) { radarWarnings(radar, advice) }
-    val runUp = remember(trainings, competitions, asOf) { RunUpTarget.build(trainings, competitions, asOf) }
-    val season = remember(trainings, competitions, records) { SeasonMap.build(trainings, competitions, records, now) }
-    val taper = remember(trainings, competitions) { TaperTimeline.build(trainings, competitions, now) }
-    val mainForecast = insights.forecasts.firstOrNull { it.key == "main-jump" }
+    // кратко о разбеге на карточке раздела: последняя тренировка с отметками
+    val lastRunUp = remember(trainings, competitions) { RunUpTarget.build(runUpShots(trainings, competitions), RunUpScope.Last, now) }
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-    // порядок карточек: по нему радар прокручивает к мишени или карте сезона
-    val keys = buildList {
-        add("visualization"); add("advice")
-        if (focusDay != null) add("overview:focus")
-        if (taper != null) add("overview:taper")
-        add("overview:radar"); add("overview:season"); add("overview:runup")
-    }
-    fun jumpTo(key: String) {
-        val i = keys.indexOf(key)
-        if (i >= 0) scope.launch { listState.animateScrollToItem(i) }
-    }
     AppScreenScaffold(
         title = "Аналитика",
         avatarUri = athleteProfile?.avatarUriString,
@@ -252,41 +236,26 @@ fun AnalyticsScreen(
                     }
                 }
             }
-            // выбранный день: радар и мишень показаны на него; сброс возвращает к сегодняшнему дню
-            focusDay?.let { d ->
-                item(key = "overview:focus") {
-                    AppCard(containerColor = cs.primaryContainer) {
-                        Row(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            item(key = "runup") {
+                AppCard(modifier = Modifier.coachTarget("analytics.runup"), onClick = onOpenRunUp) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        IconBadge(icon = Icons.Default.GpsFixed, tint = MaterialTheme.extraColors.gold, size = 48.dp, iconSize = 26.dp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Мишень разбега", style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
                             Text(
-                                "Обзор на ${SimpleDateFormat("d MMMM yyyy", Locale("ru")).format(Date(d))}",
-                                style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer, modifier = Modifier.weight(1f)
+                                lastRunUp?.let { "Последняя тренировка: точно ${it.hits}, заступов ${it.fouls}, недоступов ${it.shorts}" }
+                                    ?: "Где попытки с разбега легли относительно бруска",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = cs.onSurfaceVariant
                             )
-                            TextButton(onClick = { focusDay = null }) { Text("Сегодня") }
                         }
                     }
                 }
             }
-            // подводка показывается, только когда старт ближе трёх недель
-            taper?.let { t ->
-                item(key = "overview:taper") {
-                    TaperCard(t, mainForecast, modifier = Modifier.coachTarget("analytics.taper"),
-                        focusDay = focusDay, onPick = { focusDay = it }, onOpenForecast = onOpenAdvice)
-                }
-            }
-            item(key = "overview:radar") {
-                FormRadarCard(
-                    radar, modifier = Modifier.coachTarget("analytics.radar"),
-                    warnings = warnings,
-                    asOfLabel = focusDay?.let { "на ${SimpleDateFormat("d MMMM", Locale("ru")).format(Date(it))}" },
-                    onShowChart = { id -> viewModel.showOnChart(id); onOpenVisualization() },
-                    onJump = { key -> jumpTo(if (key == RadarKey.RUNUP) "overview:runup" else "overview:season") },
-                    onOpenAdvice = onOpenAdvice
-                )
-            }
-            item(key = "overview:season") {
-                SeasonMapCard(season, modifier = Modifier.coachTarget("analytics.season"), focusDay = focusDay, onPick = { focusDay = it })
-            }
-            item(key = "overview:runup") { RunUpTargetCard(runUp, modifier = Modifier.coachTarget("analytics.runup"), focusDay = focusDay) }
         }
     }
 }
@@ -549,6 +518,10 @@ private fun MultiSeriesChart(
     unitOverride: String?,
     kind: ChartKind = ChartKind.LINE
 ) {
+    if (kind == ChartKind.THREE_D) {
+        Chart3D(plots, mode, unitOverride)
+        return
+    }
     val cs = MaterialTheme.colorScheme
     val haptics = LocalHapticFeedback.current
     val reveal = remember(plots) { Animatable(0f) }
@@ -726,6 +699,84 @@ private fun MultiSeriesChart(
                     modifier = Modifier.weight(1f)
                 )
             }
+        }
+    }
+}
+
+/**
+ * Объёмный график: каждый показатель — ряд столбцов в глубину, высота — значение, по ширине — даты по порядку.
+ * Поворачивается пальцем (влево-вправо и наклон), двойное нажатие возвращает исходный вид.
+ */
+@Composable
+private fun Chart3D(plots: List<Plot>, mode: ChartMode, unitOverride: String?) {
+    val cs = MaterialTheme.colorScheme
+    var yaw by remember { mutableFloatStateOf(-35f) }
+    var pitch by remember { mutableFloatStateOf(26f) }
+    val grow = remember(plots) { Animatable(0f) }
+    LaunchedEffect(plots) { grow.animateTo(1f, tween(durationMillis = 800, easing = FastOutSlowInEasing)) }
+    val measurer = rememberTextMeasurer()
+    val dates = remember(plots) { plots.flatMap { p -> p.points.map { it.date } }.distinct().sorted() }
+    val positions = remember(dates) { ChartData.positions(dates, byOrder = true) }
+    val values = plots.flatMap { p -> p.points.map { it.value } }
+    val (low, high) = ChartData.yBounds(values, mode, false)
+    val decimals = if (unitOverride != null) 0 else plots.maxOf { ChartData.maxDecimals(it.series.unit) }
+    fun label(v: Double): String = when (mode) {
+        ChartMode.ABSOLUTE -> ChartData.formatTrim(v, decimals)
+        ChartMode.NORMALIZED -> "${ChartData.formatTrim(v, 0)} %"
+        ChartMode.CHANGE -> (if (v > 0) "+" else "") + "${ChartData.formatTrim(v, 1)} %"
+    }
+    val small = androidx.compose.ui.text.TextStyle(fontSize = 10.sp, color = cs.onSurfaceVariant)
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(260.dp)
+                .pointerInput(Unit) {
+                    detectDragGestures { change, drag ->
+                        change.consume()
+                        yaw = (yaw + drag.x * 0.35f).coerceIn(-80f, 80f)
+                        pitch = (pitch - drag.y * 0.25f).coerceIn(5f, 80f)
+                    }
+                }
+                .pointerInput(Unit) { detectTapGestures(onDoubleTap = { yaw = -35f; pitch = 26f }) }
+        ) {
+            val wide = 10f
+            val tall = 4f
+            val step = 1.4f
+            val rows = plots.size
+            val z0 = -(rows - 1) * step / 2
+            val back = z0 + (rows - 1) * step + 0.9f
+            val cam = Camera3D(yaw, pitch, 15f + rows * 1.2f, size.minDimension * 1.25f, Offset(size.width / 2, size.height * 0.62f))
+            // пол и сетка на задней стенке
+            drawFaces(cam, listOf(floorQuad(-wide / 2 - 0.6f, z0 - 1f, wide / 2 + 0.6f, back, 0f, cs.surfaceContainerHighest)), shaded = false)
+            repeat(5) { k ->
+                val y = tall * k / 4f
+                drawLine(cs.outlineVariant, cam.project(V3(-wide / 2 - 0.6f, y, back)), cam.project(V3(wide / 2 + 0.6f, y, back)), strokeWidth = 1f)
+            }
+            val bw = (wide / dates.size.coerceAtLeast(1) * 0.7f).coerceIn(0.05f, 0.8f)
+            // столбцы: дальние рисуются раньше ближних
+            val bars = plots.flatMapIndexed { r, plot ->
+                val z = z0 + r * step
+                plot.points.map { p ->
+                    val x = -wide / 2 + (positions[p.date] ?: 0f) * wide
+                    val share = if (high - low < 1e-9) 0.5 else (p.value - low) / (high - low)
+                    val h = ((0.08 + 0.92 * share) * tall * grow.value).toFloat().coerceAtLeast(0.03f)
+                    box(V3(x - bw / 2, 0f, z - 0.45f), V3(x + bw / 2, h, z + 0.45f), plot.color)
+                }
+            }
+            bars.sortedByDescending { faces -> cam.depth(faces.first().center) }.forEach { drawFaces(cam, it) }
+            // подписи шкалы на задней стенке
+            listOf(0f, 0.5f, 1f).forEach { k ->
+                val v = low + (high - low) * ((k - 0.08f) / 0.92f).coerceAtLeast(0f)
+                val t = measurer.measure(label(v), small)
+                val at = cam.project(V3(wide / 2 + 0.8f, tall * k, back))
+                drawText(t, topLeft = Offset(at.x.coerceIn(0f, size.width - t.size.width), (at.y - t.size.height / 2).coerceIn(0f, size.height - t.size.height)))
+            }
+        }
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Text(shortDate(dates.first()), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Text(shortDate(dates.last()), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
         }
     }
 }

@@ -54,7 +54,9 @@ enum class ChartKind(val label: String) {
     LINE("Линии"),
     BAR("Столбцы"),
     AREA("Области"),
-    STEP("Ступеньки")
+    STEP("Ступеньки"),
+    /** Объёмные столбцы: показатели стоят рядами в глубину, график поворачивается пальцем. */
+    THREE_D("3D")
 }
 
 enum class LineStyle(val label: String) {
@@ -101,17 +103,6 @@ data class VisualizationConfig(
             .joinToString(FIELD) + GROUP + c.series.joinToString(GROUP) { s ->
             listOf(s.id, s.color, s.style.name, s.width, s.visible).joinToString(FIELD)
         }
-    }
-
-    /**
-     * Показать показатель первым графиком: если он уже есть на каком-то графике — этот график поднимается наверх,
-     * иначе сверху появляется новый график с ним. Так из обзора аналитики можно перейти к подробному графику.
-     */
-    fun focusSeries(seriesId: String, title: String): VisualizationConfig {
-        val existing = charts.firstOrNull { c -> c.series.any { it.id == seriesId } }
-        if (existing != null) return copy(charts = listOf(existing.copy(series = existing.series.map { if (it.id == seriesId) it.copy(visible = true) else it })) + charts.filter { it.id != existing.id })
-        val id = (charts.maxOfOrNull { it.id } ?: 0) + 1
-        return copy(charts = listOf(ChartConfig(id = id, title = title, series = listOf(SeriesStyle(seriesId, SeriesStyle.AUTO_COLOR)))) + charts)
     }
 
     companion object {

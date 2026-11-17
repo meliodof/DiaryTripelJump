@@ -34,7 +34,9 @@ data class ExerciseResultInput(
     /** Подход измеряется в секундах: [reps] и [repsPerSet] — секунды, результат один на подход. */
     val isTimed: Boolean = false,
     /** Заметка к упражнению в этой тренировке: самочувствие, техника, условия. */
-    val notes: String? = null
+    val notes: String? = null,
+    /** Комментарии к отдельным подходам и попыткам, формат [AttemptNotes]; при правке тренировки переносятся. */
+    val attemptNotes: String? = null
 )
 
 /** Результат старта в тройном прыжке для главного экрана. */
@@ -156,13 +158,15 @@ class DiaryViewModel(
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, emptyList())
 
     // Тяжёлые вычисления — в фоновом потоке, чтобы не задерживать отрисовку при переключении вкладок
-    private val allRecords: StateFlow<List<RecordSummary>> = combine(rawTripleJumpResults, allExerciseResults, recordOverrides, allCompetitions) { tj, ex, ov, comps ->
-        val today = startOfDay(System.currentTimeMillis())
-        val starts = comps
-            .filter { it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED && startOfDay(it.date) <= today }
-            .mapNotNull { c -> bestOfCompetition(c)?.let { it to c.date } }
-        RecordsEngine.build(tj, ex, ov, starts)
-    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, emptyList())
+    private val allRecords: StateFlow<List<RecordSummary>> =
+        combine(rawTripleJumpResults, allExerciseResults, recordOverrides, allCompetitions, athleteProfile) { tj, ex, ov, comps, profile ->
+            val today = startOfDay(System.currentTimeMillis())
+            val starts = comps
+                .filter { it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED && startOfDay(it.date) <= today }
+                .mapNotNull { c -> bestOfCompetition(c)?.let { it to c.date } }
+            // рекорд из профиля — официальный старт, часто показанный до начала дневника: он тоже рекорд
+            RecordsEngine.build(tj, ex, ov, starts, profile?.customPbMeters?.let { it to profile?.customPbDate })
+        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, emptyList())
 
     private val _hiddenRecords = MutableStateFlow(preferences.hiddenRecords)
 
@@ -231,7 +235,8 @@ class DiaryViewModel(
                 it.isCompetition && !it.isAntiRecord && it.resultUnit == ResultUnit.M && !it.isSingleLeg &&
                     it.eventName.contains("тройной", ignoreCase = true)
             }.forEach { add(it.result to it.date) }
-            profile?.customPbMeters?.takeIf { it > 0 }?.let { add(it to System.currentTimeMillis()) }
+            // с датой рекорда возрастная группа считается на день старта, а не на сегодня
+            profile?.customPbMeters?.takeIf { it > 0 }?.let { add(it to (profile?.customPbDate ?: System.currentTimeMillis())) }
         }
         SportRanks.best(samples, profile?.gender, profile?.birthDate)
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, null)
@@ -263,7 +268,7 @@ class DiaryViewModel(
 
     /** Результаты стартов в тройном прыжке (новые сверху) для главного экрана. */
     val tripleJumpStartResults: StateFlow<List<StartResultUi>> =
-        combine(allCompetitions, rawTripleJumpResults) { comps, results ->
+        combine(allCompetitions, rawTripleJumpResults, athleteProfile) { comps, results, profile ->
             val today = startOfDay(System.currentTimeMillis())
             val rows = comps
                 .filter { it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED }
@@ -274,7 +279,8 @@ class DiaryViewModel(
                     StartResultUi(c, best, c.placement, c.attemptsJson, false)
                 }
                 .sortedByDescending { it.competition.date }
-            val overall = rows.maxOfOrNull { it.best }
+            // старт ниже рекорда из профиля (показанного до дневника) — не личный рекорд
+            val overall = (rows.map { it.best } + listOfNotNull(profile?.customPbMeters?.takeIf { it > 0 })).maxOrNull()
             rows.map { it.copy(isPersonalBest = overall != null && it.best >= overall) }
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, AppSharing, emptyList())
 
@@ -419,13 +425,6 @@ class DiaryViewModel(
     fun updateVisualization(change: (VisualizationConfig) -> VisualizationConfig) {
         saveVisualization(change(_visualization.value))
     }
-
-    /** Из обзора аналитики: показатель первым графиком в визуализации. */
-    fun showOnChart(seriesId: String) {
-        val title = analyticsSeries.value.firstOrNull { it.id == seriesId }?.title ?: return
-        updateVisualization { it.focusSeries(seriesId, title) }
-    }
-
     /** Новый замер; в профиль попадает самый поздний. */
     fun addBodyMeasurement(kind: BodyKind, value: Double, date: Long) {
         if (EntryRules.resultError(value, kind.resultUnit) != null) return
@@ -510,7 +509,8 @@ class DiaryViewModel(
         weight: Double?,
         customPbMeters: Double?,
         gender: String?,
-        leadingLeg: String?
+        leadingLeg: String?,
+        customPbDate: Long? = null
     ) {
         viewModelScope.launch {
             val current = repository.getProfile().first() ?: AthleteProfile()
@@ -527,6 +527,7 @@ class DiaryViewModel(
                     height = height,
                     weight = weight,
                     customPbMeters = customPbMeters,
+                    customPbDate = customPbDate.takeIf { customPbMeters != null },
                     leadingLeg = leadingLeg
                 )
             )
@@ -556,8 +557,11 @@ class DiaryViewModel(
                 val competitionCount = competitions.count {
                     it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED && yearOf(it.date) == year
                 }
-                val jumpRecords = recs.filter { !it.isAnti && it.unit == ResultUnit.M }
-                val bestJump = (jumpRecords.filter { it.isCompetition }.ifEmpty { jumpRecords }).maxOfOrNull { it.best } ?: 0.0
+                // только тройной (не пятерной, длина и другие упражнения в метрах): лучший за год на стартах,
+                // а если стартов в этом году не было — на тренировках
+                val (compJump, trainJump) = RecordInsights.mainJumpSplit(recs)
+                fun bestOfYear(r: RecordSummary?) = r?.points?.filter { yearOf(it.date) == year }?.maxOfOrNull { it.value }
+                val bestJump = bestOfYear(compJump) ?: bestOfYear(trainJump) ?: 0.0
 
                 SeasonStats(
                     year = year,
@@ -733,6 +737,31 @@ class DiaryViewModel(
         viewModelScope.launch {
             val key = exercise.variantKey()
             repository.getAllExercises().first().filter { it.variantKey() == key }.forEach { repository.deleteExercise(it) }
+        }
+    }
+
+    /** Комментарии ко всем попыткам упражнения сразу (окно «Комментарии к попыткам»). */
+    fun saveExerciseAttemptNotes(result: ExerciseResult, notes: Map<String, String>) {
+        viewModelScope.launch { repository.updateExerciseResult(result.copy(attemptNotesJson = AttemptNotes.encode(notes))) }
+    }
+
+    /** Комментарии ко всем попыткам старта сразу: финал и квалификация. */
+    fun saveCompetitionAttemptNotes(competition: Competition, notes: Map<String, String>) {
+        viewModelScope.launch { repository.updateCompetition(competition.copy(attemptNotesJson = AttemptNotes.encode(notes))) }
+    }
+
+    /** Один комментарий к попытке — например, с мишени разбега; пустой текст удаляет комментарий. */
+    fun saveAttemptNote(ref: AttemptRef, text: String) {
+        viewModelScope.launch {
+            if (ref.competition) {
+                allCompetitions.value.firstOrNull { it.id == ref.ownerId }?.let { c ->
+                    repository.updateCompetition(c.copy(attemptNotesJson = AttemptNotes.with(c.attemptNotesJson, ref.key, text)))
+                }
+            } else {
+                allExerciseResults.value.firstOrNull { it.id == ref.ownerId }?.let { r ->
+                    repository.updateExerciseResult(r.copy(attemptNotesJson = AttemptNotes.with(r.attemptNotesJson, ref.key, text)))
+                }
+            }
         }
     }
 
@@ -1017,7 +1046,8 @@ class DiaryViewModel(
                     titleLayout = input.titleLayout,
                     repsPerSetJson = input.repsPerSet?.joinToString(","),
                     isTimed = input.isTimed,
-                    notes = input.notes?.trim()?.takeIf { it.isNotEmpty() }
+                    notes = input.notes?.trim()?.takeIf { it.isNotEmpty() },
+                    attemptNotesJson = input.attemptNotes
                 )
             )
         }

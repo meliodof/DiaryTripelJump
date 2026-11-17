@@ -24,6 +24,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.diarytripeljump.data.Competition
 import com.example.diarytripeljump.data.CompetitionStatus
+import com.example.diarytripeljump.data.AttemptLines
+import com.example.diarytripeljump.data.RankMark
+import com.example.diarytripeljump.data.SportRanks
 import java.util.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.offset
@@ -50,6 +53,7 @@ fun CompetitionsScreen(
     var editingCompetition by remember { mutableStateOf<Competition?>(null) }
     var itemToDelete by remember { mutableStateOf<Competition?>(null) }
     var skippingCompetition by remember { mutableStateOf<Competition?>(null) }
+    var notesFor by remember { mutableStateOf<Competition?>(null) }
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
     // Раздел определяется по дате и обновляется автоматически (в полночь)
@@ -62,6 +66,10 @@ fun CompetitionsScreen(
     }
     val pastList = remember(competitionsList, todayStart) {
         competitionsList.filter { it.phase(todayStart) == CompetitionPhase.PAST }.sortedByDescending { it.date }
+    }
+    // на каких стартах выполнена разрядная норма — подсказка тренеру, который оформляет разряд
+    val rankMarks = remember(competitionsList, athleteProfile, todayStart) {
+        SportRanks.marks(competitionsList, athleteProfile?.gender, athleteProfile?.birthDate, System.currentTimeMillis())
     }
 
     val listState = rememberLazyListState()
@@ -113,6 +121,8 @@ fun CompetitionsScreen(
                 items(shown, key = { it.id }) { competition ->
                     CompetitionCardItem(
                         competition = competition,
+                        rankMark = rankMarks[competition.id],
+                        onNotesClick = { notesFor = competition },
                         onEditClick = { editingCompetition = competition },
                         onDeleteClick = { itemToDelete = competition },
                         onSkipClick = { skippingCompetition = competition }
@@ -205,6 +215,16 @@ fun CompetitionsScreen(
         )
     }
 
+    // Комментарии к попыткам старта
+    notesFor?.let { c ->
+        AttemptNotesDialog(
+            title = "Комментарии к попыткам",
+            lines = AttemptLines.competition(c),
+            onDismiss = { notesFor = null },
+            onSave = { notes -> viewModel.saveCompetitionAttemptNotes(c, notes); notesFor = null }
+        )
+    }
+
     // Modal Dialog: Skip Competition
     if (skippingCompetition != null) {
         SkipCompetitionReasonDialog(
@@ -269,8 +289,11 @@ fun CompetitionCardItem(
     competition: Competition,
     onEditClick: () -> Unit,
     onDeleteClick: () -> Unit,
-    onSkipClick: () -> Unit
+    onSkipClick: () -> Unit,
+    rankMark: RankMark? = null,
+    onNotesClick: (() -> Unit)? = null
 ) {
+    val attemptLines = remember(competition) { AttemptLines.competition(competition) }
     val cs = MaterialTheme.colorScheme
     val extra = MaterialTheme.extraColors
     val isSkipped = competition.status == CompetitionStatus.SKIPPED
@@ -348,6 +371,9 @@ fun CompetitionCardItem(
                         modifier = Modifier.offset(y = (-8).dp),
                         actions = buildList {
                             add(MenuAction("Редактировать", Icons.Default.Edit, onClick = onEditClick))
+                            if (onNotesClick != null && attemptLines.isNotEmpty()) {
+                                add(MenuAction("Комментарии к попыткам", Icons.Default.ChatBubbleOutline, onClick = onNotesClick))
+                            }
                             if (!isSkipped) add(MenuAction("Пропустить старт", Icons.Default.Block, onClick = onSkipClick))
                             add(MenuAction("Удалить", Icons.Default.DeleteOutline, destructive = true, onClick = onDeleteClick))
                         }
@@ -384,6 +410,16 @@ fun CompetitionCardItem(
                             containerColor = cs.secondaryContainer
                         )
                     }
+                }
+
+                if (rankMark != null) {
+                    StatusPill(
+                        text = "Норма ${rankMark.rank.shortName} · ${String.format(Locale.getDefault(), "%.2f", rankMark.result)} м" +
+                            if (rankMark.first) " · впервые" else "",
+                        contentColor = if (rankMark.first) cs.onPrimary else cs.onPrimaryContainer,
+                        containerColor = if (rankMark.first) cs.primary else cs.primaryContainer,
+                        icon = Icons.Default.MilitaryTech
+                    )
                 }
 
                 if (isSkipped && !competition.skipReason.isNullOrBlank()) {
@@ -455,6 +491,7 @@ fun CompetitionCardItem(
                         modifier = Modifier.padding(end = 12.dp)
                     )
                 }
+                AttemptNotesList(attemptLines, modifier = Modifier.padding(end = 12.dp))
             }
         }
     }

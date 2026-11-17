@@ -2,6 +2,8 @@ package com.example.diarytripeljump
 
 import androidx.compose.ui.graphics.Color
 import com.example.diarytripeljump.data.AgeGroups
+import com.example.diarytripeljump.data.Competition
+import com.example.diarytripeljump.data.CompetitionStatus
 import com.example.diarytripeljump.data.RunUp
 import com.example.diarytripeljump.data.RunUpAttempt
 import com.example.diarytripeljump.data.RunUpLength
@@ -48,6 +50,31 @@ class SportRanksAndRunUpTest {
     fun ageLimit_lowersRank() {
         // в 2026 году спортсмену 2013 г. р. исполняется 13 лет: КМС выполняется только с 14
         assertEquals("I", SportRanks.reached(15.0, male, yearMillis(2013), yearMillis(2026))?.code)
+    }
+
+    @Test
+    fun marks_onCompetitions_firstTimeAndQualification() {
+        fun comp(id: Long, year: Int, attempts: String?, qual: String? = null, status: CompetitionStatus = CompetitionStatus.COMPLETED) =
+            Competition(id = id, name = "Старт $id", date = yearMillis(year), attemptsJson = attempts, qualificationAttemptsJson = qual, status = status)
+        val now = yearMillis(2027)
+        val marks = SportRanks.marks(
+            listOf(
+                comp(1, 2023, "11.80, X, 11.75"),           // III разряд впервые
+                comp(2, 2024, "11.90"),                       // снова III — не впервые
+                comp(3, 2025, "X, X, X", qual = "12.85"),     // II в квалификации — впервые
+                comp(4, 2025, "14.00", status = CompetitionStatus.SKIPPED),
+                comp(5, 2026, "8.00")                         // ниже III юношеского — пометки нет
+            ),
+            male, null, now
+        )
+        assertEquals("III", marks[1]?.rank?.code); assertTrue(marks[1]!!.first)
+        assertEquals("III", marks[2]?.rank?.code); assertFalse(marks[2]!!.first)
+        assertEquals("II", marks[3]?.rank?.code); assertTrue(marks[3]!!.first)
+        assertEquals(12.85, marks[3]!!.result, 1e-9)
+        assertNull(marks[4]); assertNull(marks[5])
+        // без пола нормы неизвестны, будущий старт не помечается
+        assertTrue(SportRanks.marks(listOf(comp(1, 2023, "13.00")), null, null, now).isEmpty())
+        assertTrue(SportRanks.marks(listOf(comp(1, 2030, "13.00")), male, null, now).isEmpty())
     }
 
     @Test

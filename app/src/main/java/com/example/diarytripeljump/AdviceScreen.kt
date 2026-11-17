@@ -298,30 +298,6 @@ private fun InfluenceRow(inf: Influence, onOpen: (() -> Unit)?) {
     }
 }
 
-/** Что по исследованиям связано с тройным и записывает ли это спортсмен. */
-@Composable
-private fun KnownLinksCard(links: Map<KnownLink, Boolean>) {
-    val cs = MaterialTheme.colorScheme
-    AppCard(containerColor = cs.surfaceContainerLow) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("По исследованиям", style = MaterialTheme.typography.titleSmall, color = cs.onSurface)
-            links.forEach { (link, tracked) ->
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(link.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = cs.onSurface, modifier = Modifier.weight(1f))
-                        StatusPill(
-                            text = if (tracked) "есть в дневнике" else "не записываете",
-                            contentColor = if (tracked) cs.primary else cs.onSurfaceVariant,
-                            containerColor = if (tracked) cs.primary.copy(alpha = 0.12f) else cs.surfaceContainerHigh
-                        )
-                    }
-                    Text(link.finding, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                    Text(link.source, style = MaterialTheme.typography.labelSmall, fontStyle = FontStyle.Italic, color = cs.onSurfaceVariant)
-                }
-            }
-        }
-    }
-}
 
 private val AdviceKind.groupTitle: String
     get() = when (this) {
@@ -415,27 +391,17 @@ fun AdviceScreen(viewModel: DiaryViewModel, onBack: () -> Unit, onNavigate: (Str
                 }
             }
 
-            // --- Что связано с результатом: по своим данным и по исследованиям ---
-            item(key = "influence:title") { SectionTitle("Что связано с результатом в тройном") }
-            item(key = "influence:list") {
-                AppCard(modifier = Modifier.coachTarget("advice.links")) {
-                    if (insights.influences.isEmpty()) {
-                        Text(
-                            "По вашим данным надёжных связей пока нет. Для проверки нужно хотя бы ${Insights.Limits.MIN_PAIRS} недель, " +
-                                "в которые есть и упражнение, и тройной.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = cs.onSurfaceVariant,
-                            modifier = Modifier.padding(16.dp)
-                        )
-                    }
-                    insights.influences.forEachIndexed { i, inf ->
-                        InfluenceRow(inf, onOpen = if (records.any { it.key == inf.key }) { { openedRecord = inf.key } } else null)
-                        if (i < insights.influences.lastIndex) HorizontalDivider(color = cs.outlineVariant)
+            // --- Что связано с результатом: только найденные по своим данным связи, без справочных блоков ---
+            if (insights.influences.isNotEmpty()) {
+                item(key = "influence:title") { SectionTitle("Что связано с результатом в тройном") }
+                item(key = "influence:list") {
+                    AppCard {
+                        insights.influences.forEachIndexed { i, inf ->
+                            InfluenceRow(inf, onOpen = if (records.any { it.key == inf.key }) { { openedRecord = inf.key } } else null)
+                            if (i < insights.influences.lastIndex) HorizontalDivider(color = cs.outlineVariant)
+                        }
                     }
                 }
-            }
-            item(key = "influence:known") {
-                KnownLinksCard(Insights.trackedKnownLinks(records.map { it.displayName }))
             }
 
             // --- Советы ---

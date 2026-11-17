@@ -128,7 +128,9 @@ fun DiaryScreen(
     // тройной отдельно на соревнованиях (рекорды стартов и попытки) и на тренировках
     val jumpSplit = remember(records) { RecordInsights.mainJumpSplit(records) }
     val competitionPoints = remember(jumpSplit, startResults) {
-        (startResults.map { RecordPoint(it.competition.date, it.best, true) } + jumpSplit.first?.points.orEmpty()).sortedBy { it.date }
+        // старты уже входят в стартовый рекорд: один и тот же старт не рисуется дважды
+        (startResults.map { RecordPoint(it.competition.date, it.best, true) } + jumpSplit.first?.points.orEmpty())
+            .distinctBy { it.date to it.value }.sortedBy { it.date }
     }
     val todayStart = com.example.diarytripeljump.ui.components.rememberTodayStart()
 

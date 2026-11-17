@@ -261,7 +261,8 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
                         birthDate = Calendar.getInstance().apply { clear(); set(2002, Calendar.MARCH, 14) }.timeInMillis,
                         height = 184.0,
                         weight = 74.2,
-                        customPbMeters = meetValues.values.maxOrNull(),
+                        // рекорд в профиле не задаётся: все старты демо есть в дневнике, а рекорд из профиля без даты
+                        // считался бы показанным до дневника и перекрыл бы историю рекордов
                         avatarUriString = profile?.avatarUriString
                     )
                 )

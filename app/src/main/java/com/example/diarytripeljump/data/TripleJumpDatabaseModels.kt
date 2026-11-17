@@ -17,6 +17,7 @@ data class AthleteProfile(
     val birthDate: Long? = null,
     val height: Double? = null,
     val weight: Double? = null,
+    /** Рекорд в тройном на официальных соревнованиях, в том числе показанный до начала ведения дневника. */
     val customPbMeters: Double? = null,
     val notes: String? = null,
     /** "MALE" / "FEMALE" / null — нужен для возрастной группы взрослых (мужчины / женщины). */
@@ -25,7 +26,9 @@ data class AthleteProfile(
     val sportRank: String? = null,
     val sportRankDate: Long? = null,
     /** Ведущая нога: "LEFT" / "RIGHT" / null. */
-    val leadingLeg: String? = null
+    val leadingLeg: String? = null,
+    /** Дата рекорда из профиля; null — дата неизвестна, рекорд считается показанным до начала дневника. */
+    val customPbDate: Long? = null
 )
 
 @Entity(tableName = "competitions")
@@ -54,7 +57,9 @@ data class Competition(
     val qualificationAttemptsJson: String? = null,
     val qualificationRunUpJson: String? = null,
     /** false — квалификация не пройдена, в финале спортсмен не выступал. */
-    val qualifiedForFinal: Boolean = true
+    val qualifiedForFinal: Boolean = true,
+    /** Комментарии к попыткам финала и квалификации, формат [AttemptNotes]. */
+    val attemptNotesJson: String? = null
 )
 
 enum class CompetitionStatus { ONGOING, UPCOMING, COMPLETED, SKIPPED, CANCELLED }
@@ -212,7 +217,9 @@ data class ExerciseResult(
     // Повторения по подходам, если их было разное число: «5,5,3»; null — во всех подходах по [reps]
     val repsPerSetJson: String? = null,
     // Подход измеряется временем: в reps и repsPerSetJson тогда секунды, а результат один на подход
-    val isTimed: Boolean = false
+    val isTimed: Boolean = false,
+    // Комментарии к отдельным подходам (попыткам), формат [AttemptNotes]
+    val attemptNotesJson: String? = null
 )
 
 /** Цель по результату. Ключ совпадает с ключом рекорда ([RecordSummary.key]), поэтому прогресс считается автоматически. */

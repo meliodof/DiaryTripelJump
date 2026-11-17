@@ -106,10 +106,22 @@ class AdviceEngineTest {
         val trainings = listOf(
             training(2, skipped = true, reason = "Болезнь"),
             training(5, skipped = true, reason = "болезнь"),
-            training(9, skipped = true, reason = "Учёба")
+            training(8, skipped = true, reason = "Учёба")
         )
         val a = build(trainings).single { it.id.startsWith("skips") }
         assertTrue(a.text, a.text.contains("болезнь"))
+    }
+
+    @Test
+    fun sundaySkip_isNotCounted() {
+        // now — среда: 3 дня назад воскресенье, выходной
+        assertTrue(isRestDay(now - 3 * day))
+        val trainings = listOf(
+            training(2, skipped = true, reason = "Учёба"),
+            training(3, skipped = true, reason = "Выходной"),
+            training(5, skipped = true, reason = "Учёба")
+        )
+        assertTrue(build(trainings).none { it.id.startsWith("skips") })
     }
 
     @Test

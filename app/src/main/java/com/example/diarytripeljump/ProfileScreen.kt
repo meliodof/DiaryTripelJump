@@ -381,7 +381,7 @@ fun ProfileScreen(
         EditProfileDialog(
             currentProfile = athleteProfile,
             onDismiss = { showEditDialog = false },
-            onConfirm = { firstName, lastName, nickname, greetingPref, birthDateMillis, height, weight, customPb, gender, leadingLeg ->
+            onConfirm = { firstName, lastName, nickname, greetingPref, birthDateMillis, height, weight, customPb, customPbDate, gender, leadingLeg ->
                 confirm.save("Профиль") {
                     viewModel.updateAthleteProfile(
                         gender = gender,
@@ -394,7 +394,8 @@ fun ProfileScreen(
                         birthDate = birthDateMillis,
                         height = height,
                         weight = weight,
-                        customPbMeters = customPb
+                        customPbMeters = customPb,
+                        customPbDate = customPbDate
                     )
                     showEditDialog = false
                 }
@@ -569,6 +570,7 @@ fun EditProfileDialog(
         height: Double?,
         weight: Double?,
         customPbMeters: Double?,
+        customPbDate: Long?,
         gender: String?,
         leadingLeg: String?
     ) -> Unit
@@ -584,6 +586,8 @@ fun EditProfileDialog(
     var pbText by remember { mutableStateOf(currentProfile?.customPbMeters?.toString() ?: "") }
     var birthMillis by remember { mutableStateOf(currentProfile?.birthDate) }
     var showDatePicker by remember { mutableStateOf(false) }
+    var pbDate by remember { mutableStateOf(currentProfile?.customPbDate) }
+    var showPbDatePicker by remember { mutableStateOf(false) }
     var leadingLeg by remember { mutableStateOf(currentProfile?.leadingLeg) }
 
     AlertDialog(
@@ -681,14 +685,25 @@ fun EditProfileDialog(
                 OutlinedTextField(
                     value = pbText,
                     onValueChange = { pbText = it.replace(',', '.').filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("Личный рекорд в тройном") },
+                    label = { Text("Рекорд в тройном на соревнованиях") },
                     suffix = { Text("м") },
-                    supportingText = { Text("Если оставить пустым — берётся из рекордов", color = cs.onSurfaceVariant) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                // рекорд мог быть показан до начала дневника: дата ставит его на своё место в истории рекордов
+                if (pbText.toDoubleOrNull() != null) {
+                    val pbDay = pbDate
+                    if (pbDay != null) {
+                        DateField(label = "Дата рекорда", millis = pbDay, onClick = { showPbDatePicker = true }, modifier = Modifier.fillMaxWidth())
+                    } else {
+                        OutlinedButton(onClick = { showPbDatePicker = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Указать дату рекорда")
+                        }
+                    }
+                }
 
                 ProfileFormLabel("Ведущая нога")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -717,6 +732,7 @@ fun EditProfileDialog(
                     heightText.toDoubleOrNull(),
                     weightText.toDoubleOrNull(),
                     pbText.toDoubleOrNull(),
+                    pbDate.takeIf { pbText.toDoubleOrNull() != null },
                     gender,
                     leadingLeg
                 )
@@ -724,6 +740,17 @@ fun EditProfileDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
+
+    if (showPbDatePicker) {
+        AppDatePickerDialog(
+            initialMillis = pbDate ?: System.currentTimeMillis(),
+            onDismiss = { showPbDatePicker = false },
+            onConfirm = {
+                pbDate = minOf(it, System.currentTimeMillis())
+                showPbDatePicker = false
+            }
+        )
+    }
 
     if (showDatePicker) {
         AppDatePickerDialog(

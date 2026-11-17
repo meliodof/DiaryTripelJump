@@ -100,6 +100,7 @@ object Routes {
     const val VISUALIZATION = "analytics/visualization"
     const val ADVICE = "analytics/advice"
     const val ASSISTANT = "analytics/assistant"
+    const val RUNUP = "analytics/runup"
 }
 
 /** Пункты нижней навигации (вкладки верхнего уровня). */
@@ -172,7 +173,11 @@ fun MainScreen(
     val isWide = LocalConfiguration.current.screenWidthDp >= 600
 
     val onSelectTab: (TopLevelDestination) -> Unit = { navController.navigateTopLevel(it.route) }
-    val onNavigate: (String) -> Unit = { route -> navController.navigateTopLevel(route) }
+    val onNavigate: (String) -> Unit = { route ->
+        // разделы нижней панели открываются как вкладки, внутренние экраны (мишень разбега) — поверх
+        if (TopLevelDestination.entries.any { it.route == route }) navController.navigateTopLevel(route)
+        else navController.navigate(route) { launchSingleTop = true }
+    }
     val onOpenProfile: () -> Unit = {
         navController.navigate(Routes.PROFILE) { launchSingleTop = true }
     }
@@ -280,8 +285,18 @@ fun MainScreen(
                             viewModel = viewModel,
                             onOpenProfile = onOpenProfile,
                             onOpenVisualization = { navController.navigate(Routes.VISUALIZATION) { launchSingleTop = true } },
-                            onOpenAdvice = { navController.navigate(Routes.ADVICE) { launchSingleTop = true } }
+                            onOpenAdvice = { navController.navigate(Routes.ADVICE) { launchSingleTop = true } },
+                            onOpenRunUp = { navController.navigate(Routes.RUNUP) { launchSingleTop = true } }
                         )
+                    }
+                    composable(
+                        route = Routes.RUNUP,
+                        enterTransition = { slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(250)) + fadeIn(tween(250)) },
+                        exitTransition = { fadeOut(tween(TAB_EXIT_MS)) },
+                        popEnterTransition = { fadeIn(tween(TAB_ENTER_MS)) },
+                        popExitTransition = { slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(250)) + fadeOut(tween(250)) }
+                    ) {
+                        RunUpScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
                     }
                     composable(
                         route = Routes.ADVICE,

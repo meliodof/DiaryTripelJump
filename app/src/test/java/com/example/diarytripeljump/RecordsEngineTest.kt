@@ -182,8 +182,46 @@ class RecordsEngineTest {
             TripleJumpResult(id = 1, result = 13.0, isAntiRecord = true, isCompetition = true, date = day),
             TripleJumpResult(id = 2, result = 12.8, isAntiRecord = true, isCompetition = false, date = 2 * day)
         )
-        val r = RecordsEngine.build(anti, emptyList(), startResults = listOf(12.1 to 3 * day, 14.0 to 4 * day)).single()
-        assertEquals(12.1, r.best, 1e-9)
+        val records = RecordsEngine.build(anti, emptyList(), startResults = listOf(12.1 to 3 * day, 14.0 to 4 * day))
+        assertEquals(12.1, records.single { it.isAnti }.best, 1e-9)
+        // те же старты дают и стартовый рекорд
+        assertEquals(14.0, records.single { !it.isAnti && it.isCompetition }.best, 1e-9)
+    }
+
+    @Test
+    fun profileRecord_beforeDiary_isOfficialStartRecord() {
+        // рекорд 14,20 из профиля показан до дневника; на стартах в дневнике пока 13,90
+        val records = RecordsEngine.build(
+            emptyList(), listOf(ex(1, "Тройной прыжок", 13.5, ResultUnit.M, 10)),
+            startResults = listOf(13.9 to 20 * day), profilePb = 14.2 to null
+        )
+        val (competition, training) = RecordInsights.mainJumpSplit(records)
+        assertEquals(14.2, competition!!.best, 1e-9)
+        assertTrue(competition.isCompetition)
+        // без даты он раньше любой записи дневника, поэтому 13,90 не стал новым рекордом
+        assertTrue(competition.bestDate < 10 * day)
+        assertEquals(listOf(14.2), competition.history.map { it.value })
+        assertEquals(13.5, training!!.best, 1e-9)
+    }
+
+    @Test
+    fun profileRecord_withDate_isBeatenByLaterStart() {
+        val records = RecordsEngine.build(
+            emptyList(), emptyList(), startResults = listOf(14.5 to 30 * day), profilePb = 14.2 to 5 * day
+        )
+        val r = records.single()
+        assertEquals(14.5, r.best, 1e-9)
+        assertEquals(listOf(14.2, 14.5), r.history.map { it.value })
+        assertEquals(5 * day, r.history.first().date)
+    }
+
+    @Test
+    fun manualStartRecord_notDuplicatedByStart() {
+        val manual = TripleJumpResult(id = 1, eventName = "Тройной прыжок", result = 14.0, resultUnit = ResultUnit.M,
+            isCompetition = true, date = 7 * day)
+        val r = RecordsEngine.build(listOf(manual), emptyList(), startResults = listOf(14.0 to 7 * day)).single()
+        assertEquals(1, r.attempts)
+        assertEquals(1L, r.deletableResultId)
     }
 
     @Test

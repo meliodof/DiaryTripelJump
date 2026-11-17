@@ -412,7 +412,7 @@ object Insights {
             text = "За неделю ${formatTrainingDuration(acute)} тренировок при среднем ${formatTrainingDuration(chronic.roundToInt())} " +
                 "в неделю за месяц. Резкий рост нагрузки повышает риск травмы — стоит добавить восстановление.",
             because = "Отношение острой нагрузки (7 дней) к хронической (среднее за 28 дней) по времени начала и окончания тренировок.",
-            route = "analytics"
+            route = "trainings"
         )
     }
 

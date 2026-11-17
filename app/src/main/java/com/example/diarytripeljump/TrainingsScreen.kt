@@ -425,6 +425,10 @@ fun TrainingsScreen(
             onOpenHistory = {
                 openedExercise = null
                 openedRecordKey = key
+            },
+            onSaveNotes = { notes ->
+                viewModel.saveExerciseAttemptNotes(result, notes)
+                openedExercise = result.copy(attemptNotesJson = com.example.diarytripeljump.data.AttemptNotes.encode(notes))
             }
         )
     }
@@ -504,7 +508,8 @@ fun TrainingsScreen(
                     titleLayout = exRes.titleLayout,
                     repsPerSet = SetResults.parseReps(exRes.repsPerSetJson),
                     isTimed = exRes.isTimed,
-                    notes = exRes.notes
+                    notes = exRes.notes,
+                    attemptNotes = exRes.attemptNotesJson
                 )
             }
         }
@@ -1311,9 +1316,12 @@ private fun ExerciseResultDetailsDialog(
     result: ExerciseResult,
     record: RecordSummary?,
     onDismiss: () -> Unit,
-    onOpenHistory: () -> Unit
+    onOpenHistory: () -> Unit,
+    onSaveNotes: (Map<String, String>) -> Unit = {}
 ) {
     val cs = MaterialTheme.colorScheme
+    val attemptLines = remember(result) { com.example.diarytripeljump.data.AttemptLines.exercise(result) }
+    var editingNotes by remember { mutableStateOf(false) }
     val title = RecordsEngine.exerciseTitle(
         result.exerciseName, result.isSingleLeg, result.legSide, result.inSpikes,
         result.inventoryName, result.inventoryUnit, result.inventoryValue, result.resultUnit, result.titleLayout
@@ -1367,6 +1375,14 @@ private fun ExerciseResultDetailsDialog(
                 if (!result.notes.isNullOrBlank()) {
                     Text(text = result.notes, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 }
+                AttemptNotesList(attemptLines)
+                if (attemptLines.isNotEmpty()) {
+                    TextButton(onClick = { editingNotes = true }, contentPadding = PaddingValues(0.dp)) {
+                        Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Комментарии к попыткам")
+                    }
+                }
             }
         },
         confirmButton = { Button(onClick = onDismiss) { Text("Закрыть") } },
@@ -1374,6 +1390,14 @@ private fun ExerciseResultDetailsDialog(
             { TextButton(onClick = onOpenHistory) { Text("История упражнения") } }
         } else null
     )
+    if (editingNotes) {
+        AttemptNotesDialog(
+            title = "Комментарии к попыткам",
+            lines = attemptLines,
+            onDismiss = { editingNotes = false },
+            onSave = { notes -> editingNotes = false; onSaveNotes(notes) }
+        )
+    }
 }
 
 /** Карточка тренировки: меню действий «⋮», превью первого упражнения, раскрытие списка. */

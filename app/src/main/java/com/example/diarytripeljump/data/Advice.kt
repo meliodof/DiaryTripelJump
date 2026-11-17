@@ -100,7 +100,7 @@ object AdviceEngine {
             "Нагрузка" to "Повторения во всех подходах за неделю против среднего трёх прошлых недель: рост на " +
                 "${percent(Limits.LOAD_GROWTH - 1)} и больше. Перерыв — ${Limits.BREAK_DAYS}+ дней без тренировок.",
             "Подводка к старту" to "За ${Limits.TAPER_DAYS} дней до старта: снижен ли объём, отдых в последние два дня.",
-            "Пропуски" to "${Limits.SKIPS}+ пропуска за 30 дней, с самой частой причиной.",
+            "Пропуски" to "${Limits.SKIPS}+ пропуска за 30 дней, с самой частой причиной. Воскресенье — выходной и не считается.",
             "Заметки" to "Жалоба на боль в ${Limits.NOTES_MENTIONS} из ${Limits.NOTES_TRAININGS} последних тренировок: слова «болит», " +
                 "«тянет», «травма» или своя модель разбора заметок, которая понимает и «колено ноет», «ахилл побаливает».",
             "Вес" to "Изменение на ${percent(Limits.WEIGHT_SHARE)} и больше за месяц.",
@@ -155,20 +155,20 @@ object AdviceEngine {
                 title = "Частые заступы",
                 text = "В ${fouls.size} из ${attempts.size} попыток заступ, в среднем на ${feet(fouls.average())}. " +
                     "Стоит попробовать отнести отметку примерно на столько же.",
-                because = because, route = "analytics"
+                because = because, route = "analytics/runup"
             )
             shorts.size >= attempts.size * Limits.RUN_UP_SHARE -> Advice(
                 id = "runup-short-$week", kind = AdviceKind.CHANCE,
                 title = "Недоступы до бруска",
                 text = "В ${shorts.size} из ${attempts.size} попыток недоступ, в среднем на ${feet(abs(shorts.average()))}. " +
                     "Можно поднести отметку — так меньше теряется в длине прыжка.",
-                because = because, route = "analytics"
+                because = because, route = "analytics/runup"
             )
             hits >= attempts.size * Limits.RUN_UP_STABLE -> Advice(
                 id = "runup-stable-$week", kind = AdviceKind.GOOD,
                 title = "Разбег стабилен",
                 text = "$hits из ${attempts.size} попыток точно в брусок. Отметку можно не трогать.",
-                because = because, route = "analytics"
+                because = because, route = "analytics/runup"
             )
             else -> null
         }
@@ -267,7 +267,7 @@ object AdviceEngine {
             text = "За неделю $thisWeek повторений против ${average.roundToInt()} в среднем раньше. " +
                 "Резкий рост повышает риск перегрузки — добавь восстановление или распредели объём.",
             because = "Объём: повторения во всех подходах за 7 дней и за три недели до этого.",
-            route = "analytics"
+            route = "trainings"
         )
     }
 
@@ -308,7 +308,7 @@ object AdviceEngine {
             title = "Подводка: ${next.name}",
             text = text,
             because = "Дата старта и объём тренировок за последнюю неделю.",
-            route = "analytics"
+            route = "competitions"
         )
     }
 
@@ -316,7 +316,8 @@ object AdviceEngine {
 
     private fun skips(input: AdviceInput): Advice? {
         val from = input.now - 30 * DAY
-        val skipped = input.trainings.filter { it.training.isSkipped && it.training.date in from..input.now }
+        // воскресенье — выходной: отметка о пропуске в этот день не считается
+        val skipped = input.trainings.filter { countsAsSkip(it) && it.training.date in from..input.now }
         if (skipped.size < Limits.SKIPS) return null
         val reason = skipped.mapNotNull { it.training.skipReason?.trim()?.takeIf { r -> r.isNotEmpty() } }
             .groupingBy { it.lowercase() }.eachCount().maxByOrNull { it.value }?.key

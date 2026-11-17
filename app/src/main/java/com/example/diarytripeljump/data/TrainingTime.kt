@@ -4,6 +4,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Воскресенье — выходной: отметка о пропуске в этот день в подсчёт пропусков не входит. */
+fun isRestDay(millis: Long): Boolean =
+    java.util.Calendar.getInstance().apply { timeInMillis = millis }[java.util.Calendar.DAY_OF_WEEK] == java.util.Calendar.SUNDAY
+
+/** Пропуск, который считается: отметка о пропуске не в выходной. */
+fun countsAsSkip(t: TrainingWithExercises): Boolean = t.training.isSkipped && !isRestDay(t.training.date)
+
 /** Длительность тренировки словами: «45 мин», «2 ч», «1 ч 30 мин». */
 fun formatTrainingDuration(minutes: Int): String {
     val h = minutes / 60

@@ -98,10 +98,9 @@ object DiaryAssistant {
         }
         val (route, label) = when (intent) {
             AssistantIntent.RECORDS, AssistantIntent.EXERCISE, AssistantIntent.GOALS -> "records" to "Открыть рекорды"
-            AssistantIntent.NEXT_START -> "competitions" to "Открыть старты"
-            // подводка, нагрузка, разбег и итоги периода нагляднее в обзоре аналитики: подводка, карта сезона, мишень
-            AssistantIntent.READY, AssistantIntent.LOAD, AssistantIntent.RUNUP, AssistantIntent.WEEK -> "analytics" to "Открыть обзор"
-            AssistantIntent.HEALTH -> "trainings" to "Открыть тренировки"
+            AssistantIntent.NEXT_START, AssistantIntent.READY -> "competitions" to "Открыть старты"
+            AssistantIntent.RUNUP -> "analytics/runup" to "Открыть мишень разбега"
+            AssistantIntent.WEEK, AssistantIntent.LOAD, AssistantIntent.HEALTH -> "trainings" to "Открыть тренировки"
             else -> null to null
         }
         return AssistantAnswer(text, intent, conf, route, label)
@@ -141,7 +140,7 @@ object DiaryAssistant {
         val from = input.now - days * DAY
         val inRange = input.trainings.filter { it.training.date in from until to }
         val done = inRange.filter { !it.training.isSkipped }
-        val skipped = inRange.count { it.training.isSkipped }
+        val skipped = inRange.count { countsAsSkip(it) }
         val minutes = done.sumOf { it.training.durationMinutes ?: 0 }
         val volume = AdviceEngine.volume(input.trainings, from, to)
         val prevVolume = AdviceEngine.volume(input.trainings, from - days * DAY, from)

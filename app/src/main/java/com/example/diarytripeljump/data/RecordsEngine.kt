@@ -73,6 +73,10 @@ data class RecordEvent(
  */
 object RecordsEngine {
 
+    /** Название главной дисциплины: под ним показывается стартовый рекорд из соревнований и профиля. */
+    const val MAIN_JUMP = "Тройной прыжок"
+    private const val DAY_MS = 86_400_000L
+
     private data class Sample(
         val date: Long,
         val value: Double,
@@ -226,7 +230,9 @@ object RecordsEngine {
         ex: List<ExerciseResult>,
         overrides: List<RecordOverride> = emptyList(),
         /** Лучшие результаты стартов в тройном прыжке (значение и дата): обновляют антирекорд дисциплины. */
-        startResults: List<Pair<Double, Long>> = emptyList()
+        startResults: List<Pair<Double, Long>> = emptyList(),
+        /** Рекорд в тройном из профиля (официальный старт) и его дата; null вместо даты — до начала дневника. */
+        profilePb: Pair<Double, Long?>? = null
     ): List<RecordSummary> {
         data class Group(
             val key: String,
@@ -299,6 +305,35 @@ object RecordsEngine {
                     invName = r.inventoryName, invUnit = r.inventoryUnit, invValue = r.inventoryValue
                 )
             )
+        }
+
+        // Стартовый рекорд в тройном: прошедшие старты из вкладки «Соревнования» и рекорд из профиля, даже если он
+        // показан до начала дневника. Старт, уже записанный вручную (тот же день и результат), не дублируется.
+        fun isMainCompetitionJump(g: Group) = g.isCompetition && !g.isAnti && g.unit == ResultUnit.M && !g.isSingleLeg &&
+            g.inventory == null && g.name.contains("тройной", ignoreCase = true)
+        val pb = profilePb?.takeIf { it.first > 0 }
+        if (startResults.isNotEmpty() || pb != null) {
+            val competitionKey = manualRecordKey(MAIN_JUMP, false, true, ResultUnit.M, false, null, null)
+            val g = groups[competitionKey] ?: groups.values.filter { isMainCompetitionJump(it) }.maxByOrNull { it.samples.size }
+                ?: Group(competitionKey, MAIN_JUMP, ResultUnit.M, false, null, false, true, false, null, null, null, null)
+                    .also { groups[competitionKey] = it }
+            fun has(value: Double, date: Long) = g.samples.any { Math.abs(it.value - value) < 1e-9 && startOfDay(it.date) == startOfDay(date) }
+            startResults.forEach { (value, date) ->
+                if (value > 0 && !has(value, date)) g.samples.add(
+                    Sample(date, value, null, false, null, null, null, "Прыжковые", isCompetition = true)
+                )
+            }
+            if (pb != null) {
+                val earliest = groups.values.flatMap { it.samples }.minOfOrNull { it.date }
+                // дата неизвестна: рекорд показан до дневника, поэтому он раньше любой записи
+                val date = pb.second ?: earliest?.let { startOfDay(it) - DAY_MS } ?: startOfDay(System.currentTimeMillis())
+                if (!has(pb.first, date)) g.samples.add(
+                    Sample(
+                        date, pb.first, null, false, null, null, null, "Прыжковые", isCompetition = true,
+                        notes = if (pb.second == null) "Рекорд из профиля, дата не указана" else "Рекорд из профиля"
+                    )
+                )
+            }
         }
 
         // Антирекорд обновляется сам: результаты тренировок и стартов сравниваются с ручной записью

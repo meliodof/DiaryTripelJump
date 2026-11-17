@@ -70,4 +70,31 @@ object SportRanks {
     /** Следующая цель: разряд выше текущего; null — выше некуда. */
     fun next(rank: SportRank?): SportRank? =
         if (rank == null) all.last() else all.getOrNull(all.indexOf(rank) - 1)
+
+    /**
+     * Пометки на прошедших стартах: какая норма выполнена лучшей попыткой (с квалификацией) и впервые ли — с этого
+     * старта тренер оформляет документы на разряд. Ветер и статус соревнований приложение не знает: окончательно
+     * выполнение нормы подтверждает тренер. Без пола в профиле нормы неизвестны — пометок нет.
+     */
+    fun marks(competitions: List<Competition>, gender: String?, birthDate: Long?, now: Long): Map<Long, RankMark> {
+        val today = startOfDay(now)
+        var bestSoFar: Int? = null
+        val result = HashMap<Long, RankMark>()
+        competitions
+            .filter { it.status != CompetitionStatus.SKIPPED && it.status != CompetitionStatus.CANCELLED && startOfDay(it.date) <= today }
+            .sortedBy { it.date }
+            .forEach { c ->
+                val best = (ChartData.attemptsOf(c.attemptsJson) + ChartData.attemptsOf(c.qualificationAttemptsJson)).maxOrNull()
+                    ?: return@forEach
+                val rank = reached(best, gender, birthDate, c.date) ?: return@forEach
+                val index = all.indexOf(rank)
+                val first = bestSoFar == null || index < bestSoFar!!
+                if (first) bestSoFar = index
+                result[c.id] = RankMark(rank, best, first)
+            }
+        return result
+    }
 }
+
+/** Норма, выполненная на старте: [first] — такой (или более высокий) разряд выполнен впервые. */
+data class RankMark(val rank: SportRank, val result: Double, val first: Boolean)
