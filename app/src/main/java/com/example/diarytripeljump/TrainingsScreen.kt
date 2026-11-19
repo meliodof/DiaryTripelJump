@@ -55,6 +55,7 @@ import com.example.diarytripeljump.data.PeriodRules
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.Stroke
 import com.example.diarytripeljump.data.startOfDay
+import com.example.diarytripeljump.data.TrainingStartTime
 import com.example.diarytripeljump.data.formatTrainingDuration
 import com.example.diarytripeljump.data.trainingTimeRange
 import com.example.diarytripeljump.data.RecordsEngine
@@ -472,7 +473,8 @@ fun TrainingsScreen(
             inventoryActions = viewModel.inventoryActions,
             complexes = complexes,
             onSaveComplex = { id, name, description, ids -> viewModel.saveComplex(id, name, description, ids) },
-            onDeleteExercise = { viewModel.deleteExerciseFromCatalog(it) }
+            onDeleteExercise = { viewModel.deleteExerciseFromCatalog(it) },
+            suggestedStarts = { day -> TrainingStartTime.suggest(trainingsList.map { it.training }, day) }
         )
     }
 
@@ -543,7 +545,9 @@ fun TrainingsScreen(
             inventoryActions = viewModel.inventoryActions,
             complexes = complexes,
             onSaveComplex = { id, name, description, ids -> viewModel.saveComplex(id, name, description, ids) },
-            onDeleteExercise = { viewModel.deleteExerciseFromCatalog(it) }
+            onDeleteExercise = { viewModel.deleteExerciseFromCatalog(it) },
+            // у сохранённой тренировки её собственное начало не считается «привычным» само для себя
+            suggestedStarts = { day -> TrainingStartTime.suggest(trainingsList.map { it.training }.filter { it.id != session.id }, day) }
         )
     }
 
@@ -1285,7 +1289,10 @@ private fun exerciseRowUi(exRes: ExerciseResult, exercisesList: List<Exercise>):
     val lowerBetter = RecordsEngine.isLowerBetter(exName, exRes.resultUnit)
     val candidates = attempts + listOfNotNull(exRes.result.takeIf { it > 0 })
     val repsPlan = SetResults.repsBySet(exRes.sets, exRes.reps, exRes.repsPerSetJson)
-    val runUpLines = exRes.runUpJson?.let { RunUp.decode(it) }?.map { RunUp.describe(it) }
+    val triple = com.example.diarytripeljump.data.TripleJump.isExercise(exName)
+    // у тройного в строке попытки и результат, и разбег
+    val runUpLines = if (triple) com.example.diarytripeljump.data.AttemptLines.exercise(exRes).map { it.label.substringAfter(": ", "") }
+        else exRes.runUpJson?.let { RunUp.decode(it) }?.map { RunUp.describe(it) }
     return ExerciseRowUi(
         result = exRes,
         name = exName,
@@ -1353,7 +1360,11 @@ private fun ExerciseResultDetailsDialog(
                         Text(text = formatRecordValue(best, result.resultUnit), style = NumberLarge, color = cs.onSurface)
                     }
                 }
-                if (runUp.isNotEmpty()) {
+                if (com.example.diarytripeljump.data.TripleJump.isExercise(result.exerciseName)) {
+                    attemptLines.forEach { line ->
+                        Text(text = line.label.replace("Попытка ", "").replaceFirst(":", "."), style = MaterialTheme.typography.bodyMedium, color = cs.onSurface)
+                    }
+                } else if (runUp.isNotEmpty()) {
                     runUp.forEachIndexed { i, attempt ->
                         Text(text = "${i + 1}. ${RunUp.describe(attempt)}", style = MaterialTheme.typography.bodyMedium, color = cs.onSurface)
                     }
@@ -1598,6 +1609,7 @@ private fun NoteLine(text: String, modifier: Modifier = Modifier, maxLines: Int 
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AddTrainingDialog(
     exercisesList: List<Exercise>,
@@ -1623,16 +1635,21 @@ fun AddTrainingDialog(
     inventoryActions: InventoryActions = InventoryActions(),
     complexes: List<ComplexUi> = emptyList(),
     onSaveComplex: (id: Long?, name: String, description: String?, exerciseIds: List<Long>) -> Unit = { _, _, _, _ -> },
-    onDeleteExercise: (Exercise) -> Unit = {}
+    onDeleteExercise: (Exercise) -> Unit = {},
+    /** Привычное время начала для выбранного дня (минуты от полуночи), лучшее — первым; см. [TrainingStartTime]. */
+    suggestedStarts: (day: Long) -> List<Int> = { emptyList() }
 ) {
     val confirm = LocalConfirm.current
-    // дату и время можно поменять и у новой, и у сохранённой тренировки; за день тренировок может быть несколько
+    // дату и время можно поменять и у новой, и у сохранённой тренировки; за день тренировок может быть несколько.
+    // Новой тренировке предлагается привычное время начала, а пока тренировок нет — текущее время.
     var trainingDate by remember {
         mutableLongStateOf(
             if (keepInitialTime) initialDate
-            else startOfDay(initialDate) + (System.currentTimeMillis() - startOfDay(System.currentTimeMillis()))
+            else startOfDay(initialDate) + (suggestedStarts(initialDate).firstOrNull()?.let { it * 60_000L }
+                ?: (System.currentTimeMillis() - startOfDay(System.currentTimeMillis())))
         )
     }
+    val startOptions = remember(startOfDay(trainingDate)) { suggestedStarts(trainingDate) }
     var pickingDate by remember { mutableStateOf(false) }
     var pickingTime by remember { mutableStateOf(false) }
     // окончание хранится длительностью: при переносе начала тренировка сдвигается целиком
@@ -1682,6 +1699,29 @@ fun AddTrainingDialog(
                         if (durationMinutes != null) {
                             IconButton(onClick = { durationMinutes = null; endError = null }) {
                                 Icon(Icons.Default.Close, contentDescription = "Не указывать окончание")
+                            }
+                        }
+                    }
+                    // привычное время начала: нажатие подставляет его, окончание сдвигается вместе с началом
+                    if (startOptions.isNotEmpty()) {
+                        FlowRow(
+                            modifier = Modifier.coachTarget("training.usualStart"),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                            itemVerticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Обычно:",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            val current = TrainingStartTime.minuteOfDay(trainingDate)
+                            startOptions.forEach { minute ->
+                                ToggleChip(
+                                    label = TrainingStartTime.label(minute),
+                                    selected = current == minute,
+                                    onClick = { trainingDate = startOfDay(trainingDate) + minute * 60_000L }
+                                )
                             }
                         }
                     }
@@ -1780,7 +1820,8 @@ fun AddTrainingDialog(
             onDismiss = { showExercisePicker = false }
         ) {
             CatalogExercisePicker(
-                exercises = exercisesList,
+                // варианты тройного и разбег выбираются в своём разделе ниже, в общем списке их нет
+                exercises = exercisesList.filterNot { com.example.diarytripeljump.data.TripleJump.isExercise(it.name) || RunUp.isExercise(it.name) },
                 isSelected = { ex -> addedExerciseInputs.any { it.variantKey() == ex.variantKey() } },
                 onToggle = { ex ->
                     val exKey = ex.variantKey()
@@ -1791,6 +1832,43 @@ fun AddTrainingDialog(
                 onEdit = { editingExercise = it },
                 onDelete = { exerciseToDeleteFromCatalog = it }
             )
+
+            // Тройной прыжок — отдельная категория: в попытке и результат, и попадание в брусок.
+            // Здесь же разбег без прыжка: только попадание в брусок и перенос отметки
+            Text(
+                text = "Тройной прыжок и разбег",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            FlowRow(
+                modifier = Modifier.coachTarget("picker.triple"),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                com.example.diarytripeljump.data.TripleJump.variants.forEach { v ->
+                    val input = v.toInput()
+                    val key = input.variantKey()
+                    ToggleChip(
+                        label = v.label,
+                        selected = addedExerciseInputs.any { it.variantKey() == key },
+                        onClick = {
+                            addedExerciseInputs = if (addedExerciseInputs.any { it.variantKey() == key }) addedExerciseInputs.filter { it.variantKey() != key }
+                            else addedExerciseInputs + input
+                        }
+                    )
+                }
+                val runUpAdded = addedExerciseInputs.any { RunUp.isExercise(it.exerciseName) }
+                ToggleChip(
+                    label = "${RunUp.NAME} без прыжка",
+                    selected = runUpAdded,
+                    onClick = {
+                        addedExerciseInputs = if (runUpAdded) addedExerciseInputs.filterNot { RunUp.isExercise(it.exerciseName) }
+                        else addedExerciseInputs + ExerciseResultInput(
+                            exerciseId = 0, exerciseName = RunUp.NAME, result = 0.0, unit = ResultUnit.CM, runUp = emptyList()
+                        )
+                    }
+                )
+            }
 
             // Комплексы: нажатие добавляет в тренировку все упражнения комплекса
             Text(
@@ -1846,23 +1924,6 @@ fun AddTrainingDialog(
                         )
                     }
                 }
-            }
-
-            // Разбег — отдельное упражнение: вместо результата окно с попытками
-            OutlinedButton(
-                onClick = {
-                    if (addedExerciseInputs.none { it.runUp != null }) {
-                        addedExerciseInputs = addedExerciseInputs + ExerciseResultInput(
-                            exerciseId = 0, exerciseName = RunUp.NAME, result = 0.0, unit = ResultUnit.CM, runUp = emptyList()
-                        )
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Icon(imageVector = Icons.Default.Straighten, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = RunUp.NAME)
             }
 
             // Создание упражнения — в конструкторе
@@ -2106,6 +2167,7 @@ fun ExerciseResultEditorCard(
 ) {
     var showPerSetDialog by remember { mutableStateOf(false) }
     var showRunUpDialog by remember { mutableStateOf(false) }
+    val isTriple = com.example.diarytripeljump.data.TripleJump.isExercise(input.exerciseName)
 
     var setsStr by remember(input.exerciseName) { mutableStateOf(input.sets?.toString() ?: "") }
     var repsStr by remember(input.exerciseName) { mutableStateOf(input.reps?.toString() ?: "") }
@@ -2203,7 +2265,25 @@ fun ExerciseResultEditorCard(
                 }
             }
 
-            if (input.runUp != null) {
+            if (isTriple) {
+                val count = maxOf(input.runUp.orEmpty().size, input.setResults.size)
+                (0 until count).forEach { i ->
+                    val value = input.setResults.getOrNull(i)
+                    val run = input.runUp?.getOrNull(i)?.takeIf { !it.isEmpty }?.let { RunUp.describe(it) }
+                    Text(
+                        text = "${i + 1}. " + listOfNotNull(
+                            when { value == null -> null; value > 0 -> formatRecordValue(value, ResultUnit.M); else -> "незачёт" }, run
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant
+                    )
+                }
+                OutlinedButton(onClick = { showRunUpDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(imageVector = Icons.Default.FormatListNumbered, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = if (count == 0) "Ввести попытки" else "Изменить попытки")
+                }
+            } else if (input.runUp != null) {
                 input.runUp.forEachIndexed { i, attempt ->
                     Text(
                         text = "${i + 1}. ${RunUp.describe(attempt)}",
@@ -2330,15 +2410,35 @@ fun ExerciseResultEditorCard(
     }
 
     if (showRunUpDialog) {
-        RunUpResultsDialog(
-            exerciseName = input.title(),
-            initial = input.runUp.orEmpty(),
-            onDismiss = { showRunUpDialog = false },
-            onConfirm = { attempts ->
-                onUpdate(input.copy(result = 0.0, runUp = attempts))
-                showRunUpDialog = false
-            }
-        )
+        if (isTriple) {
+            RunUpResultsDialog(
+                exerciseName = input.title(),
+                initial = input.runUp.orEmpty(),
+                initialResults = input.setResults,
+                withResult = true,
+                onDismiss = { showRunUpDialog = false },
+                onConfirm = { _ -> },
+                onConfirmResults = { attempts, results ->
+                    onUpdate(
+                        input.copy(
+                            runUp = attempts, setResults = results, result = results.filter { it > 0 }.maxOrNull() ?: 0.0,
+                            sets = results.size.takeIf { it > 0 }, reps = 1
+                        )
+                    )
+                    showRunUpDialog = false
+                }
+            )
+        } else {
+            RunUpResultsDialog(
+                exerciseName = input.title(),
+                initial = input.runUp.orEmpty(),
+                onDismiss = { showRunUpDialog = false },
+                onConfirm = { attempts ->
+                    onUpdate(input.copy(result = 0.0, runUp = attempts))
+                    showRunUpDialog = false
+                }
+            )
+        }
     }
 
     if (showPerSetDialog) {
@@ -2359,6 +2459,8 @@ fun ExerciseResultEditorCard(
 
 /** Строка формы разбега. [board]: 0 — не указано, 1 — заступил, 2 — не доступил, 3 — попал. [move]: 0 — нет, 1 — отнёс, 2 — поднёс. */
 private data class RunUpRow(
+    /** Результат попытки тройного в метрах; «0» — незачёт. */
+    val result: String = "",
     val board: Int = 0,
     val boardFeet: String = "",
     val move: Int = 0,
@@ -2414,12 +2516,21 @@ fun RunUpResultsDialog(
     initial: List<RunUpAttempt>,
     onDismiss: () -> Unit,
     onConfirm: (List<RunUpAttempt>) -> Unit,
-    fixedCount: Int? = null
+    fixedCount: Int? = null,
+    /** Тройной прыжок: в каждой попытке ещё и результат; [initialResults] — результаты с тем же номером. */
+    withResult: Boolean = false,
+    initialResults: List<Double> = emptyList(),
+    onConfirmResults: ((List<RunUpAttempt>, List<Double>) -> Unit)? = null
 ) {
     val cs = MaterialTheme.colorScheme
     val rows = remember {
         mutableStateListOf<RunUpRow>().apply {
-            addAll(initial.map { it.toRow() })
+            val count = maxOf(initial.size, if (withResult) initialResults.size else 0)
+            addAll((0 until count).map { i ->
+                (initial.getOrNull(i)?.toRow() ?: RunUpRow()).let { row ->
+                    if (!withResult) row else row.copy(result = initialResults.getOrNull(i)?.let { v -> if (v > 0) plainNumber(v) else "0" } ?: "")
+                }
+            })
             if (fixedCount != null) {
                 while (size < fixedCount) add(RunUpRow())
                 while (size > fixedCount) removeAt(lastIndex)
@@ -2434,7 +2545,7 @@ fun RunUpResultsDialog(
         onDismissRequest = onDismiss,
         title = { FormHelpRow(HelpTopic.F_RUNUP) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(text = "Разбег", style = MaterialTheme.typography.titleLarge)
+                Text(text = if (withResult) "Попытки" else "Разбег", style = MaterialTheme.typography.titleLarge)
                 Text(text = exerciseName, style = MaterialTheme.typography.bodyMedium, color = cs.primary)
             }
         } },
@@ -2458,6 +2569,18 @@ fun RunUpResultsDialog(
                                         Icon(Icons.Default.Close, contentDescription = "Убрать попытку", modifier = Modifier.size(18.dp))
                                     }
                                 }
+                            }
+                            if (withResult) {
+                                OutlinedTextField(
+                                    value = row.result,
+                                    onValueChange = { rows[i] = row.copy(result = numeric(it)) },
+                                    label = { Text("Результат") },
+                                    suffix = { Text("м") },
+                                    supportingText = { Text("0 — незачёт") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
                             FlowRow(
                                 modifier = Modifier.coachTarget("runup.board"),
@@ -2526,8 +2649,14 @@ fun RunUpResultsDialog(
         },
         confirmButton = {
             Button(onClick = {
-                val attempts = rows.map { it.toAttempt() }
-                onConfirm(if (fixedCount != null) attempts else attempts.filterNot { it.isEmpty })
+                if (withResult && onConfirmResults != null) {
+                    // пустая попытка (ни результата, ни разбега) не сохраняется
+                    val kept = rows.filter { it.result.isNotBlank() || !it.toAttempt().isEmpty }
+                    onConfirmResults(kept.map { it.toAttempt() }, kept.map { it.result.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0 })
+                } else {
+                    val attempts = rows.map { it.toAttempt() }
+                    onConfirm(if (fixedCount != null) attempts else attempts.filterNot { it.isEmpty })
+                }
             }) { Text("Готово") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }

@@ -245,25 +245,12 @@ fun CatalogScreen(
 
             if (tab == 0) {
                 item {
-                    Column {
-                        Text(
-                            text = "${filtered.size} ${pluralRu(filtered.size, "упражнение", "упражнения", "упражнений")}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = cs.onSurfaceVariant
-                        )
-                        Text(
-                            text = buildAnnotatedString {
-                                withStyle(SpanStyle(color = cs.tertiary)) { append("бирюзовым") }
-                                append(" шиповки, ")
-                                withStyle(SpanStyle(color = cs.secondary)) { append("оранжевым") }
-                                append(" снаряд, ")
-                                withStyle(SpanStyle(color = cs.primary)) { append("синим") }
-                                append(" нога")
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = cs.onSurfaceVariant
-                        )
-                    }
+                    // названия показываются обычным текстом, поэтому подписи о цветах свойств больше нет
+                    Text(
+                        text = "${filtered.size} ${pluralRu(filtered.size, "упражнение", "упражнения", "упражнений")}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant
+                    )
                 }
                 if (filtered.isEmpty()) {
                     val filtering = query.isNotBlank() || onlyFavorites || categoryFilter != 0

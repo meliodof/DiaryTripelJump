@@ -174,7 +174,7 @@ fun MainScreen(
 
     val onSelectTab: (TopLevelDestination) -> Unit = { navController.navigateTopLevel(it.route) }
     val onNavigate: (String) -> Unit = { route ->
-        // разделы нижней панели открываются как вкладки, внутренние экраны (мишень разбега) — поверх
+        // разделы нижней панели открываются как вкладки, внутренние экраны (попадания на разбеге) — поверх
         if (TopLevelDestination.entries.any { it.route == route }) navController.navigateTopLevel(route)
         else navController.navigate(route) { launchSingleTop = true }
     }

@@ -66,9 +66,10 @@ object RecordInsights {
         ResultUnit.REPS -> "${ceil(pace).toInt().coerceAtLeast(1)} раз"
     }
 
-    /** Рекорд в самом тройном прыжке: без снаряда, на двух ногах. */
+    /** Рекорд в самом тройном прыжке: без снаряда, на двух ногах, с полного разбега (короткий разбег — подводящее). */
     fun isMainJump(r: RecordSummary): Boolean =
-        !r.isAnti && r.unit == ResultUnit.M && !r.isSingleLeg && r.inventoryName.isNullOrBlank() && r.name.contains("тройной", ignoreCase = true)
+        !r.isAnti && r.unit == ResultUnit.M && !r.isSingleLeg && r.inventoryName.isNullOrBlank() &&
+            r.name.contains("тройной", ignoreCase = true) && !TripleJump.isShort(r.name)
 
     /** Лучшие рекорды в тройном отдельно на соревнованиях и на тренировках. */
     fun mainJumpSplit(records: List<RecordSummary>): Pair<RecordSummary?, RecordSummary?> {

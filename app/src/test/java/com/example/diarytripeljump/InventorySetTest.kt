@@ -83,4 +83,37 @@ class InventorySetTest {
         assertEquals("Барьер 76 см", RecordsEngine.recordInventory(f.name, f.unit, f.value, ResultUnit.KG))
         assertEquals("Штанга + Барьер 76 см", RecordsEngine.variantInventory(f.name, f.unit, f.value, ResultUnit.KG))
     }
+
+    @Test
+    fun count_roundTripsAndOneItemIsNotCounted() {
+        // 6 барьеров: один снаряд с количеством хранится списком, единица и значение — как раньше
+        val hurdles = hurdle.copy(count = 6)
+        val f = InventorySet.encode(listOf(hurdles))
+        assertTrue(InventorySet.isPacked(f.name))
+        assertEquals(ResultUnit.CM, f.unit)
+        assertEquals(76.0, f.value!!, 1e-9)
+        assertEquals(listOf(hurdles), InventorySet.decode(f.name, f.unit, f.value))
+        // «1 штука» — то же, что без количества: старая запись не меняется
+        assertEquals(InventorySet.encode(listOf(hurdle)), InventorySet.encode(listOf(hurdle.copy(count = 1))))
+        // количество переживает переименование снаряда
+        val renamed = InventorySet.rename(f, "Барьер", ResultUnit.CM, "Барьер низкий", ResultUnit.CM)!!
+        assertEquals(6, InventorySet.decode(renamed.name, renamed.unit, renamed.value).single().count)
+    }
+
+    @Test
+    fun count_isShownAndSplitsRecords() {
+        val one = InventorySet.encode(listOf(InventoryUse("Гантель", ResultUnit.KG, 10.0)))
+        val two = InventorySet.encode(listOf(InventoryUse("Гантель", ResultUnit.KG, 10.0, count = 2)))
+        assertEquals("Гантель 10 кг × 2", RecordsEngine.inventoryLabel(two.name, two.unit, two.value))
+        val a = RecordsEngine.recordInventory(one.name, one.unit, one.value, ResultUnit.REPS)
+        val b = RecordsEngine.recordInventory(two.name, two.unit, two.value, ResultUnit.REPS)
+        assertEquals("Гантель 10 кг × 2", b)
+        assertNotEquals(
+            RecordsEngine.exerciseRecordKey("Выпады", false, null, ResultUnit.REPS, inventory = a),
+            RecordsEngine.exerciseRecordKey("Выпады", false, null, ResultUnit.REPS, inventory = b)
+        )
+        val title = RecordsEngine.exerciseTitle("Выпады", false, null, false, two.name, two.unit, two.value, ResultUnit.REPS)
+        assertTrue(title, title.endsWith("10 кг × 2"))
+        assertFalse(title, title.contains("\u001E"))
+    }
 }

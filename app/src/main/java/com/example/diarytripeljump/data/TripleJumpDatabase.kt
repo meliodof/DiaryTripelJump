@@ -292,16 +292,21 @@ abstract class TripleJumpDatabase : RoomDatabase() {
             }
         }
 
+        /** 27 → 28: тройной прыжок — отдельная категория; прежние упражнения «тройной» переходят в её варианты. */
+        internal val MIGRATION_27_28 = object : Migration(27, 28) {
+            override fun migrate(db: SupportSQLiteDatabase) = TripleJump.migrateLegacy(db)
+        }
+
         internal val ALL_MIGRATIONS = arrayOf(
             MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17,
             MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24,
-            MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27
+            MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28
         )
 
         const val DATABASE_NAME = "triple_jump_database"
 
         // Уже выпущенную версию не меняем: любое изменение схемы — новая версия и новая миграция
-        const val CURRENT_VERSION = 27
+        const val CURRENT_VERSION = 28
 
         /** Самая старая версия, которую можно перенести без потери данных. */
         const val MIN_MIGRATABLE_VERSION = 11

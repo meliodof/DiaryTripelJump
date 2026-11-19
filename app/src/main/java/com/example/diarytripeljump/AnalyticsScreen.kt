@@ -245,7 +245,7 @@ fun AnalyticsScreen(
                     ) {
                         IconBadge(icon = Icons.Default.GpsFixed, tint = MaterialTheme.extraColors.gold, size = 48.dp, iconSize = 26.dp)
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Мишень разбега", style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
+                            Text("Попадания на разбеге", style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
                             Text(
                                 lastRunUp?.let { "Последняя тренировка: точно ${it.hits}, заступов ${it.fouls}, недоступов ${it.shorts}" }
                                     ?: "Где попытки с разбега легли относительно бруска",

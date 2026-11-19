@@ -137,7 +137,11 @@ object RecordsEngine {
 
     /** Подпись одного снаряда: для нагружаемого — только название, иначе название и вес/высота. */
     private fun itemLabel(item: InventoryUse, resultUnit: ResultUnit): String =
-        if (isLoadedImplement(item.unit, resultUnit)) item.name else singleInventoryLabel(item.name, item.unit, item.value)
+        if (isLoadedImplement(item.unit, resultUnit)) item.name + countLabel(item.count)
+        else singleInventoryLabel(item.name, item.unit, item.value, item.count)
+
+    /** Количество снарядов в подписи: «гантель 10 кг × 2»; один снаряд — без отметки. */
+    fun countLabel(count: Int?): String = count?.takeIf { it > 1 }?.let { " × $it" } ?: ""
 
     /** Снаряды, которые отличают упражнение: «блин 10 кг + барьер 76 см» (см. [InventorySet]). */
     fun variantInventory(invName: String?, invUnit: ResultUnit?, invValue: Double?, resultUnit: ResultUnit): String? =
@@ -161,7 +165,7 @@ object RecordsEngine {
         layout: String? = null
     ): String {
         val items = InventorySet.decode(invName, invUnit, invValue).map {
-            it.name to if (isLoadedImplement(it.unit, resultUnit)) "" else inventoryValueLabel(it.unit, it.value)
+            it.name to ((if (isLoadedImplement(it.unit, resultUnit)) "" else inventoryValueLabel(it.unit, it.value)) + countLabel(it.count)).trim()
         }
         val first = items.firstOrNull()
         return TitleGrammar.compose(
@@ -203,17 +207,17 @@ object RecordsEngine {
     /** Подпись снарядов со значениями: «блин 10 кг + барьер 76 см». */
     fun inventoryLabel(name: String?, unit: ResultUnit?, value: Double?): String? =
         InventorySet.decode(name, unit, value)
-            .map { singleInventoryLabel(it.name, it.unit, it.value) }
+            .map { singleInventoryLabel(it.name, it.unit, it.value, it.count) }
             .takeIf { it.isNotEmpty() }
             ?.joinToString(" + ")
 
-    private fun singleInventoryLabel(name: String, unit: ResultUnit?, value: Double?): String {
+    private fun singleInventoryLabel(name: String, unit: ResultUnit?, value: Double?, count: Int? = null): String {
         val unitText = when (unit) {
             ResultUnit.CM -> "см"
             ResultUnit.KG -> "кг"
             else -> ""
         }
-        return if (value != null && value > 0) "$name ${formatNumber(value)} $unitText".trim() else name
+        return (if (value != null && value > 0) "$name ${formatNumber(value)} $unitText".trim() else name) + countLabel(count)
     }
 
     /** Лучшее значение внутри одного упражнения: среди результатов подходов и итогового значения. */

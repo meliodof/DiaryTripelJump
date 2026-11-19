@@ -8,7 +8,7 @@ import java.util.Random
  * Версия набора демо-данных. Если демо-база заполнена прежней версией, она создаётся заново.
  * 2 — год данных под проверку прогноза, связей и советов (см. [DemoSignals]).
  */
-const val DEMO_SEED_VERSION = 2
+const val DEMO_SEED_VERSION = 3
 
 /** Что из демо-набора найдено в дневнике пользователя (остатки старой автозагрузки). */
 data class DemoLeftovers(
@@ -141,7 +141,6 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
         const val DAY = 86_400_000L
 
         const val C_RUN = "Беговое упражнение"
-        const val C_TECH = "Упражнение на технику тройного прыжка"
         const val C_STR = "Силовое упражнение"
         const val C_JUMP = "Прыжковое упражнение"
         const val C_GPP = "Упражнение ОФП"
@@ -154,8 +153,8 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
             ExDef("Выпады со штангой", C_STR, ResultUnit.KG, 60.0, 15.0, 3, 4),
             ExDef("Бег 30 м", C_RUN, ResultUnit.SECONDS, 3.98, -0.16, 3, 3),
             ExDef("Бег 60 м с хода", C_RUN, ResultUnit.SECONDS, 6.62, -0.25, 3, 2),
-            ExDef("Тройной прыжок с 6 шагов", C_TECH, ResultUnit.M, 13.10, 0.80, 4, 4),
-            ExDef("Тройной прыжок с полного разбега", C_TECH, ResultUnit.M, 14.60, 0.65, 3, 4),
+            ExDef(TripleJump.SHORT, TripleJump.CATEGORY, ResultUnit.M, 13.10, 0.80, 4, 4),
+            ExDef(TripleJump.FULL, TripleJump.CATEGORY, ResultUnit.M, 14.60, 0.65, 3, 4),
             ExDef("Многоскоки (5 прыжков)", C_JUMP, ResultUnit.M, 15.40, 1.20, 4, 4),
             ExDef("Прыжки на одной ноге", C_JUMP, ResultUnit.M, 11.00, 1.00, 3, 4, legSide = "LEFT"),
             ExDef("Прыжки через барьеры", C_JUMP, ResultUnit.CM, 80.0, 10.0, 4, 5, invName = "Барьер", invUnit = ResultUnit.CM, invValue = 91.0),
@@ -177,17 +176,17 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
 
         val COMPLEXES = listOf(
             Triple("Силовой блок ног", "База для силовых дней", listOf("Приседания со штангой", "Тяга становая", "Рывок штанги")),
-            Triple("Прыжковая техника", "Прыжки и разбег для технических дней", listOf("Тройной прыжок с 6 шагов", "Многоскоки (5 прыжков)", "Прыжки через барьеры")),
+            Triple("Прыжковая техника", "Прыжки и разбег для технических дней", listOf(TripleJump.SHORT, "Многоскоки (5 прыжков)", "Прыжки через барьеры")),
             Triple("Скорость и ОФП", "Короткие ускорения и общая подготовка", listOf("Бег 30 м", "Бег 60 м с хода", "Подтягивания", "Бросок ядра назад"))
         )
 
         /** День недели → упражнения этого дня. */
         val WEEK_PLAN = mapOf(
             Calendar.MONDAY to listOf("Приседания со штангой", "Тяга становая", "Рывок штанги"),
-            Calendar.TUESDAY to listOf("Тройной прыжок с 6 шагов", "Многоскоки (5 прыжков)", "Прыжки через барьеры"),
+            Calendar.TUESDAY to listOf(TripleJump.SHORT, "Многоскоки (5 прыжков)", "Прыжки через барьеры"),
             Calendar.THURSDAY to listOf("Бег 30 м", "Бег 60 м с хода", "Подтягивания", "Бросок ядра назад"),
             Calendar.FRIDAY to listOf("Жим лёжа", "Выпады со штангой", "Выпрыгивания на тумбу", "Прыжки на одной ноге"),
-            Calendar.SATURDAY to listOf("Тройной прыжок с полного разбега", "Многоскоки (5 прыжков)")
+            Calendar.SATURDAY to listOf(TripleJump.FULL, "Многоскоки (5 прыжков)")
         )
 
         /** Номера тренировочных дней, которые «пропущены», и причины. */
@@ -296,7 +295,7 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
                             isSingleLeg = d.legSide != null, legSide = d.legSide,
                             inventoryName = d.invName, inventoryUnit = d.invUnit, inventoryValue = d.invValue,
                             isFavorite = d.name in FAVORITES,
-                            inSpikes = d.category == C_TECH
+                            inSpikes = d.category == TripleJump.CATEGORY && TripleJump.spikesFor(d.name, true)
                         )
                     )
                 }
@@ -424,7 +423,7 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
                     val raw = when (d.name) {
                         "Приседания со штангой" -> DemoSignals.squat(week)
                         "Бег 30 м" -> DemoSignals.sprint30(week)
-                        "Тройной прыжок с полного разбега" -> DemoSignals.jump(week)
+                        TripleJump.FULL -> DemoSignals.jump(week)
                         "Бег 60 м с хода" -> d.base + d.gain * progress + rnd.nextGaussian() * 0.03 +
                             if (back == lastThursday) 0.45 else 0.0
                         else -> d.base + d.gain * progress + rnd.nextGaussian() * Math.abs(d.gain) * 0.08
@@ -442,8 +441,10 @@ class SeedDatabase(private val repository: TripleJumpRepository) {
                             setResultsJson = results.joinToString(","),
                             isSingleLeg = d.legSide != null, legSide = d.legSide,
                             inventoryName = d.invName, inventoryUnit = d.invUnit, inventoryValue = d.invValue,
-                            // технические прыжки с разбега выполняются в шиповках
-                            inSpikes = d.category == C_TECH
+                            // тройной с короткого — в шиповках; у тройного в каждой попытке ещё и попадание в брусок
+                            inSpikes = d.category == TripleJump.CATEGORY && TripleJump.spikesFor(d.name, true),
+                            runUpJson = if (d.category == TripleJump.CATEGORY)
+                                RunUp.encodeAll(results.map { RunUpAttempt(boardFeet = listOf(-0.5, 0.0, 0.0, 0.5, 1.0)[rnd.nextInt(5)]) }) else null
                         )
                     )
                 }

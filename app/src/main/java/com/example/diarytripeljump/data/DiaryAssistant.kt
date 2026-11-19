@@ -99,7 +99,7 @@ object DiaryAssistant {
         val (route, label) = when (intent) {
             AssistantIntent.RECORDS, AssistantIntent.EXERCISE, AssistantIntent.GOALS -> "records" to "Открыть рекорды"
             AssistantIntent.NEXT_START, AssistantIntent.READY -> "competitions" to "Открыть старты"
-            AssistantIntent.RUNUP -> "analytics/runup" to "Открыть мишень разбега"
+            AssistantIntent.RUNUP -> "analytics/runup" to "Открыть попадания на разбеге"
             AssistantIntent.WEEK, AssistantIntent.LOAD, AssistantIntent.HEALTH -> "trainings" to "Открыть тренировки"
             else -> null to null
         }

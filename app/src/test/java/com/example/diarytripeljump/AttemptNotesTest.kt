@@ -4,7 +4,7 @@ import com.example.diarytripeljump.data.*
 import org.junit.Assert.*
 import org.junit.Test
 
-/** Комментарии к отдельным попыткам: хранение в записи, подписи попыток, привязка точек мишени. */
+/** Комментарии к отдельным попыткам: хранение в записи, подписи попыток, привязка следов на экране попаданий. */
 class AttemptNotesTest {
 
     @Test

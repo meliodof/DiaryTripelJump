@@ -148,7 +148,7 @@ fun ExerciseEditorDialog(
     val picked = remember {
         mutableStateListOf<PickedInventory>().apply {
             InventorySet.decode(start?.inventoryName, start?.inventoryUnit, start?.inventoryValue).forEach {
-                add(PickedInventory(it.name, it.unit, it.value?.let { v -> formatNumber(v).replace(',', '.') } ?: ""))
+                add(PickedInventory(it.name, it.unit, it.value?.let { v -> formatNumber(v).replace(',', '.') } ?: "", it.many?.toString().orEmpty()))
             }
         }
     }
@@ -174,7 +174,7 @@ fun ExerciseEditorDialog(
     /** Выбранные снаряды в полях базы (см. [InventorySet]). */
     fun inventoryFields() = InventorySet.encode(
         if (!hasInventory) emptyList()
-        else picked.map { InventoryUse(it.name, it.unit, if (isLoaded(it)) null else it.valueText.toDoubleOrNull()) }
+        else picked.map { InventoryUse(it.name, it.unit, if (isLoaded(it)) null else it.valueText.toDoubleOrNull(), it.count) }
     )
 
     fun isAdded(b: BuilderBlock) = when (b) {
@@ -437,7 +437,7 @@ fun ExerciseEditorDialog(
                         if (hasInventory) {
                             BlockSettings(title = "Инвентарь", icon = BuilderBlock.INVENTORY.icon) {
                                 Text(
-                                    "Можно выбрать несколько",
+                                    "Можно выбрать несколько и у каждого указать, сколько штук: 2 гантели, 6 барьеров",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = cs.onSurfaceVariant
                                 )
@@ -473,40 +473,59 @@ fun ExerciseEditorDialog(
                                 if (showErrors && inventoryMissing) {
                                     Text("Выберите инвентарь или уберите блок", style = MaterialTheme.typography.bodySmall, color = cs.error)
                                 }
-                                // у инвентаря без единицы нет веса или размера
+                                // у каждого снаряда — сколько штук; у инвентаря без единицы нет веса или размера
                                 picked.forEachIndexed { i, p ->
-                                    if (p.unit == null) return@forEachIndexed
-                                    val error = valueError(p)
-                                    OutlinedTextField(
-                                        value = p.valueText,
-                                        onValueChange = { v ->
-                                            val text = EntryRules.cleanNumber(v)
-                                            // постоянный вес: снаряд не штанга, и результат считается не в кг
-                                            if (isLoaded(p) && text.isNotEmpty()) {
-                                                val low = name.lowercase()
-                                                val throwing = listOf("метан", "брос", "толк").any { low.contains(it) }
-                                                unit = if (throwing) ResultUnit.M else ResultUnit.REPS
-                                                unitTouched = true
-                                            }
-                                            picked[i] = p.copy(valueText = text)
-                                        },
-                                        label = { Text("${p.name}: вес или размер") },
-                                        suffix = { Text(getUnitTitle(p.unit)) },
-                                        isError = showErrors && error != null,
-                                        supportingText = when {
-                                            showErrors && error != null -> {
-                                                { Text(error) }
-                                            }
-                                            isLoaded(p) -> {
-                                                { Text("Для штанги оставьте пустым: её вес вводится в попытках как результат") }
-                                            }
-                                            else -> null
-                                        },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                                        if (p.unit == null) {
+                                            Text(
+                                                p.name, style = MaterialTheme.typography.bodyLarge,
+                                                modifier = Modifier.weight(1f).padding(top = 18.dp)
+                                            )
+                                        } else {
+                                            val error = valueError(p)
+                                            OutlinedTextField(
+                                                value = p.valueText,
+                                                onValueChange = { v ->
+                                                    val text = EntryRules.cleanNumber(v)
+                                                    // постоянный вес: снаряд не штанга, и результат считается не в кг
+                                                    if (isLoaded(p) && text.isNotEmpty()) {
+                                                        val low = name.lowercase()
+                                                        val throwing = listOf("метан", "брос", "толк").any { low.contains(it) }
+                                                        unit = if (throwing) ResultUnit.M else ResultUnit.REPS
+                                                        unitTouched = true
+                                                    }
+                                                    picked[i] = p.copy(valueText = text)
+                                                },
+                                                label = { Text("${p.name}: вес или размер") },
+                                                suffix = { Text(getUnitTitle(p.unit)) },
+                                                isError = showErrors && error != null,
+                                                supportingText = when {
+                                                    showErrors && error != null -> {
+                                                        { Text(error) }
+                                                    }
+                                                    isLoaded(p) -> {
+                                                        { Text("Для штанги оставьте пустым: её вес вводится в попытках как результат") }
+                                                    }
+                                                    else -> null
+                                                },
+                                                singleLine = true,
+                                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                                shape = RoundedCornerShape(12.dp),
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                        // сколько штук: 2 гантели, 6 барьеров; пусто — один снаряд
+                                        OutlinedTextField(
+                                            value = p.countText,
+                                            onValueChange = { v -> picked[i] = p.copy(countText = v.filter { it.isDigit() }.take(2)) },
+                                            label = { Text("Штук") },
+                                            placeholder = { Text("1") },
+                                            singleLine = true,
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.width(96.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -648,7 +667,7 @@ fun ExerciseEditorDialog(
                 val index = picked.indexOfFirst { it.matches(old) }
                 if (index >= 0) {
                     val p = picked[index]
-                    picked[index] = PickedInventory(newName, newUnit, if (newUnit != old.unit) "" else p.valueText)
+                    picked[index] = PickedInventory(newName, newUnit, if (newUnit != old.unit) "" else p.valueText, p.countText)
                 }
             }
         )
@@ -685,9 +704,10 @@ private fun splitName(name: String, layout: String?): Triple<String, String, Str
     )
 }
 
-/** Снаряд, выбранный в конструкторе; значение — как введено в поле. */
-private data class PickedInventory(val name: String, val unit: ResultUnit?, val valueText: String) {
+/** Снаряд, выбранный в конструкторе; значение и количество — как введены в поля (пустое количество — один). */
+private data class PickedInventory(val name: String, val unit: ResultUnit?, val valueText: String, val countText: String = "") {
     fun matches(item: InventoryItem) = name.equals(item.name, ignoreCase = true) && unit == item.unit
+    val count: Int? get() = countText.toIntOrNull()?.takeIf { it > 1 }
 }
 
 @Composable

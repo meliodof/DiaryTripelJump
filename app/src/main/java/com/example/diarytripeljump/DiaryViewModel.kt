@@ -750,7 +750,7 @@ class DiaryViewModel(
         viewModelScope.launch { repository.updateCompetition(competition.copy(attemptNotesJson = AttemptNotes.encode(notes))) }
     }
 
-    /** Один комментарий к попытке — например, с мишени разбега; пустой текст удаляет комментарий. */
+    /** Один комментарий к попытке — например, с экрана попаданий на разбеге; пустой текст удаляет комментарий. */
     fun saveAttemptNote(ref: AttemptRef, text: String) {
         viewModelScope.launch {
             if (ref.competition) {
@@ -1008,7 +1008,12 @@ class DiaryViewModel(
             // сначала то же упражнение справочника, если его вариант не менялся; иначе — по названию и свойствам
             val exId = byId[input.exerciseId]?.takeIf { it.variantKey() == key }?.id ?: byVariant[key]?.id ?: run {
                 val created = Exercise(
-                    name = input.exerciseName, categoryName = if (input.runUp != null) "Прыжковое упражнение" else "Пользовательские",
+                    name = input.exerciseName,
+                    categoryName = when {
+                        TripleJump.isExercise(input.exerciseName) -> TripleJump.CATEGORY
+                        input.runUp != null -> "Прыжковое упражнение"
+                        else -> "Пользовательские"
+                    },
                     defaultUnit = input.unit,
                     isSingleLeg = input.isSingleLeg, legSide = input.legSide, inventoryName = input.inventoryName,
                     inventoryUnit = input.inventoryUnit, inventoryValue = input.inventoryValue, inSpikes = input.inSpikes,
@@ -1042,7 +1047,11 @@ class DiaryViewModel(
                         else -> input.inventoryValue
                     },
                     inSpikes = input.inSpikes,
-                    runUpJson = input.runUp?.let { RunUp.encode(it) },
+                    // у тройного разбег хранится с номером попытки (вместе с пустыми), чтобы совпадать с результатами
+                    runUpJson = input.runUp?.let { list ->
+                        if (TripleJump.isExercise(input.exerciseName)) list.takeIf { a -> a.any { !it.isEmpty } }?.let { RunUp.encodeAll(it) }
+                        else RunUp.encode(list)
+                    },
                     titleLayout = input.titleLayout,
                     repsPerSetJson = input.repsPerSet?.joinToString(","),
                     isTimed = input.isTimed,

@@ -69,9 +69,14 @@ object AttemptLines {
         val runUp = RunUp.decode(r.runUpJson)
         val count = maxOf(values.size, runUp.size, if (r.result > 0) 1 else 0)
         val noun = if (runUp.isNotEmpty() || r.sets == null) "Попытка" else "Подход"
+        val triple = TripleJump.isExercise(r.exerciseName)
         return (0 until count).map { i ->
-            val value = (values.getOrNull(i) ?: if (values.isEmpty() && i == 0) r.result else null)?.takeIf { it > 0 }
-            val parts = listOfNotNull(value?.let { formatRecordValue(it, r.resultUnit) }, runUp.getOrNull(i)?.let { RunUp.describe(it) })
+            val raw = values.getOrNull(i) ?: if (values.isEmpty() && i == 0) r.result else null
+            val value = raw?.takeIf { it > 0 }
+            val parts = listOfNotNull(
+                value?.let { formatRecordValue(it, r.resultUnit) } ?: if (triple && raw != null) "незачёт" else null,
+                runUp.getOrNull(i)?.takeIf { !it.isEmpty }?.let { RunUp.describe(it) }
+            )
             val key = AttemptNotes.exerciseKey(i)
             AttemptLine(key, "$noun ${i + 1}" + parts.joinToString(", ").let { if (it.isEmpty()) "" else ": $it" }, notes[key])
         }

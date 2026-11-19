@@ -66,6 +66,51 @@ class MigrationTest {
     }
 
     @Test
+    fun migrate27To28_tripleJumpBecomesCategory() {
+        helper.createDatabase(dbName, 27).apply {
+            execSQL("INSERT INTO exercises (id, name, categoryColorHex, defaultUnit, isSingleLeg, isFavorite, inSpikes) VALUES (1, 'Тройной прыжок с 6 шагов', '#1E4D3B', 'M', 0, 0, 1)")
+            execSQL("INSERT INTO exercises (id, name, categoryColorHex, defaultUnit, isSingleLeg, isFavorite, inSpikes) VALUES (2, 'Тройной прыжок с полного разбега', '#1E4D3B', 'M', 0, 0, 1)")
+            execSQL("INSERT INTO exercises (id, name, categoryColorHex, defaultUnit, isSingleLeg, isFavorite, inSpikes) VALUES (3, 'Присед', '#1E4D3B', 'KG', 0, 0, 0)")
+            execSQL("INSERT INTO exercise_complexes (id, name, createdAt) VALUES (1, 'Техника', 0)")
+            execSQL("INSERT INTO complex_exercises (id, complexId, exerciseId, position) VALUES (1, 1, 1, 0)")
+            execSQL("INSERT INTO training_sessions (id, date, trainingType, isSkipped) VALUES (1, 1000, 'JUMP', 0)")
+            execSQL(
+                "INSERT INTO exercise_results (id, exerciseId, exerciseName, trainingSessionId, date, result, resultUnit, stage, isSingleLeg, inSpikes, isTimed) " +
+                    "VALUES (1, 2, 'Тройной прыжок с полного разбега', 1, 1000, 14.5, 'M', 'MAIN', 0, 1, 0)"
+            )
+            execSQL(
+                "INSERT INTO exercise_goals (recordKey, name, displayName, unit, targetValue, lowerIsBetter, createdAt) " +
+                    "VALUES ('ex|тройной прыжок с полного разбега|BOTH|M|spikes', 'Тройной прыжок с полного разбега', 'Тройной прыжок с полного разбега', 'M', 15.0, 0, 0)"
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 28, true, *TripleJumpDatabase.ALL_MIGRATIONS)
+        // старые упражнения удалены из каталога, присед на месте; комплекс получил вариант «с короткого в шиповках»
+        db.query("SELECT name, inSpikes FROM exercises ORDER BY id").use { c ->
+            val rows = mutableListOf<Pair<String, Int>>()
+            while (c.moveToNext()) rows += c.getString(0) to c.getInt(1)
+            assertEquals(listOf("Присед" to 0, "Тройной с короткого разбега" to 1), rows)
+        }
+        db.query("SELECT e.name FROM complex_exercises ce JOIN exercises e ON e.id = ce.exerciseId").use { c ->
+            c.moveToFirst(); assertEquals("Тройной с короткого разбега", c.getString(0))
+        }
+        // результат остался в той же тренировке с тем же значением
+        db.query("SELECT exerciseName, trainingSessionId, result, inSpikes FROM exercise_results WHERE id = 1").use { c ->
+            c.moveToFirst()
+            assertEquals("Тройной с полного разбега", c.getString(0))
+            assertEquals(1L, c.getLong(1))
+            assertEquals(14.5, c.getDouble(2), 1e-9)
+            assertEquals(0, c.getInt(3))
+        }
+        db.query("SELECT recordKey, name FROM exercise_goals").use { c ->
+            c.moveToFirst()
+            assertEquals("ex|тройной с полного разбега|BOTH|M", c.getString(0))
+            assertEquals("Тройной с полного разбега", c.getString(1))
+        }
+    }
+
+    @Test
     fun migrate24To25_clearsPlaceholderDuration() {
         helper.createDatabase(dbName, 24).apply {
             // заглушка 60 минут из старых версий и настоящая длительность из демо-данных

@@ -10,7 +10,10 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import com.example.diarytripeljump.data.Exercise
 import com.example.diarytripeljump.data.RecordsEngine
+import com.example.diarytripeljump.data.ResultUnit
 import com.example.diarytripeljump.data.RunUp
+import com.example.diarytripeljump.data.TripleJump
+import com.example.diarytripeljump.data.TripleVariant
 
 /*
  * Упражнение определяется не только названием, но и свойствами: нога, шиповки, снаряд.
@@ -91,7 +94,7 @@ fun ExerciseConfig.variantKey(): String = RecordsEngine.variantKey(
 /** Вес снаряда равен результату (штанга в кг при результате в кг) — отдельно не вводится. */
 val ExerciseConfig.isLoadedImplement: Boolean get() = RecordsEngine.isLoadedImplement(inventoryUnit, unit)
 
-val ExerciseConfig.isRunUp: Boolean get() = RunUp.isExercise(name)
+val ExerciseConfig.isRunUp: Boolean get() = RunUp.isExercise(name) || TripleJump.isExercise(name)
 
 /** Выполнение упражнения из справочника в форме тренировки. */
 fun Exercise.toInput(): ExerciseResultInput = ExerciseResultInput(
@@ -106,8 +109,13 @@ fun Exercise.toInput(): ExerciseResultInput = ExerciseResultInput(
     inventoryUnit = inventoryUnit,
     inventoryValue = if (RecordsEngine.isLoadedImplement(inventoryUnit, defaultUnit)) null else inventoryValue,
     inSpikes = inSpikes,
-    runUp = if (RunUp.isExercise(name)) emptyList() else null,
+    runUp = if (RunUp.isExercise(name) || TripleJump.isExercise(name)) emptyList() else null,
     titleLayout = titleLayout
+)
+
+/** Новое выполнение тройного прыжка выбранного варианта: попытки с результатом и разбегом. */
+fun TripleVariant.toInput(): ExerciseResultInput = ExerciseResultInput(
+    exerciseId = 0, exerciseName = name, result = 0.0, unit = ResultUnit.M, inSpikes = inSpikes, runUp = emptyList()
 )
 
 /** Новое выполнение по параметрам из конструктора; [exerciseId] = 0 — упражнение найдётся по варианту при сохранении. */
